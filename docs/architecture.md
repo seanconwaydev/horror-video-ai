@@ -1,27 +1,28 @@
-                User Input
-                    |
-                    v
-
-            Project Orchestrator
-
-                    |
-     --------------------------------
-     |              |               |
-     v              v               v
-
- Research     Story Planning    Scene Planning
+                Topic Input
 
                     |
                     v
 
-             Video Project Artifact
+          Historical Content Pipeline
+
+                    |
+        -----------------------------
+        |             |             |
+
+    Research     Narrative      Scene
+    Component    Component    Component
 
                     |
                     v
 
-          Media Generation Pipeline
+          Video Project Artifact
 
                     |
                     v
 
-               Final Video
+          Media Generation Layer
+
+                    |
+                    v
+
+              Final Video
