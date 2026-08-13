@@ -4,7 +4,7 @@ Last updated: 2026-08-12
 
 Status: stages 1–5 completed and reviewed manually (no automation — Claude played each stage's role directly in conversation). Stages 6–7 drafted as illustrative examples of the artifact shape. Stages 8–12 are conceptual only; no image or video model is connected yet, so nothing past this point has actually been generated.
 
-This is exploratory/reference material, not a project decision — see docs/architecture.md for the actual, current pipeline design and decisions. This file exists so the dry-run work isn't lost once any one conversation ends.
+This is exploratory/reference material, not a project decision — see [../architecture.md](../architecture.md) for the current pipeline design and [../decisions/](../decisions) for actual decisions. This file exists so the dry-run work isn't lost once any one conversation ends.
 
 ## Stage 1 — Topic
 
@@ -35,7 +35,7 @@ Cross-checked against [The National WWII Museum's official D-Day fact sheet](htt
 5. **Taking cover** (0:39–0:49): "He presses into the steel, raises his rifle toward the tree line, fires — not at anyone in particular, just at the noise. His lips are still moving. Counting again. He doesn't seem to notice he's doing it."
 6. **The bunker** (0:49–1:00): "Back against the concrete, chest heaving, alive. His mouth is still moving, faint, automatic. Whatever number he's on, it isn't the one he started with." End.
 
-Adversarial review notes (stage 5) that shaped this version: originally 6 beats read as too short for long-form and too generic without a distinguishing character detail — both resolved by (a) the Shorts-first format decision and (b) adding the unexplained counting habit (see docs/architecture.md's "Narrative concept ideas" section for that as a reusable technique).
+Adversarial review notes (stage 5) that shaped this version: originally 6 beats read as too short for long-form and too generic without a distinguishing character detail — both resolved by (a) the Shorts-first format decision (see [../decisions/0002-shorts-first-format.md](../decisions/0002-shorts-first-format.md)) and (b) adding the unexplained counting habit (see [../playbook/narrative-techniques.md](../playbook/narrative-techniques.md) for that as a reusable technique).
 
 ## Stage 6/7 — Illustrative shot list and sample prompts
 
@@ -51,11 +51,11 @@ A rough (non-photorealistic) storyboard sketch of these six beats was rendered a
 
 - **Previz:** would render one still per scene for review before any video spend; no image model connected yet.
 - **Video generation:** would generate each clip from its approved prompt + reference still; no video model connected yet.
-- **Audio:** decided to go narration-free for this particular script, using pure ambient/sound design instead — but audio format is meant to vary video-to-video (see docs/architecture.md stage 10), not fixed project-wide.
+- **Audio:** decided to go narration-free for this particular script, using pure ambient/sound design instead — but audio format is meant to vary video-to-video (see [../pipeline.md](../pipeline.md), stage 10), not fixed project-wide.
 - **Assembly:** thumbnail candidate — a still from scene 6 (his face against the bunker). Title candidate: "The Ten Feet in Front of Him."
 - **Upload:** would need synthetic-content disclosure toggled on; description should include the "estimated" casualty hedge and a note that this is a dramatized/composite account, not a documented individual's story.
 
 ## Open threads from this dry run not yet resolved anywhere
 
-- Cross-scene tic continuity (e.g., a count left at "...2...3..." picked back up at "...30...31..." in the next scene to imply elapsed time) — logged as a rare flavor technique in docs/architecture.md, not used in this script.
-- Long-form pacing/structure requirements (what actually satisfies higher viewer expectations at 8+ minutes, beyond just "more scenes") — flagged as unresolved in docs/architecture.md's Length format section, deferred to phase 2.
+- Cross-scene tic continuity (e.g., a count left at "...2...3..." picked back up at "...30...31..." in the next scene to imply elapsed time) — logged as a rare flavor technique in [../playbook/narrative-techniques.md](../playbook/narrative-techniques.md), not used in this script.
+- Long-form pacing/structure requirements (what actually satisfies higher viewer expectations at 8+ minutes, beyond just "more scenes") — flagged as unresolved in [../decisions/0002-shorts-first-format.md](../decisions/0002-shorts-first-format.md), deferred to phase 2.
