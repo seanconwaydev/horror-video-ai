@@ -1,0 +1,30 @@
+# Per-stage model configuration.
+#
+# Each key is a pipeline stage (see docs/pipeline.md). The model string
+# must be in LiteLLM's "<provider>/<model-name>" format.
+#
+# Per docs/decisions/0003-model-configuration-via-litellm.md: these are
+# pinned on purpose. Change a model only by editing this file by hand --
+# never automatically, never via a fallback/router.
+#
+# The values below are placeholders to prove the config loader works.
+# Actual model choices (especially a research/grounding model with real web
+# search) are still open -- see docs/architecture.md, "Open questions".
+
+research:
+  model: "anthropic/claude-sonnet-5"
+
+fact_check:
+  model: "anthropic/claude-sonnet-5"
+
+narrative:
+  model: "anthropic/claude-sonnet-5"
+
+narrative_review:
+  model: "anthropic/claude-sonnet-5"
+
+shot_list:
+  model: "anthropic/claude-sonnet-5"
+
+video_prompts:
+  model: "anthropic/claude-sonnet-5"
