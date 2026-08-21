@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -73,7 +73,7 @@ def _prompt_if_missing(value: str | None, label: str) -> str:
 
 
 def _run_dir() -> Path:
-    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     d = Path("outputs") / f"run_{run_id}"
     d.mkdir(parents=True, exist_ok=True)
     return d
