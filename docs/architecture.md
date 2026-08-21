@@ -7,6 +7,7 @@ Fast overview of the system. For detail, see the linked docs below rather than t
 - Stage-by-stage behavior: [pipeline.md](./pipeline.md)
 - Why specific choices were made: [decisions/](./decisions)
 - YouTube monetization policy research: [research/youtube-monetization-policy.md](./research/youtube-monetization-policy.md)
+- Research-stage model comparison: [research/model-comparison.md](./research/model-comparison.md)
 - Creative/narrative techniques: [playbook/narrative-techniques.md](./playbook/narrative-techniques.md)
 - Manual pipeline dry runs: [dry-runs/](./dry-runs)
 
