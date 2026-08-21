@@ -6,16 +6,22 @@
 # Per docs/decisions/0003-model-configuration-via-litellm.md: these are
 # pinned on purpose. Change a model only by editing this file by hand --
 # never automatically, never via a fallback/router.
-#
-# The values below are placeholders to prove the config loader works.
-# Actual model choices (especially a research/grounding model with real web
-# search) are still open -- see docs/architecture.md, "Open questions".
+
+# v1 stages (see docs/decisions/0006 and 0007) -- real decisions, not placeholders.
 
 research:
-  model: "anthropic/claude-sonnet-5"
+  model: "perplexity/sonar-deep-research"
 
 fact_check:
-  model: "anthropic/claude-sonnet-5"
+  model: "gemini/gemini-2.5-flash"
+
+previz:
+  model: "openai/gpt-image-1-mini"
+
+# Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
+# stay as placeholders so the full pipeline vision in docs/pipeline.md still
+# has a config slot waiting for it. Untouched, still "anthropic/claude-sonnet-5"
+# from initial scaffolding -- revisit when these stages are actually built.
 
 narrative:
   model: "anthropic/claude-sonnet-5"

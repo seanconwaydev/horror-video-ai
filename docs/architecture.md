@@ -1,6 +1,6 @@
 # Historical AI Video Generator — Architecture
 
-Last updated: 2026-08-12
+Last updated: 2026-08-20
 
 Fast overview of the system. For detail, see the linked docs below rather than this file — this one is meant to stay short enough to read in a couple of minutes.
 
@@ -28,6 +28,10 @@ The system should get better with use. Findings from your own review notes and, 
 
 Format, audio style, and point of view are all decided per video at the narrative stage, not hardcoded as pipeline defaults — forcing every video into the same shape would itself be the "templated" pattern the monetization policy penalizes.
 
+## Current v1 scope
+
+The full pipeline below is the vision, and it hasn't changed. What's actually being built right now is deliberately narrower: stages 1–3 (input, research, fact-check) feeding a scoped-down Previz that produces a single image from a single described scene — no multi-scene script, no video yet. See [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md) for why, and exactly what's deferred vs. skipped for good.
+
 ## Structure
 
 ```mermaid
@@ -51,14 +55,14 @@ The highlighted box (Previz) is the spend gate: everything before it is text or 
 
 **Video generation model.** Needs to support image-to-video conditioning (see the Previz stage). Candidates to evaluate on cost, output quality, and API access: Veo, Kling, Runway, Sora.
 
-**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate.
+**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gpt-image-1-mini` via OpenAI is the current v1 placeholder ([decisions/0007](./decisions/0007-research-fact-check-previz-models.md)) — not a rigorously compared decision yet, unlike research/fact-check below.
 
-**Research/grounding model.** Needs real web search capability, not just training-data recall, given how much the whole pipeline depends on the fact sheet being accurate.
-
-**Control flow.** How stages actually get called in sequence and pause for review (a script vs. something more structured) — worth revisiting once stages 2–7 have real code to review. Likely AWS Step Functions, per [decisions/0004](./decisions/0004-aws-incremental-adoption.md), but not yet implemented.
+**Control flow.** How stages actually get called in sequence and pause for review (a script vs. something more structured) — worth revisiting once stages 2–7 have real code to review. Likely AWS Step Functions, per [decisions/0004](./decisions/0004-aws-incremental-adoption.md), but not yet implemented. Answered for v1's narrowed scope as a plain CLI confirm-loop — see [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md).
 
 **Compute for the video-generation stage.** Lambda's 15-minute execution limit doesn't fit long-running video-generation API calls. Fargate is the leading candidate but needs more research before committing — see [decisions/0004](./decisions/0004-aws-incremental-adoption.md).
 
 **Which other AWS services get adopted, and when.** S3 (artifact storage), Secrets Manager/Parameter Store (API keys), and DynamoDB/RDS (pipeline state) were all identified as natural fits in [decisions/0004](./decisions/0004-aws-incremental-adoption.md), but deliberately not committed yet — each gets its own ADR if and when the pipeline actually needs it.
+
+**Whether previz's "main character" stays generic or becomes fixed (a recurring "brand" character) or input-determined.** Raised in [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md); not resolved there.
 
 Once any of these is actually decided, it moves out of this list and becomes its own entry under [decisions/](./decisions).

@@ -22,59 +22,65 @@ def _fake_completion(content: str):
 
 def test_run_research_stage_parses_valid_response():
     payload = {
-        "topic": "The Wright Flyer",
         "claims": [
             {
-                "text": "The Wright Flyer's first flight lasted 12 seconds.",
+                "text": "Kitty Hawk in Dec. 1903 was a remote, sparsely populated coastal area.",
                 "source": "Smithsonian National Air and Space Museum",
                 "date": "1903-12-17",
-                "names": ["Orville Wright"],
+                "names": ["Kitty Hawk"],
             }
         ],
     }
 
     fact_sheet = run_research_stage(
-        "The Wright Flyer",
+        "December 1903",
+        "Kitty Hawk, North Carolina",
+        "A man watches a flying machine lift off from the dunes.",
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_completion(json.dumps(payload)),
     )
 
-    assert fact_sheet.topic == "The Wright Flyer"
+    assert fact_sheet.time == "December 1903"
+    assert fact_sheet.place == "Kitty Hawk, North Carolina"
+    assert fact_sheet.description == "A man watches a flying machine lift off from the dunes."
     assert len(fact_sheet.claims) == 1
     assert fact_sheet.claims[0].source == "Smithsonian National Air and Space Museum"
     assert fact_sheet.claims[0].date == "1903-12-17"
-    assert fact_sheet.claims[0].names == ["Orville Wright"]
+    assert fact_sheet.claims[0].names == ["Kitty Hawk"]
 
 
 def test_run_research_stage_raises_for_invalid_json():
     with pytest.raises(ResearchError, match="not valid JSON"):
         run_research_stage(
             "Anything",
+            "Anywhere",
+            "Anything happens.",
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_completion("not json"),
         )
 
 
 def test_run_research_stage_raises_for_claim_missing_source():
-    payload = {
-        "topic": "Anything",
-        "claims": [{"text": "A claim with no source."}],
-    }
+    payload = {"claims": [{"text": "A claim with no source."}]}
 
     with pytest.raises(ResearchError, match="missing a 'source'"):
         run_research_stage(
             "Anything",
+            "Anywhere",
+            "Anything happens.",
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
 
 
-def test_run_research_stage_raises_for_missing_top_level_keys():
-    with pytest.raises(ResearchError, match="missing 'topic' or 'claims'"):
+def test_run_research_stage_raises_for_missing_claims_key():
+    with pytest.raises(ResearchError, match="missing 'claims'"):
         run_research_stage(
             "Anything",
+            "Anywhere",
+            "Anything happens.",
             model="anthropic/claude-sonnet-5",
-            completion_fn=_fake_completion(json.dumps({"claims": []})),
+            completion_fn=_fake_completion(json.dumps({"not_claims": []})),
         )
 
 
@@ -85,12 +91,10 @@ def test_run_research_stage_resolves_model_from_config_when_not_passed():
         captured["model"] = kwargs["model"]
         return SimpleNamespace(
             choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps({"topic": "x", "claims": []}))
-                )
+                SimpleNamespace(message=SimpleNamespace(content=json.dumps({"claims": []})))
             ]
         )
 
-    run_research_stage("Anything", completion_fn=_completion)
+    run_research_stage("Anything", "Anywhere", "Anything happens.", completion_fn=_completion)
 
     assert captured["model"] == get_stage_model("research")
