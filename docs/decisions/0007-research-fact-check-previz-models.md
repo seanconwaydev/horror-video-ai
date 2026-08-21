@@ -13,12 +13,13 @@ capability, not just training-data recall") and an image model for previz
 its output as a placeholder until a real grounding decision was made -- it
 was calling a plain chat model with no search capability.
 
-A separate comparison (outside this repo) evaluated grounded-search options
-across cost, citation quality, and provider diversity for a
-generate-then-verify pattern: one pass produces claims, a second pass on a
-*different* provider tries to corroborate or contradict them, so a blind
-spot specific to one model's training data or search ranking doesn't survive
-its own check.
+A comparison (see
+[docs/research/model-comparison.md](../research/model-comparison.md))
+evaluated grounded-search options across cost, citation quality, and
+provider diversity for a generate-then-verify pattern: one pass produces
+claims, a second pass on a *different* provider tries to corroborate or
+contradict them, so a blind spot specific to one model's training data or
+search ranking doesn't survive its own check.
 
 ## Decision
 
