@@ -75,6 +75,7 @@ def test_real_project_config_is_valid():
     expected_stages = {
         "research",
         "fact_check",
+        "previz",
         "narrative",
         "narrative_review",
         "shot_list",

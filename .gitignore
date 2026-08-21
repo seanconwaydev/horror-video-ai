@@ -219,3 +219,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+outputs/
+
+# Left behind by device-bridge cleanup (see chat) -- files this sandbox
+# could rename but not delete. Safe to delete by hand, or ignore.
+_to_delete/
+_to_delete_stale_venv/

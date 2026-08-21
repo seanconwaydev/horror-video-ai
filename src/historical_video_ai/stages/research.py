@@ -1,14 +1,14 @@
-"""Stage 2: Research -- produce a structured, sourced fact sheet for a topic.
+"""Stage 2: Research -- produce a structured, sourced fact sheet for one
+described scene.
 
-See docs/pipeline.md ("2. Research") for the stage's purpose and review gate.
+See docs/pipeline.md ("2. Research") for the stage's purpose and review
+gate, and docs/decisions/0006-narrow-v1-scope-single-image.md for why this
+stage takes a (time, place, description) scene instead of a bare topic.
 
-Grounding note: the research model needs real web-search capability so it
-isn't just relying on parametric recall, and which model/provider actually
-provides that is still an open question (see docs/architecture.md, "Open
-questions"). This module calls whatever model is pinned in
-config/models.yaml with a plain prompt -- no search tool wired in yet.
-Treat any fact sheet produced today as a placeholder until that decision is
-made and recorded as its own ADR.
+Grounding: per docs/decisions/0007-research-fact-check-previz-models.md,
+this stage is pinned to a Perplexity Sonar model, which performs live web
+search as part of generating its answer -- no separate search tool needs to
+be wired in here the way Gemini's grounding does (see the fact_check stage).
 """
 
 from __future__ import annotations
@@ -42,45 +42,58 @@ class Claim:
 
 @dataclass(frozen=True)
 class FactSheet:
-    """The reviewable artifact stage 2 produces: a topic plus its sourced claims."""
+    """The reviewable artifact stage 2 produces: the scene that was asked
+    for, plus the sourced claims needed to depict it accurately."""
 
-    topic: str
+    time: str
+    place: str
+    description: str
     claims: list[Claim]
 
 
 _PROMPT_TEMPLATE = """\
-You are a historical researcher producing a fact sheet for a short video on \
-the following topic. Respond with ONLY a JSON object (no prose, no markdown \
-fences) matching this exact shape:
+You are a historical researcher producing a sourced fact sheet to help \
+accurately depict ONE specific scene for a short video. The scene's main \
+character is a generic, unnamed person -- do not invent a specific \
+historical figure unless the description below names one. Write and think \
+about the scene in third person.
+
+Time: {time}
+Place: {place}
+What happens: {description}
+
+Research enough about this time and place to describe how it would \
+accurately look and feel: architecture, clothing/attire, objects and \
+technology available then, atmosphere, and any specific historical detail \
+relevant to what happens in the description above. Historical accuracy is \
+the thing most likely to publicly embarrass the channel if it's wrong, so \
+nothing here should be unsourced -- if you are not confident a claim is \
+accurate, omit it rather than guess.
+
+Respond with ONLY a JSON object (no prose, no markdown fences) matching this \
+exact shape:
 
 {{
-  "topic": "<the topic, restated>",
   "claims": [
     {{
-      "text": "<a single factual claim>",
+      "text": "<a single factual/visual claim relevant to depicting this scene>",
       "source": "<a citation or source for this specific claim -- required>",
       "date": "<date associated with this claim, or null>",
-      "names": ["<person or place names involved>"]
+      "names": ["<person, place, or object names involved>"]
     }}
   ]
 }}
-
-Every claim must have a real, credible source -- do not include unsourced
-claims. If you are not confident a claim is accurate, omit it rather than
-guess.
-
-Topic: {topic}
 """
 
 
-def _parse_fact_sheet(raw_content: str) -> FactSheet:
+def _parse_claims(raw_content: str) -> list[Claim]:
     try:
         data = json.loads(raw_content)
     except json.JSONDecodeError as exc:
         raise ResearchError(f"Research stage response was not valid JSON: {exc}") from exc
 
-    if not isinstance(data, dict) or "topic" not in data or "claims" not in data:
-        raise ResearchError("Research stage response is missing 'topic' or 'claims'")
+    if not isinstance(data, dict) or "claims" not in data:
+        raise ResearchError("Research stage response is missing 'claims'")
 
     claims: list[Claim] = []
     for i, raw_claim in enumerate(data["claims"]):
@@ -99,16 +112,19 @@ def _parse_fact_sheet(raw_content: str) -> FactSheet:
             )
         )
 
-    return FactSheet(topic=data["topic"], claims=claims)
+    return claims
 
 
 def run_research_stage(
-    topic: str,
+    time: str,
+    place: str,
+    description: str,
     *,
     model: str | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> FactSheet:
-    """Produce a sourced fact sheet for `topic`.
+    """Produce a sourced fact sheet for the scene described by
+    (time, place, description).
 
     `model` defaults to the pinned model for the "research" stage in
     config/models.yaml (see docs/decisions/0003). `completion_fn` defaults
@@ -120,9 +136,11 @@ def run_research_stage(
     """
     resolved_model = model or get_stage_model("research")
 
+    prompt = _PROMPT_TEMPLATE.format(time=time, place=place, description=description)
     response = completion_fn(
         model=resolved_model,
-        messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(topic=topic)}],
+        messages=[{"role": "user", "content": prompt}],
     )
     raw_content = response.choices[0].message.content
-    return _parse_fact_sheet(raw_content)
+    claims = _parse_claims(raw_content)
+    return FactSheet(time=time, place=place, description=description, claims=claims)
