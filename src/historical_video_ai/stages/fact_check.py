@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 import litellm
 
+from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.research import Claim, FactSheet
 
@@ -96,7 +97,7 @@ def _format_claims(claims: list[Claim]) -> str:
     return "\n".join(lines) if lines else "(no claims)"
 
 
-def _parse_flags(raw_content: str) -> list[ClaimFlag]:
+def _parse_flags(raw_content: str, claims: list[Claim]) -> list[ClaimFlag]:
     try:
         data = json.loads(raw_content)
     except json.JSONDecodeError as exc:
@@ -104,6 +105,8 @@ def _parse_flags(raw_content: str) -> list[ClaimFlag]:
 
     if not isinstance(data, dict) or "flags" not in data:
         raise FactCheckError("Fact-check stage response is missing 'flags'")
+
+    known_claim_texts = {c.text for c in claims}
 
     flags: list[ClaimFlag] = []
     for i, raw_flag in enumerate(data["flags"]):
@@ -117,9 +120,22 @@ def _parse_flags(raw_content: str) -> list[ClaimFlag]:
                 f"Flag {i} has an invalid 'severity' ({severity!r}); "
                 "expected 'contradicted' or 'uncertain'"
             )
+        claim_text = raw_flag["claim_text"]
+        if claim_text not in known_claim_texts:
+            # A model that paraphrases or appends extra detail (date, source)
+            # instead of copying the claim text verbatim breaks every later
+            # attempt to correlate this flag back to its claim -- e.g.
+            # previz silently failing to exclude a claim it should have.
+            # Fail loud here instead, matching this project's convention of
+            # not letting malformed model output degrade silently downstream.
+            raise FactCheckError(
+                f"Flag {i}'s 'claim_text' doesn't exactly match any claim from "
+                f"research (the model may have paraphrased or added detail "
+                f"instead of copying it verbatim): {claim_text!r}"
+            )
         flags.append(
             ClaimFlag(
-                claim_text=raw_flag["claim_text"],
+                claim_text=claim_text,
                 concern=raw_flag["concern"],
                 severity=severity,
             )
@@ -142,8 +158,10 @@ def run_fact_check_stage(
     to litellm.completion and exists as an injection point for tests -- pass
     a fake to avoid making a real API call.
 
-    Raises FactCheckError if the model's response isn't valid JSON or is
-    missing required fields, rather than returning a partial/guessed result.
+    Raises FactCheckError if the model's response isn't valid JSON, is
+    missing required fields, or flags a claim_text that doesn't exactly
+    match one of fact_sheet's claims -- rather than returning a partial/
+    guessed result, or a flag nothing downstream can reliably act on.
     """
     resolved_model = model or get_stage_model("fact_check")
 
@@ -158,5 +176,5 @@ def run_fact_check_stage(
         messages=[{"role": "user", "content": prompt}],
     )
     raw_content = response.choices[0].message.content
-    flags = _parse_flags(raw_content)
+    flags = _parse_flags(raw_content, fact_sheet.claims)
     return FactCheckResult(fact_sheet=fact_sheet, flags=flags)

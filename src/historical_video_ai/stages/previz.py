@@ -25,6 +25,7 @@ from pathlib import Path
 
 import litellm
 
+from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.fact_check import FactCheckResult
 
@@ -44,13 +45,18 @@ class PrevizResult:
 
 
 def _build_prompt(fact_check_result: FactCheckResult) -> str:
+    """Build the image prompt from fact_check_result.fact_sheet.claims as
+    given -- this stage trusts that list as already resolved. It used to
+    auto-exclude any claim flagged "contradicted" itself, but that matching
+    relied on exact string equality between a flag's claim_text and the
+    original claim, which a real model response isn't guaranteed to
+    preserve (see fact_check.py's claim_text validation) -- and more
+    fundamentally, silently dropping a claim isn't this stage's call to
+    make. Per docs/pipeline.md's stage 3 review gate, a human resolves each
+    flag (accept, cut, or soften) before the fact sheet ever reaches here --
+    see cli.py's _resolve_flags."""
     fact_sheet = fact_check_result.fact_sheet
-    contradicted = {
-        f.claim_text for f in fact_check_result.flags if f.severity == "contradicted"
-    }
-    trustworthy_claims = [c for c in fact_sheet.claims if c.text not in contradicted]
-
-    detail_lines = "\n".join(f"- {c.text}" for c in trustworthy_claims)
+    detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
     return (
         f"A historically accurate scene. Time: {fact_sheet.time}. "
         f"Place: {fact_sheet.place}. A generic, unnamed person (third "

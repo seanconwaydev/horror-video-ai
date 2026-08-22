@@ -46,6 +46,14 @@ If the real tool genuinely can't be run in the current environment, say so plain
 
 **Format**: Shorts-only for now (`docs/decisions/0002-shorts-first-format.md`) — roughly 30–60 seconds. Video generation itself is deferred until the pipeline up to previz is working well (`docs/decisions/0006`).
 
+## Known upstream workarounds
+
+Sometimes a third-party dependency has a real bug with no released fix, and the only way forward is a workaround in this project's own code rather than waiting indefinitely. When that happens: check whether a newer **released** version (stable or an official pre-release build actually published to the package index) fixes it first — never install from an unmerged PR or issue-thread patch as a substitute for a real release, even if it looks relevant, since those can be incomplete or simply wrong (see the litellm example below, where two open PRs claiming to fix the exact error don't actually fix it). Only once a released fix genuinely doesn't exist does a workaround belong in the codebase.
+
+Every such workaround must be tagged with a greppable `WORKAROUND(<issue-or-PR-URL>):` marker at the patch site, so a later session can find every currently-applied one (`grep -rn "WORKAROUND(" src/`) and check whether it's now safe to delete because upstream shipped a real fix. Current ones:
+
+- **`src/historical_video_ai/_litellm_workarounds.py`** — litellm's `Message`/`ModelResponse` types fail to construct at all on Python 3.10/3.11 ([litellm#36384](https://github.com/BerriAI/litellm/issues/36384)), breaking `litellm.completion()` for every provider. No released version fixes this as of 2026-08-22 (checked through `1.99.0.dev2`). Self-deactivating: it's a no-op once litellm's own fix lands, but should still be deleted at that point rather than left inert. Imported for its side effect by any stage module making a real (non-mocked) litellm call.
+
 ## Project conventions
 
 - **Architecture decisions are recorded as ADRs** in `docs/decisions/`, one file per decision, numbered sequentially, written once and left alone — a changed decision gets a new ADR that supersedes the old one rather than an edit in place (`docs/decisions/0001-record-architecture-decisions.md`). `docs/architecture.md` stays a short current-state overview; undecided items live in its "Open questions" section until they're resolved, at which point they become an ADR. When you make or are asked to help make an actual architectural decision on this project, write the ADR.
