@@ -48,7 +48,11 @@ def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
     assert "Kitty Hawk" in result.prompt_used
 
 
-def test_run_previz_stage_excludes_contradicted_claims_from_prompt(tmp_path):
+def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
+    # previz trusts fact_sheet.claims as already resolved -- flags no
+    # longer cause any auto-exclusion here (see cli.py's _resolve_flags,
+    # which is where a human now decides to accept/cut/soften a flagged
+    # claim before it ever reaches this stage).
     flags = [
         ClaimFlag(
             claim_text="This claim will be contradicted.",
@@ -64,7 +68,7 @@ def test_run_previz_stage_excludes_contradicted_claims_from_prompt(tmp_path):
         output_dir=tmp_path,
     )
 
-    assert "This claim will be contradicted." not in result.prompt_used
+    assert "This claim will be contradicted." in result.prompt_used
     assert "undeveloped in 1903" in result.prompt_used
 
 

@@ -106,6 +106,30 @@ def test_run_fact_check_stage_raises_for_invalid_severity():
         )
 
 
+def test_run_fact_check_stage_raises_when_claim_text_does_not_match():
+    # A model that paraphrases or appends detail (date, source) instead of
+    # copying claim_text verbatim -- observed in a real DeepSeek response --
+    # breaks anything downstream trying to correlate the flag back to its
+    # claim, so this must fail loud rather than let the mismatch through.
+    payload = {
+        "flags": [
+            {
+                "claim_text": "Kitty Hawk was a remote, sparsely populated coastal area in 1903. "
+                "(date: 1903-12-17) [source: Smithsonian National Air and Space Museum]",
+                "concern": "Paraphrased instead of copied verbatim.",
+                "severity": "uncertain",
+            }
+        ]
+    }
+
+    with pytest.raises(FactCheckError, match="doesn't exactly match any claim"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
 def test_run_fact_check_stage_resolves_model_from_config_when_not_passed():
     captured = {}
 
