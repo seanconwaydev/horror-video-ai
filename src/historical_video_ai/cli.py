@@ -33,6 +33,14 @@ Two ways to avoid paying for research/fact-check on every iteration:
   real. Use this once you've found a research output worth reusing --
   see tests/fixtures/. Combine with --mock for fully offline iteration on
   real historical claims with a zero-cost previz too.
+
+`--video-gen-from <run_dir> [<run_dir> ...]` runs stage 9 (video generation)
+standalone, skipping research, fact-check, and previz entirely: each given
+run directory must already contain a completed previz result, and becomes
+one scene's anchor image + prompt (see docs/decisions/0010-video-generation-
+model-and-standalone-stage.md). Passing multiple directories generates one
+clip per directory. Combine with --mock to exercise the polling loop without
+a real API call.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,6 +66,7 @@ from historical_video_ai.stages.previz import (
     run_previz_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
+from historical_video_ai.stages.video_generation import run_video_generation_stage
 
 _MOCK_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -96,6 +106,22 @@ def _mock_review_completion(**kwargs):
     the previz-review loop's mechanics without cost or credentials."""
     content = json.dumps({"accepted": True, "concern": None})
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+
+def _mock_video_generation(**kwargs):
+    """No network call, no API key -- returns a job already 'completed', so
+    --video-gen-from --mock exercises the polling loop's mechanics (it just
+    skips the loop entirely, since the job is terminal on creation) without
+    cost or credentials."""
+    return SimpleNamespace(id="mock-video-id", status="completed", error=None)
+
+
+def _mock_video_status(**kwargs):
+    return SimpleNamespace(id="mock-video-id", status="completed", error=None)
+
+
+def _mock_video_content(**kwargs):
+    return b"[MOCK] not a real video file"
 
 
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
@@ -277,6 +303,7 @@ def _generate_previz_with_review(
     image_kwargs: dict,
     review_kwargs: dict,
     out_dir: Path,
+    on_image_generated: Callable[[PrevizResult], None] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate previz's image, then have an independent pass review the
     actual image -- not just the text prompt -- against the scene (see
@@ -290,6 +317,18 @@ def _generate_previz_with_review(
     A rejected attempt's image is archived as previz_attempt_<n>_rejected
     .png (rather than silently overwritten by the next attempt) so the
     reason it was rejected has something to point at.
+
+    `on_image_generated`, if given, is called with each attempt's
+    PrevizResult right after the image is written -- *before* the review
+    call, which can itself fail (a real, observed case: previz_review's
+    model raising an auth error on a missing API key). Without this,
+    main()'s run_log.json only recorded previz_image_path/prompt_used after
+    this whole function returned, which meant a review-stage crash left a
+    real, already-generated (and already paid for) image on disk with no
+    record of it in the log -- exactly the gap --video-gen-from's
+    _load_previz_output depends on not having. Hooking in here instead of
+    writing the log directly keeps this function's only concern generation
+    + review, not log-file format.
     """
     attempts: list[dict] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
@@ -298,6 +337,8 @@ def _generate_previz_with_review(
             fact_check_result, model=previz_model, output_dir=out_dir, **image_kwargs
         )
         print(f"Image saved to {previz_result.image_path}")
+        if on_image_generated is not None:
+            on_image_generated(previz_result)
 
         print(f"--- previz review (model: {review_model}) ---")
         review = run_previz_review_stage(
@@ -396,6 +437,116 @@ def _load_fixture(path: Path) -> FactCheckResult:
     return FactCheckResult(fact_sheet=fact_sheet, flags=flags, premise_conflict=premise_conflict)
 
 
+def _load_previz_output(run_dir: Path) -> tuple[Path, str]:
+    """Load a previously generated previz image and the prompt used to
+    produce it from an existing run's run_log.json, so --video-gen-from can
+    run stage 9 standalone against real previz output instead of requiring
+    a fresh research -> fact-check -> previz pass every time. Reuses the
+    run_log.json this file already writes rather than inventing a separate
+    manifest format for (image, prompt) pairs -- see
+    docs/decisions/0010-video-generation-model-and-standalone-stage.md.
+
+    Raises FileNotFoundError if run_dir has no run_log.json, or if the
+    image path it references no longer exists on disk, and ValueError if
+    the log doesn't show a completed previz result -- fails loud rather
+    than silently treating an incomplete or stale run as usable input.
+    """
+    log_path = run_dir / "run_log.json"
+    if not log_path.exists():
+        raise FileNotFoundError(f"No run_log.json found in {run_dir}")
+
+    data = json.loads(log_path.read_text())
+    image_path_str = data.get("previz_image_path")
+    prompt_used = data.get("previz_prompt_used")
+    if not image_path_str or not prompt_used:
+        raise ValueError(
+            f"{log_path} has no completed previz result (missing "
+            "'previz_image_path' or 'previz_prompt_used') -- point "
+            "--video-gen-from at a run that finished previz successfully."
+        )
+
+    image_path = Path(image_path_str)
+    if not image_path.exists():
+        raise FileNotFoundError(
+            f"Previz image referenced by {log_path} no longer exists: {image_path}"
+        )
+
+    return image_path, prompt_used
+
+
+def _run_video_generation_only(
+    run_dirs: list[Path], *, mock: bool, out_dir: Path, video_model: str | None = None
+) -> None:
+    """Run stage 9 (video generation) standalone against one or more
+    already-completed previz outputs, skipping research, fact-check, and
+    previz entirely for this invocation. Each run_dir becomes one scene's
+    anchor image + prompt -- multiple directories today stands in for the
+    future multi-scene case, where each approved shot becomes its own
+    image-to-video job. See docs/decisions/0010-video-generation-model-and-
+    standalone-stage.md.
+
+    Blocks and polls each job to completion before starting the next --
+    0010's v1 choice, not the SQS fan-out already named for this stage in
+    docs/decisions/0004 for when there's real multi-scene volume to justify
+    a queue.
+
+    Lets VideoGenerationError propagate uncaught on failure, same
+    fail-loud convention as every other stage -- this doesn't try to
+    continue past a failed scene and finish the rest.
+
+    `out_dir` is a required parameter rather than computed here (same
+    reason as `_generate_previz_with_review`'s `out_dir`) -- keeps this
+    testable against a tmp_path instead of writing into the real project's
+    outputs/ directory.
+    """
+    video_kwargs = (
+        {
+            "video_fn": _mock_video_generation,
+            "status_fn": _mock_video_status,
+            "content_fn": _mock_video_content,
+            "sleep_fn": lambda _seconds: None,
+        }
+        if mock
+        else {}
+    )
+
+    video_model = video_model or get_stage_model("video_generation")
+    log = {
+        "mode": "video_generation_only",
+        "mock": mock,
+        "video_generation_model": video_model,
+        "source_previz_runs": [str(d) for d in run_dirs],
+        "scenes": [],
+    }
+    _write_log(out_dir, log)
+
+    for i, run_dir in enumerate(run_dirs, start=1):
+        print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
+        image_path, prompt = _load_previz_output(run_dir)
+        print(f"Source: {run_dir} (image: {image_path})")
+
+        result = run_video_generation_stage(
+            image_path,
+            prompt,
+            model=video_model,
+            output_dir=out_dir,
+            output_filename=f"video_scene_{i}.mp4",
+            **video_kwargs,
+        )
+        print(f"Video saved to {result.video_path}")
+        log["scenes"].append(
+            {
+                "source_previz_run": str(run_dir),
+                "source_image_path": str(result.source_image_path),
+                "prompt_used": result.prompt_used,
+                "video_path": str(result.video_path),
+            }
+        )
+        _write_log(out_dir, log)
+
+    print(f"\nDone. Run artifacts saved in {out_dir}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the research -> fact-check -> previz pipeline for one scene."
@@ -415,6 +566,20 @@ def main() -> None:
             "Path to a previously captured real run_log.json -- replays its "
             "research + fact-check output instead of calling those APIs "
             "again (previz still runs for real unless --mock is also set)."
+        ),
+    )
+    parser.add_argument(
+        "--video-gen-from",
+        type=Path,
+        nargs="+",
+        metavar="RUN_DIR",
+        help=(
+            "Run stage 9 (video generation) standalone against one or more "
+            "existing run output directories that already completed previz "
+            "-- each becomes one scene's anchor image + prompt. Skips "
+            "research, fact-check, and previz entirely for this "
+            "invocation. Combine with --mock to exercise the polling loop "
+            "without a real API call."
         ),
     )
     parser.add_argument(
@@ -438,6 +603,10 @@ def main() -> None:
 
     if not args.mock:
         load_environment()
+
+    if args.video_gen_from:
+        _run_video_generation_only(args.video_gen_from, mock=args.mock, out_dir=_run_dir())
+        return
 
     completion_kwargs = {"completion_fn": _mock_completion} if args.mock else {}
     image_kwargs = {"image_fn": _mock_image} if args.mock else {}
@@ -529,6 +698,19 @@ def main() -> None:
 
     previz_model = get_stage_model("previz")
     review_model = get_stage_model("previz_review")
+    log["previz_model"] = previz_model
+    log["previz_review_model"] = review_model
+
+    def _record_previz_image(result: PrevizResult) -> None:
+        # Persisted as soon as the image exists -- not after the whole
+        # generate+review loop returns -- so a crash inside review (e.g. a
+        # missing API key) still leaves run_log.json pointing at a real,
+        # already-generated image instead of silently losing it. See
+        # _generate_previz_with_review's on_image_generated docstring.
+        log["previz_image_path"] = str(result.image_path)
+        log["previz_prompt_used"] = result.prompt_used
+        _write_log(out_dir, log)
+
     previz_result, previz_attempts = _generate_previz_with_review(
         fact_check_result,
         previz_model=previz_model,
@@ -536,17 +718,24 @@ def main() -> None:
         image_kwargs=image_kwargs,
         review_kwargs=review_kwargs,
         out_dir=out_dir,
+        on_image_generated=_record_previz_image,
     )
-    log["previz_model"] = previz_model
-    log["previz_review_model"] = review_model
     log["previz_attempts"] = previz_attempts
     if previz_result is None:
+        # Every attempt was explicitly rejected and its image renamed to
+        # previz_attempt_<n>_rejected.png (see _generate_previz_with_review)
+        # -- clear the path _record_previz_image left from the last
+        # attempt, since it no longer points at a real file, and this
+        # branch's whole meaning is "no accepted image exists."
+        log.pop("previz_image_path", None)
+        log.pop("previz_prompt_used", None)
         log["stopped_reason"] = "previz_review_rejected_max_attempts"
         _write_log(out_dir, log)
         print(f"\nNo image produced. Run artifacts saved in {out_dir}")
         return
-    log["previz_image_path"] = str(previz_result.image_path)
-    log["previz_prompt_used"] = previz_result.prompt_used
+    # previz_image_path/previz_prompt_used are already in log and on disk,
+    # written by _record_previz_image the moment the accepted image was
+    # generated -- this just flushes previz_attempts alongside them.
     _write_log(out_dir, log)
 
     print(f"\nDone. Run artifacts saved in {out_dir}")

@@ -7,13 +7,28 @@ pipeline, and docs/decisions/0006-narrow-v1-scope-single-image.md for why
 this v1 version builds its prompt directly from the fact-check stage's
 output instead of a per-scene video prompt.
 
-Model note: pinned to an OpenAI image model as a starting placeholder, not a
-rigorously compared decision -- see docs/decisions/0007. Unverified: this
-calls litellm.image_generation(), which LiteLLM documents as covering
-OpenAI's image API, normalized to an OpenAI-style response; that call shape
-has not been exercised against a live key from this repo. Treat the first
-real run as a test, not a known-working thing (same caveat as the research
-and fact_check stages' real backends).
+Model note: pinned to Gemini's image model (gemini/gemini-2.5-flash-image),
+moved off the original OpenAI placeholder from docs/decisions/0007 -- see
+docs/decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md for
+why: Sora-2 (the video_generation stage's model) requires an exact-pixel
+match to one of its two fixed sizes (720x1280 or 1280x720), and none of
+gpt-image-1-mini's three fixed sizes even shares that aspect ratio, forcing
+a large, content-losing crop. Gemini's 9:16 output is a near-exact match
+(within ~0.8%), letting video_generation resize instead of crop -- no scene
+content lost. Requests a 9:16-ish `size` (mapped internally to Gemini's
+`imageConfig.aspectRatio`, not an exact pixel size -- gemini-2.5-flash-image
+doesn't support requesting an exact size, only an aspect ratio) so the
+output is close to Sora's target ratio.
+
+The request/response call shape (litellm.image_generation() normalizing
+Gemini's response to the same ImageResponse/b64_json shape OpenAI's API
+uses) was verified by direct reproduction against litellm's real
+request-building code, bypassing the network -- unlike the previous OpenAI
+placeholder, this isn't a blind guess at the call shape. It has still not
+been exercised against a live Gemini key from this repo, though -- treat
+the first real run as a test for actual output quality/behavior, not for
+whether the call shape itself works (same caveat as the research and
+fact_check stages' real backends).
 """
 
 from __future__ import annotations
@@ -28,11 +43,22 @@ import litellm
 
 from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
+from historical_video_ai.json_utils import strip_markdown_json_fence
 from historical_video_ai.stages.fact_check import FactCheckResult
 
 
 class PrevizError(Exception):
     """Raised when the previz stage's image response is missing or malformed."""
+
+
+# Requests the aspect ratio closest to Sora-2's fixed 720x1280 portrait size
+# (video_generation.py's own target size for the same reason -- see
+# docs/decisions/0011). gemini-2.5-flash-image only supports requesting an
+# aspect ratio, not an exact pixel size, so this is a hint litellm maps to
+# Gemini's nearest named ratio ("9:16"), not a literal request for these
+# exact pixels -- video_generation.py still resizes the actual output to
+# Sora's exact required dimensions before submission.
+_PREVIZ_SIZE_HINT = "720x1280"
 
 
 @dataclass(frozen=True)
@@ -112,7 +138,7 @@ def run_previz_stage(
     resolved_model = model or get_stage_model("previz")
     prompt = _build_prompt(fact_check_result)
 
-    response = image_fn(model=resolved_model, prompt=prompt)
+    response = image_fn(model=resolved_model, prompt=prompt, size=_PREVIZ_SIZE_HINT)
 
     try:
         item = response.data[0]
@@ -164,7 +190,7 @@ markdown fences) matching this exact shape:
 
 def _parse_review(raw_content: str) -> PrevizReview:
     try:
-        data = json.loads(raw_content)
+        data = json.loads(strip_markdown_json_fence(raw_content))
     except json.JSONDecodeError as exc:
         raise PrevizError(f"Previz review response was not valid JSON: {exc}") from exc
 
@@ -200,6 +226,13 @@ def run_previz_review_stage(
     checking its own work" reasoning as fact_check vs. research.
     `completion_fn` defaults to litellm.completion and exists as an
     injection point for tests -- pass a fake to avoid a real API call.
+
+    Unverified: this call (vision input via litellm.completion(), i.e. a
+    message content list with a text block and an image_url block) has not
+    been exercised against a live key from this repo -- ANTHROPIC_API_KEY
+    was never set during development. Treat the first real run as a test,
+    not a known-working thing (same caveat as run_previz_stage's own image
+    generation call).
 
     Raises PrevizError if the model's response isn't valid JSON or is
     missing required fields, matching this project's fail-loud convention.

@@ -54,9 +54,9 @@ The highlighted box (Previz) is the spend gate: everything before it is text or 
 
 ## Open questions (not yet decided)
 
-**Video generation model.** Needs to support image-to-video conditioning (see the Previz stage). Candidates to evaluate on cost, output quality, and API access: Veo, Kling, Runway, Sora.
+**Video generation model.** Needs to support image-to-video conditioning (see the Previz stage). `openai/sora-2` is the current v1 placeholder ([decisions/0010](./decisions/0010-video-generation-model-and-standalone-stage.md)) — not a rigorously compared decision, same status as previz's own image model below. Veo (Google, via Vertex AI) is the next candidate to actually compare it against; Kling and Runway remain untried.
 
-**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gpt-image-1-mini` via OpenAI is the current v1 placeholder ([decisions/0007](./decisions/0007-research-fact-check-previz-models.md)) — not a rigorously compared decision yet, unlike research/fact-check below.
+**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gemini/gemini-2.5-flash-image` is the current v1 placeholder ([decisions/0011](./decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md), superseding 0007's original OpenAI placeholder) — picked because its 9:16 output is a close aspect-ratio match to the video-generation stage's required size, not from a rigorous quality comparison; Kling, Runway, and a real quality bake-off against gpt-image-1-mini are all still untried.
 
 **Control flow.** How stages actually get called in sequence and pause for review (a script vs. something more structured) — worth revisiting once stages 2–7 have real code to review. Likely AWS Step Functions, per [decisions/0004](./decisions/0004-aws-incremental-adoption.md), but not yet implemented. Answered for v1's narrowed scope as a plain CLI confirm-loop — see [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md).
 

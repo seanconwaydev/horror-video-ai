@@ -43,7 +43,7 @@ def _fake_image_fn(b64_json: str):
 def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
     result = run_previz_stage(
         _fact_check_result(),
-        model="openai/gpt-image-1-mini",
+        model="gemini/gemini-2.5-flash-image",
         image_fn=_fake_image_fn(_TINY_PNG_B64),
         output_dir=tmp_path,
     )
@@ -51,6 +51,26 @@ def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
     assert result.image_path.exists()
     assert result.image_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic bytes
     assert "Kitty Hawk" in result.prompt_used
+
+
+def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
+    # See docs/decisions/0011: requests an aspect ratio close to Sora-2's
+    # target size so video_generation only needs a barely-perceptible
+    # resize, not a large content-losing crop.
+    captured = {}
+
+    def _image_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    run_previz_stage(
+        _fact_check_result(),
+        model="gemini/gemini-2.5-flash-image",
+        image_fn=_image_fn,
+        output_dir=tmp_path,
+    )
+
+    assert captured["size"] == "720x1280"
 
 
 def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
@@ -68,7 +88,7 @@ def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
 
     result = run_previz_stage(
         _fact_check_result(flags),
-        model="openai/gpt-image-1-mini",
+        model="gemini/gemini-2.5-flash-image",
         image_fn=_fake_image_fn(_TINY_PNG_B64),
         output_dir=tmp_path,
     )
@@ -89,7 +109,7 @@ def test_run_previz_stage_refuses_unresolved_premise_conflict(tmp_path):
     with pytest.raises(PrevizError, match="historically impossible"):
         run_previz_stage(
             result_with_conflict,
-            model="openai/gpt-image-1-mini",
+            model="gemini/gemini-2.5-flash-image",
             image_fn=_fake_image_fn(_TINY_PNG_B64),
             output_dir=tmp_path,
         )
@@ -102,7 +122,7 @@ def test_run_previz_stage_raises_when_no_image_data(tmp_path):
     with pytest.raises(PrevizError, match="no image data"):
         run_previz_stage(
             _fact_check_result(),
-            model="openai/gpt-image-1-mini",
+            model="gemini/gemini-2.5-flash-image",
             image_fn=_empty_image_fn,
             output_dir=tmp_path,
         )
@@ -150,6 +170,24 @@ def test_run_previz_review_stage_accepts(tmp_path):
 
     assert review.accepted is True
     assert review.concern is None
+
+
+def test_run_previz_review_stage_parses_response_wrapped_in_markdown_fence(tmp_path):
+    # Regression test: this is the exact failure observed for real against
+    # a live claude-sonnet-5 call reviewing a real Gemini-generated previz
+    # image -- the same prompt returned raw JSON on one call and a
+    # ```json-fenced response on the next. See historical_video_ai.json_utils.
+    image_path = _write_tiny_png(tmp_path)
+    payload = {"accepted": True, "concern": None}
+
+    review = run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_review_completion(f"```json\n{json.dumps(payload)}\n```"),
+    )
+
+    assert review.accepted is True
 
 
 def test_run_previz_review_stage_rejects_with_concern(tmp_path):

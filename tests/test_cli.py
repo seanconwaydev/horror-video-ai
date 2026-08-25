@@ -2,12 +2,15 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from historical_video_ai.cli import (
     _generate_previz_with_review,
     _load_fixture,
+    _load_previz_output,
     _resolve_flags,
     _resolve_premise_conflict,
+    _run_video_generation_only,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
@@ -415,6 +418,115 @@ def test_generate_previz_with_review_gives_up_after_max_attempts(tmp_path):
     for n in (1, 2, 3):
         assert (tmp_path / f"previz_attempt_{n}_rejected.png").exists()
     assert not (tmp_path / "previz.png").exists()
+
+
+def _write_previz_run_log(run_dir, *, image_path=None, prompt="A prompt from previz."):
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if image_path is None:
+        image_path = run_dir / "previz.png"
+        # A real PNG already at Sora's target size -- video_generation
+        # genuinely opens and resizes this with Pillow now, so arbitrary
+        # bytes no longer work here.
+        Image.new("RGB", (720, 1280), color="blue").save(image_path, format="PNG")
+    log = {"previz_image_path": str(image_path), "previz_prompt_used": prompt}
+    (run_dir / "run_log.json").write_text(json.dumps(log))
+    return image_path
+
+
+def test_load_previz_output_returns_image_path_and_prompt(tmp_path):
+    run_dir = tmp_path / "run_1"
+    image_path = _write_previz_run_log(run_dir, prompt="Scene one's prompt.")
+
+    result_image_path, prompt = _load_previz_output(run_dir)
+
+    assert result_image_path == image_path
+    assert prompt == "Scene one's prompt."
+
+
+def test_load_previz_output_raises_when_no_run_log(tmp_path):
+    run_dir = tmp_path / "run_missing"
+    run_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="No run_log.json"):
+        _load_previz_output(run_dir)
+
+
+def test_load_previz_output_raises_when_previz_incomplete(tmp_path):
+    run_dir = tmp_path / "run_incomplete"
+    run_dir.mkdir()
+    (run_dir / "run_log.json").write_text(json.dumps({"time": "1969"}))
+
+    with pytest.raises(ValueError, match="no completed previz result"):
+        _load_previz_output(run_dir)
+
+
+def test_load_previz_output_raises_when_image_file_missing(tmp_path):
+    run_dir = tmp_path / "run_stale"
+    run_dir.mkdir()
+    missing_image = run_dir / "previz.png"
+    log = {"previz_image_path": str(missing_image), "previz_prompt_used": "A prompt."}
+    (run_dir / "run_log.json").write_text(json.dumps(log))
+
+    with pytest.raises(FileNotFoundError, match="no longer exists"):
+        _load_previz_output(run_dir)
+
+
+def test_run_video_generation_only_generates_one_clip_per_run_dir(tmp_path):
+    source_a = tmp_path / "source_run_a"
+    source_b = tmp_path / "source_run_b"
+    _write_previz_run_log(source_a, prompt="Scene A's prompt.")
+    _write_previz_run_log(source_b, prompt="Scene B's prompt.")
+    out_dir = tmp_path / "video_run"
+    out_dir.mkdir()
+
+    _run_video_generation_only(
+        [source_a, source_b], mock=True, out_dir=out_dir, video_model="openai/sora-2"
+    )
+
+    assert (out_dir / "video_scene_1.mp4").exists()
+    assert (out_dir / "video_scene_2.mp4").exists()
+    log = json.loads((out_dir / "run_log.json").read_text())
+    assert log["mode"] == "video_generation_only"
+    assert [s["prompt_used"] for s in log["scenes"]] == [
+        "Scene A's prompt.",
+        "Scene B's prompt.",
+    ]
+
+
+def test_generate_previz_with_review_calls_on_image_generated_before_review(tmp_path):
+    calls = []
+
+    result, _ = _generate_previz_with_review(
+        _fact_check_result_for_previz(),
+        **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
+        on_image_generated=calls.append,
+    )
+
+    assert len(calls) == 1
+    assert calls[0] == result
+
+
+def test_generate_previz_with_review_on_image_generated_survives_a_review_crash(tmp_path):
+    # Regression test: a real run hit exactly this -- previz generated a
+    # real image, but previz_review raised (missing ANTHROPIC_API_KEY)
+    # before returning a verdict at all. on_image_generated must still have
+    # fired for that image, so a caller logging progress (main()'s
+    # run_log.json) doesn't lose track of an already-generated, already
+    # paid-for image just because the next stage blew up.
+    calls = []
+
+    def _crashing_review(**kwargs):
+        raise RuntimeError("simulated previz_review crash (e.g. missing API key)")
+
+    with pytest.raises(RuntimeError, match="simulated previz_review crash"):
+        _generate_previz_with_review(
+            _fact_check_result_for_previz(),
+            **_generate_previz_with_review_kwargs(_crashing_review, tmp_path),
+            on_image_generated=calls.append,
+        )
+
+    assert len(calls) == 1
+    assert calls[0].image_path == tmp_path / "previz.png"
 
 
 def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatch):

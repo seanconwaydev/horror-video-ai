@@ -8,6 +8,8 @@
 # never automatically, never via a fallback/router.
 
 # v1 stages (see docs/decisions/0006 and 0007) -- real decisions, not placeholders.
+# previz is the exception -- see docs/decisions/0011-previz-image-model-for-
+# video-aspect-ratio-fit.md for why it moved off the original 0007 placeholder.
 
 research:
   model: "perplexity/sonar-deep-research"
@@ -16,7 +18,7 @@ fact_check:
   model: "gemini/gemini-2.5-flash"
 
 previz:
-  model: "openai/gpt-image-1-mini"
+  model: "gemini/gemini-2.5-flash-image"
 
 # previz_review: adversarial check on previz's *output image*, not a
 # pipeline.md-numbered stage of its own -- see docs/decisions/0009-previz-
@@ -28,6 +30,16 @@ previz:
 
 previz_review:
   model: "anthropic/claude-sonnet-5"
+
+# video_generation: stage 9. Picked to unblock building the stage, not a
+# rigorously compared decision -- see docs/decisions/0010-video-generation-
+# model-and-standalone-stage.md. Uses the same OPENAI_API_KEY already
+# required for previz's image model; whether this OpenAI account actually
+# has Sora API access is unverified until a real run is tried. Veo (Google,
+# via Vertex AI) is a real candidate to compare against next, per that ADR.
+
+video_generation:
+  model: "openai/sora-2"
 
 # Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
 # stay as placeholders so the full pipeline vision in docs/pipeline.md still

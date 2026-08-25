@@ -57,6 +57,19 @@ def test_run_fact_check_stage_parses_valid_response_with_no_flags():
     assert result.flags == []
 
 
+def test_run_fact_check_stage_parses_response_wrapped_in_markdown_fence():
+    # Regression test: see test_research.py's equivalent -- observed for
+    # real that a model can wrap "respond with ONLY JSON" output in a
+    # ```json fence anyway.
+    result = run_fact_check_stage(
+        _sample_fact_sheet(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_completion('```json\n{"flags": []}\n```'),
+    )
+
+    assert result.flags == []
+
+
 def test_run_fact_check_stage_parses_flags():
     payload = {
         "flags": [

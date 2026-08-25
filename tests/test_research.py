@@ -49,6 +49,24 @@ def test_run_research_stage_parses_valid_response():
     assert fact_sheet.claims[0].names == ["Kitty Hawk"]
 
 
+def test_run_research_stage_parses_response_wrapped_in_markdown_fence():
+    # Regression test: observed for real against a live claude-sonnet-5
+    # call (during previz_review testing, same underlying prompt pattern)
+    # -- a model can wrap "respond with ONLY JSON" output in a ```json
+    # fence anyway. See historical_video_ai.json_utils.
+    payload = {"claims": []}
+
+    fact_sheet = run_research_stage(
+        "December 1903",
+        "Kitty Hawk, North Carolina",
+        "A man watches a flying machine lift off from the dunes.",
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_completion(f"```json\n{json.dumps(payload)}\n```"),
+    )
+
+    assert fact_sheet.claims == []
+
+
 def test_run_research_stage_raises_for_invalid_json():
     with pytest.raises(ResearchError, match="not valid JSON"):
         run_research_stage(
