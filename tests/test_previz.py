@@ -1,10 +1,15 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult
-from historical_video_ai.stages.previz import PrevizError, run_previz_stage
+from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
+from historical_video_ai.stages.previz import (
+    PrevizError,
+    run_previz_review_stage,
+    run_previz_stage,
+)
 from historical_video_ai.stages.research import Claim, FactSheet
 
 # A tiny valid 1x1 PNG, base64-encoded, so tests never touch a real API or
@@ -72,6 +77,24 @@ def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
     assert "undeveloped in 1903" in result.prompt_used
 
 
+def test_run_previz_stage_refuses_unresolved_premise_conflict(tmp_path):
+    result_with_conflict = FactCheckResult(
+        fact_sheet=_fact_check_result().fact_sheet,
+        premise_conflict=PremiseConflict(
+            explanation="Nothing like this existed at this time and place.",
+            suggested_alternative=None,
+        ),
+    )
+
+    with pytest.raises(PrevizError, match="historically impossible"):
+        run_previz_stage(
+            result_with_conflict,
+            model="openai/gpt-image-1-mini",
+            image_fn=_fake_image_fn(_TINY_PNG_B64),
+            output_dir=tmp_path,
+        )
+
+
 def test_run_previz_stage_raises_when_no_image_data(tmp_path):
     def _empty_image_fn(**kwargs):
         return SimpleNamespace(data=[])
@@ -95,3 +118,130 @@ def test_run_previz_stage_resolves_model_from_config_when_not_passed(tmp_path):
     run_previz_stage(_fact_check_result(), image_fn=_image_fn, output_dir=tmp_path)
 
     assert captured["model"] == get_stage_model("previz")
+
+
+def _write_tiny_png(tmp_path):
+    import base64
+
+    path = tmp_path / "previz.png"
+    path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+    return path
+
+
+def _fake_review_completion(content: str):
+    def _completion(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
+    return _completion
+
+
+def test_run_previz_review_stage_accepts(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    payload = {"accepted": True, "concern": None}
+
+    review = run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_review_completion(json.dumps(payload)),
+    )
+
+    assert review.accepted is True
+    assert review.concern is None
+
+
+def test_run_previz_review_stage_rejects_with_concern(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    payload = {"accepted": False, "concern": "Depicts a car that didn't exist yet."}
+
+    review = run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_review_completion(json.dumps(payload)),
+    )
+
+    assert review.accepted is False
+    assert review.concern == "Depicts a car that didn't exist yet."
+
+
+def test_run_previz_review_stage_raises_when_rejected_without_concern(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    payload = {"accepted": False}
+
+    with pytest.raises(PrevizError, match="missing 'concern'"):
+        run_previz_review_stage(
+            image_path,
+            _fact_check_result(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_review_completion(json.dumps(payload)),
+        )
+
+
+def test_run_previz_review_stage_raises_for_invalid_json(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+
+    with pytest.raises(PrevizError, match="not valid JSON"):
+        run_previz_review_stage(
+            image_path,
+            _fact_check_result(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_review_completion("not json"),
+        )
+
+
+def test_run_previz_review_stage_raises_for_non_bool_accepted(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    payload = {"accepted": "yes"}
+
+    with pytest.raises(PrevizError, match="must be true or false"):
+        run_previz_review_stage(
+            image_path,
+            _fact_check_result(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_review_completion(json.dumps(payload)),
+        )
+
+
+def test_run_previz_review_stage_sends_image_as_base64(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps({"accepted": True}))
+                )
+            ]
+        )
+
+    run_previz_review_stage(
+        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+    )
+
+    content = captured["messages"][0]["content"]
+    image_part = next(part for part in content if part["type"] == "image_url")
+    assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["model"] = kwargs["model"]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps({"accepted": True}))
+                )
+            ]
+        )
+
+    run_previz_review_stage(image_path, _fact_check_result(), completion_fn=_completion)
+
+    assert captured["model"] == get_stage_model("previz_review")

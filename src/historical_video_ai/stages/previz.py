@@ -19,6 +19,7 @@ and fact_check stages' real backends).
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,20 @@ class PrevizResult:
 
     image_path: Path
     prompt_used: str
+
+
+@dataclass(frozen=True)
+class PrevizReview:
+    """The result of an independent, adversarial pass over previz's
+    generated *image* -- not the text prompt, the actual pixels. See
+    docs/decisions/0009-previz-image-review.md: a hedged, accurate prompt
+    ("people believe a distant shape resembles X") can still produce an
+    image that unambiguously depicts X as literally, physically present --
+    a known failure mode of text-to-image models, which this stage exists
+    to catch rather than let through unreviewed."""
+
+    accepted: bool
+    concern: str | None
 
 
 def _build_prompt(fact_check_result: FactCheckResult) -> str:
@@ -80,9 +95,20 @@ def run_previz_stage(
     exists as an injection point for tests -- pass a fake to avoid making a
     real API call or writing a real file.
 
-    Raises PrevizError if the response doesn't contain image data in a
-    recognized shape, rather than silently producing an empty/broken file.
+    Raises PrevizError if fact_check_result still carries an unresolved
+    premise conflict (see docs/decisions/0008-refuse-impossible-premises.md
+    -- this pipeline refuses to depict a scene fact-check flagged as
+    historically impossible, rather than fabricate it) or if the response
+    doesn't contain image data in a recognized shape, rather than silently
+    producing an empty/broken file.
     """
+    if fact_check_result.premise_conflict is not None:
+        raise PrevizError(
+            "Refusing to generate an image: the scene's premise was flagged "
+            "as historically impossible and was never resolved -- "
+            f"{fact_check_result.premise_conflict.explanation}"
+        )
+
     resolved_model = model or get_stage_model("previz")
     prompt = _build_prompt(fact_check_result)
 
@@ -106,3 +132,103 @@ def run_previz_stage(
     image_path.write_bytes(base64.b64decode(b64))
 
     return PrevizResult(image_path=image_path, prompt_used=prompt)
+
+
+_REVIEW_PROMPT_TEMPLATE = """\
+You are independently reviewing a generated image against a historically \
+accurate scene description. Your job is to find reasons the IMAGE could be \
+WRONG -- specifically, does it depict anything that could not have existed \
+or happened at this time and place? This includes anachronistic objects or \
+technology, and an outright fictional or fantastical element shown as if \
+it's literally, physically present in the scene -- even if the text \
+description was appropriately hedged ("resembles", "believed to be"), a \
+generated image can still render that thing as unambiguously real, which \
+is exactly the failure mode you're checking for.
+
+Scene -- Time: {time} | Place: {place} | What happens: {description}
+
+Claims the image should be consistent with:
+{claims_block}
+
+Look at the image and respond with ONLY a JSON object (no prose, no \
+markdown fences) matching this exact shape:
+
+{{
+  "accepted": <true if the image is historically plausible given the scene and claims
+    above, false if it depicts something that could not have existed or happened>,
+  "concern": "<if accepted is false, specifically what's wrong with the image; null
+    if accepted is true>"
+}}
+"""
+
+
+def _parse_review(raw_content: str) -> PrevizReview:
+    try:
+        data = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        raise PrevizError(f"Previz review response was not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict) or "accepted" not in data:
+        raise PrevizError("Previz review response is missing 'accepted'")
+    accepted = data["accepted"]
+    if not isinstance(accepted, bool):
+        raise PrevizError(f"Previz review's 'accepted' must be true or false, got {accepted!r}")
+
+    concern = data.get("concern") if not accepted else None
+    if not accepted and not concern:
+        raise PrevizError("Previz review rejected the image but is missing 'concern'")
+
+    return PrevizReview(accepted=accepted, concern=concern)
+
+
+def run_previz_review_stage(
+    image_path: Path,
+    fact_check_result: FactCheckResult,
+    *,
+    model: str | None = None,
+    completion_fn: Callable = litellm.completion,
+) -> PrevizReview:
+    """Independently review a previz-generated image against the scene it
+    was supposed to depict -- an adversarial check on the actual image, not
+    just the text prompt (see docs/decisions/0009-previz-image-review.md,
+    and PrevizReview's docstring for why this is needed even when the
+    prompt itself was accurate).
+
+    `model` defaults to the pinned model for the "previz_review" stage in
+    config/models.yaml -- deliberately vision-capable and a different
+    provider than previz's own image model, same "not the same model
+    checking its own work" reasoning as fact_check vs. research.
+    `completion_fn` defaults to litellm.completion and exists as an
+    injection point for tests -- pass a fake to avoid a real API call.
+
+    Raises PrevizError if the model's response isn't valid JSON or is
+    missing required fields, matching this project's fail-loud convention.
+    """
+    resolved_model = model or get_stage_model("previz_review")
+    fact_sheet = fact_check_result.fact_sheet
+    detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
+    prompt = _REVIEW_PROMPT_TEMPLATE.format(
+        time=fact_sheet.time,
+        place=fact_sheet.place,
+        description=fact_sheet.description,
+        claims_block=detail_lines or "(no claims)",
+    )
+
+    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    response = completion_fn(
+        model=resolved_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    },
+                ],
+            }
+        ],
+    )
+    raw_content = response.choices[0].message.content
+    return _parse_review(raw_content)

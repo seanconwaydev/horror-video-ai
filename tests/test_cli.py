@@ -1,10 +1,21 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from historical_video_ai.cli import _load_fixture, _resolve_flags
-from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult
+from historical_video_ai.cli import (
+    _generate_previz_with_review,
+    _load_fixture,
+    _resolve_flags,
+    _resolve_premise_conflict,
+)
+from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
+
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def _write_fixture(tmp_path, **overrides):
@@ -78,6 +89,31 @@ def test_load_fixture_raises_for_empty_required_field(tmp_path, missing_field):
 
     with pytest.raises(ValueError, match=missing_field):
         _load_fixture(path)
+
+
+def test_load_fixture_reconstructs_premise_conflict(tmp_path):
+    path = _write_fixture(
+        tmp_path,
+        premise_conflict={
+            "explanation": "Nothing like this existed yet.",
+            "suggested_alternative": "A close, true version.",
+        },
+    )
+
+    result = _load_fixture(path)
+
+    assert result.premise_conflict == PremiseConflict(
+        explanation="Nothing like this existed yet.",
+        suggested_alternative="A close, true version.",
+    )
+
+
+def test_load_fixture_defaults_premise_conflict_to_none_when_absent(tmp_path):
+    path = _write_fixture(tmp_path)
+
+    result = _load_fixture(path)
+
+    assert result.premise_conflict is None
 
 
 def test_load_fixture_raises_when_flag_claim_text_does_not_match(tmp_path):
@@ -160,3 +196,236 @@ def test_resolve_flags_reprompts_on_invalid_action(monkeypatch):
     resolved = _resolve_flags(fact_sheet, flags)
 
     assert [c.text for c in resolved.claims] == ["Claim B"]
+
+
+def _fake_reverify_completion(fact_check_payload=None):
+    """Stand-in for a real research + fact-check re-verification pass: the
+    research call returns one clean claim, the fact-check call returns
+    fact_check_payload (defaulting to clean -- no flags, no conflict)."""
+
+    def _completion(**kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        if "Claims to check" in prompt:
+            content = json.dumps(fact_check_payload or {"flags": [], "premise_conflict": None})
+        else:
+            content = json.dumps(
+                {
+                    "claims": [
+                        {
+                            "text": "A newly researched claim for the corrected scene.",
+                            "source": "Some source",
+                            "date": None,
+                            "names": [],
+                        }
+                    ]
+                }
+            )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
+    return _completion
+
+
+def _premise_conflict_fact_check_result(suggested_alternative) -> FactCheckResult:
+    return FactCheckResult(
+        fact_sheet=_fact_sheet_with_two_claims(),
+        premise_conflict=PremiseConflict(
+            explanation="This depicts something that didn't exist yet.",
+            suggested_alternative=suggested_alternative,
+        ),
+    )
+
+
+def _resolve_premise_conflict_kwargs(completion_fn):
+    return {
+        "time": "December 1903",
+        "place": "Kitty Hawk, North Carolina",
+        "research_model": "anthropic/claude-sonnet-5",
+        "fact_check_model": "anthropic/claude-sonnet-5",
+        "completion_kwargs": {"completion_fn": completion_fn},
+    }
+
+
+def test_resolve_premise_conflict_returns_unchanged_when_no_conflict():
+    fact_sheet = _fact_sheet_with_two_claims()
+    fact_check_result = FactCheckResult(fact_sheet=fact_sheet)
+
+    result = _resolve_premise_conflict(
+        fact_sheet, fact_check_result, **_resolve_premise_conflict_kwargs(None)
+    )
+
+    assert result == (fact_sheet, fact_check_result)
+
+
+def test_resolve_premise_conflict_accepts_suggested_alternative_and_reverifies(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result("A close, true version of the scene.")
+    responses = iter(["y", "y"])  # use suggested alternative; proceed to fact-check on reverify
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(_fake_reverify_completion()),
+    )
+
+    assert result is not None
+    new_fact_sheet, new_fact_check_result = result
+    assert new_fact_sheet.description == "A close, true version of the scene."
+    assert new_fact_check_result.premise_conflict is None
+
+
+def test_resolve_premise_conflict_declines_alternative_and_provides_own(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+    responses = iter(["n", "y", "my own corrected description", "y"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(_fake_reverify_completion()),
+    )
+
+    assert result is not None
+    new_fact_sheet, _ = result
+    assert new_fact_sheet.description == "my own corrected description"
+
+
+def test_resolve_premise_conflict_no_alternative_provides_own(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result(None)
+    responses = iter(["y", "my own corrected description", "y"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(_fake_reverify_completion()),
+    )
+
+    assert result is not None
+    new_fact_sheet, _ = result
+    assert new_fact_sheet.description == "my own corrected description"
+
+
+def test_resolve_premise_conflict_declining_everything_stops(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+    responses = iter(["n", "n"])  # decline alternative, decline providing own
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(None),
+    )
+
+    assert result is None
+
+
+def test_resolve_premise_conflict_stops_if_reverify_still_conflicted(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+    responses = iter(["y", "y"])  # use alternative; proceed to fact-check on reverify
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    still_conflicted_payload = {
+        "flags": [],
+        "premise_conflict": {
+            "explanation": "Still impossible even with the corrected description.",
+            "suggested_alternative": None,
+        },
+    }
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(_fake_reverify_completion(still_conflicted_payload)),
+    )
+
+    assert result is None
+
+
+def _fact_check_result_for_previz() -> FactCheckResult:
+    return FactCheckResult(fact_sheet=_fact_sheet_with_two_claims())
+
+
+def _fake_image_fn(**kwargs):
+    return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+
+def _fake_review_completion(verdicts):
+    """verdicts: list of (accepted, concern) tuples, one per call, in order."""
+    responses = iter(verdicts)
+
+    def _completion(**kwargs):
+        accepted, concern = next(responses)
+        content = json.dumps({"accepted": accepted, "concern": concern})
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
+    return _completion
+
+
+def _generate_previz_with_review_kwargs(review_completion_fn, out_dir):
+    return {
+        "previz_model": "openai/gpt-image-1-mini",
+        "review_model": "anthropic/claude-sonnet-5",
+        "image_kwargs": {"image_fn": _fake_image_fn},
+        "review_kwargs": {"completion_fn": review_completion_fn},
+        "out_dir": out_dir,
+    }
+
+
+def test_generate_previz_with_review_accepts_on_first_attempt(tmp_path):
+    result, attempts = _generate_previz_with_review(
+        _fact_check_result_for_previz(),
+        **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
+    )
+
+    assert result is not None
+    assert result.image_path == tmp_path / "previz.png"
+    assert attempts == [{"attempt": 1, "accepted": True, "concern": None}]
+
+
+def test_generate_previz_with_review_retries_then_accepts(tmp_path):
+    verdicts = [(False, "Depicts something anachronistic."), (True, None)]
+
+    result, attempts = _generate_previz_with_review(
+        _fact_check_result_for_previz(),
+        **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
+    )
+
+    assert result is not None
+    assert result.image_path == tmp_path / "previz.png"
+    # the rejected first attempt was archived, not left at previz.png or lost
+    assert (tmp_path / "previz_attempt_1_rejected.png").exists()
+    assert [a["accepted"] for a in attempts] == [False, True]
+
+
+def test_generate_previz_with_review_gives_up_after_max_attempts(tmp_path):
+    verdicts = [(False, "Wrong.")] * 3
+
+    result, attempts = _generate_previz_with_review(
+        _fact_check_result_for_previz(),
+        **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
+    )
+
+    assert result is None
+    assert len(attempts) == 3
+    assert all(not a["accepted"] for a in attempts)
+    # every rejected attempt archived, no final previz.png left behind
+    for n in (1, 2, 3):
+        assert (tmp_path / f"previz_attempt_{n}_rejected.png").exists()
+    assert not (tmp_path / "previz.png").exists()
+
+
+def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatch):
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+    responses = iter(["y", "n"])  # use alternative; decline "proceed to fact-check" on reverify
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(_fake_reverify_completion()),
+    )
+
+    assert result is None
