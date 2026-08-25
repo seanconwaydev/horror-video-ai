@@ -40,7 +40,9 @@ run directory must already contain a completed previz result, and becomes
 one scene's anchor image + prompt (see docs/decisions/0010-video-generation-
 model-and-standalone-stage.md). Passing multiple directories generates one
 clip per directory. Combine with --mock to exercise the polling loop without
-a real API call.
+a real API call. --video-seconds requests a specific clip duration; see
+docs/decisions/0012-video-generation-duration.md for what's actually been
+confirmed to work against the real API.
 """
 
 from __future__ import annotations
@@ -475,7 +477,12 @@ def _load_previz_output(run_dir: Path) -> tuple[Path, str]:
 
 
 def _run_video_generation_only(
-    run_dirs: list[Path], *, mock: bool, out_dir: Path, video_model: str | None = None
+    run_dirs: list[Path],
+    *,
+    mock: bool,
+    out_dir: Path,
+    video_model: str | None = None,
+    video_seconds: str | None = None,
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
     already-completed previz outputs, skipping research, fact-check, and
@@ -498,6 +505,12 @@ def _run_video_generation_only(
     reason as `_generate_previz_with_review`'s `out_dir`) -- keeps this
     testable against a tmp_path instead of writing into the real project's
     outputs/ directory.
+
+    `video_seconds`, if given, requests that clip duration from the
+    provider (see run_video_generation_stage's own docstring and
+    docs/decisions/0012 for why this isn't validated client-side --
+    OpenAI's own docs disagree with each other about what's accepted).
+    Left as None, the stage's own default applies.
     """
     video_kwargs = (
         {
@@ -515,6 +528,7 @@ def _run_video_generation_only(
         "mode": "video_generation_only",
         "mock": mock,
         "video_generation_model": video_model,
+        "video_seconds_requested": video_seconds,
         "source_previz_runs": [str(d) for d in run_dirs],
         "scenes": [],
     }
@@ -531,15 +545,21 @@ def _run_video_generation_only(
             model=video_model,
             output_dir=out_dir,
             output_filename=f"video_scene_{i}.mp4",
+            **({"seconds": video_seconds} if video_seconds is not None else {}),
             **video_kwargs,
         )
-        print(f"Video saved to {result.video_path}")
+        print(
+            f"Video saved to {result.video_path} "
+            f"(requested {result.seconds_requested}s, provider reports {result.seconds_actual}s)"
+        )
         log["scenes"].append(
             {
                 "source_previz_run": str(run_dir),
                 "source_image_path": str(result.source_image_path),
                 "prompt_used": result.prompt_used,
                 "video_path": str(result.video_path),
+                "seconds_requested": result.seconds_requested,
+                "seconds_actual": result.seconds_actual,
             }
         )
         _write_log(out_dir, log)
@@ -583,6 +603,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--video-seconds",
+        help=(
+            "Requested clip duration in seconds, passed through to the "
+            "video_generation stage as-is (only used with --video-gen-from). "
+            "Not validated client-side -- OpenAI's own docs disagree with "
+            "each other about what's accepted above \"4\"/\"8\"/\"12\" (see "
+            "docs/decisions/0012). Defaults to the stage's own default if "
+            "not given."
+        ),
+    )
+    parser.add_argument(
         "--experiment-model",
         help=(
             "Override the pinned research + fact_check models for this run "
@@ -605,7 +636,12 @@ def main() -> None:
         load_environment()
 
     if args.video_gen_from:
-        _run_video_generation_only(args.video_gen_from, mock=args.mock, out_dir=_run_dir())
+        _run_video_generation_only(
+            args.video_gen_from,
+            mock=args.mock,
+            out_dir=_run_dir(),
+            video_seconds=args.video_seconds,
+        )
         return
 
     completion_kwargs = {"completion_fn": _mock_completion} if args.mock else {}
