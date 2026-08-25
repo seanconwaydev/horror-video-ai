@@ -113,6 +113,73 @@ def test_run_video_generation_stage_raises_when_aspect_ratio_too_different(tmp_p
         )
 
 
+def test_run_video_generation_stage_defaults_seconds_and_passes_it_through(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    captured = {}
+
+    def _video_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="job-1", status="completed", error=None, seconds="4")
+
+    result = run_video_generation_stage(
+        image_path,
+        "a prompt",
+        model="openai/sora-2",
+        video_fn=_video_fn,
+        status_fn=lambda **kw: None,
+        content_fn=lambda **kw: b"x",
+        sleep_fn=lambda _seconds: None,
+        output_dir=tmp_path,
+    )
+
+    assert captured["seconds"] == "4"
+    assert result.seconds_requested == "4"
+    assert result.seconds_actual == "4"
+
+
+def test_run_video_generation_stage_passes_explicit_seconds_through(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    captured = {}
+
+    def _video_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="job-1", status="completed", error=None, seconds="20")
+
+    result = run_video_generation_stage(
+        image_path,
+        "a prompt",
+        model="openai/sora-2",
+        seconds="20",
+        video_fn=_video_fn,
+        status_fn=lambda **kw: None,
+        content_fn=lambda **kw: b"x",
+        sleep_fn=lambda _seconds: None,
+        output_dir=tmp_path,
+    )
+
+    assert captured["seconds"] == "20"
+    assert result.seconds_requested == "20"
+    assert result.seconds_actual == "20"
+
+
+def test_run_video_generation_stage_seconds_actual_is_none_when_job_omits_it(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    video_fn, status_fn, content_fn = _immediate_job_fns()  # no `seconds` attr on the job
+
+    result = run_video_generation_stage(
+        image_path,
+        "a prompt",
+        model="openai/sora-2",
+        video_fn=video_fn,
+        status_fn=status_fn,
+        content_fn=content_fn,
+        sleep_fn=lambda _seconds: None,
+        output_dir=tmp_path,
+    )
+
+    assert result.seconds_actual is None
+
+
 def test_run_video_generation_stage_polls_until_completed(tmp_path):
     image_path = _write_fake_image(tmp_path)
     statuses = iter(["in_progress", "in_progress", "completed"])

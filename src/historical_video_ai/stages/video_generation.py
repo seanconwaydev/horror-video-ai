@@ -26,8 +26,18 @@ leaking into the request body) and this module's own comments on passing
 raw bytes instead of a Path (litellm's os.PathLike support for
 input_reference is broken) and resizing to Sora's exact required size
 (Sora rejects any reference image that doesn't pixel-match the requested
-`size`). What's still genuinely unverified is a full, successful, paid
-run all the way through to a downloaded video file.
+`size`). A full, successful, paid run through to a downloaded video file
+has since been confirmed for real.
+
+Duration note: OpenAI's own docs disagree with each other on what `seconds`
+accepts -- the API reference documents a strict `"4"`/`"8"`/`"12"` enum,
+the guide separately claims support up to 20 seconds. Resolved by testing
+against the real API, not by reading further: `seconds="20"` was requested
+and the completed job's own `seconds` field confirmed a real 20-second
+clip was delivered, not silently clamped. The guide was right; the
+reference page's enum is stale or incomplete. See docs/decisions/0012 for
+the full comparison, including the measured effect of duration on
+generation time.
 """
 
 from __future__ import annotations
@@ -81,11 +91,19 @@ class VideoGenerationResult:
     """The reviewable artifact stage 9 produces: the video clip itself,
     plus the prompt and reference image actually used to generate it (so a
     human spot-checking it, per docs/pipeline.md's stage 9 review gate, can
-    see what was asked for, not just what came back)."""
+    see what was asked for, not just what came back).
+
+    `seconds_requested`/`seconds_actual` record what duration was asked
+    for vs. what the provider's completed job object actually reports
+    (`seconds_actual` is None if the job object doesn't expose it) -- see
+    docs/decisions/0012 for why this is worth recording rather than
+    assuming the two always match."""
 
     video_path: Path
     prompt_used: str
     source_image_path: Path
+    seconds_requested: str
+    seconds_actual: str | None
 
 
 def _resize_reference_image(image_bytes: bytes, target_size: tuple[int, int]) -> bytes:
@@ -126,11 +144,20 @@ def _resize_reference_image(image_bytes: bytes, target_size: tuple[int, int]) ->
         return buffer.getvalue()
 
 
+# Sora's own documented-consistent default (its API reference's `seconds`
+# enum lists "4" as the default) -- used when the caller doesn't ask for a
+# specific duration. See docs/decisions/0012 for what longer durations
+# actually do against the real API, given OpenAI's own docs disagree with
+# each other about what's allowed above this.
+_DEFAULT_VIDEO_SECONDS = "4"
+
+
 def run_video_generation_stage(
     image_path: Path,
     prompt: str,
     *,
     model: str | None = None,
+    seconds: str = _DEFAULT_VIDEO_SECONDS,
     video_fn: Callable = litellm.video_generation,
     status_fn: Callable = litellm.video_status,
     content_fn: Callable = litellm.video_content,
@@ -143,7 +170,12 @@ def run_video_generation_stage(
     """Generate one video clip from a single reference image and prompt.
 
     `model` defaults to the pinned model for the "video_generation" stage in
-    config/models.yaml. `video_fn`/`status_fn`/`content_fn` default to
+    config/models.yaml. `seconds` requests a clip duration -- passed through
+    to the provider as-is, not validated here, since OpenAI's own docs
+    disagree with each other about what values above "4"/"8"/"12" are
+    actually accepted (see this module's docstring and docs/decisions/0012).
+    A value the provider rejects surfaces as a normal API error, same as any
+    other bad parameter. `video_fn`/`status_fn`/`content_fn` default to
     litellm's video_generation/video_status/video_content and exist as
     injection points for tests -- pass fakes to avoid a real API call, real
     waiting, or writing a real file. `sleep_fn` defaults to time.sleep for
@@ -189,6 +221,7 @@ def run_video_generation_stage(
         prompt=prompt,
         input_reference=resized_image_bytes,
         size=_TARGET_VIDEO_SIZE_STR,
+        seconds=seconds,
     )
     job_id = getattr(job, "id", None)
     if not job_id:
@@ -224,5 +257,9 @@ def run_video_generation_stage(
     video_path.write_bytes(video_bytes)
 
     return VideoGenerationResult(
-        video_path=video_path, prompt_used=prompt, source_image_path=image_path
+        video_path=video_path,
+        prompt_used=prompt,
+        source_image_path=image_path,
+        seconds_requested=seconds,
+        seconds_actual=getattr(job, "seconds", None),
     )
