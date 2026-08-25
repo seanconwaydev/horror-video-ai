@@ -18,6 +18,17 @@ fact_check:
 previz:
   model: "openai/gpt-image-1-mini"
 
+# previz_review: adversarial check on previz's *output image*, not a
+# pipeline.md-numbered stage of its own -- see docs/decisions/0009-previz-
+# image-review.md. Vision-capable, deliberately a different provider than
+# previz's own OpenAI image model, same "not the same model checking its
+# own work" reasoning as fact_check vs. research (0007). Picked the same
+# way previz's own model was in 0007 -- to unblock building this, not a
+# rigorously compared decision.
+
+previz_review:
+  model: "anthropic/claude-sonnet-5"
+
 # Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
 # stay as placeholders so the full pipeline vision in docs/pipeline.md still
 # has a config slot waiting for it. Untouched, still "anthropic/claude-sonnet-5"

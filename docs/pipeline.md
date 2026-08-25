@@ -50,6 +50,8 @@ This is the key cost-control stage — the spend gate shown in the architecture 
 
 This stage does double duty: the approved still isn't just a review artifact, it becomes the reference image fed into the video model's image-to-video generation for that scene (assuming the chosen video model supports image conditioning — this should be a requirement when selecting a video model, since it gives tighter continuity between what you approved and what actually renders, rather than the video model reinterpreting the text prompt from scratch).
 
+Before you ever see a still, it gets one automated adversarial pass: an independent model reviews the *generated image itself* — not just the text prompt that produced it — for anything depicting something that couldn't have existed or happened at this time and place. This exists because a hedged, accurate prompt ("a shape that resembles X") can still produce an image showing X as unambiguously, literally present — a known unreliability of text-to-image generation, not something prompt wording alone reliably prevents (see [decisions/0009](./decisions/0009-previz-image-review.md)). A rejected image is regenerated, capped at a small fixed number of attempts; if every attempt is rejected, no image is produced for that scene rather than handing over one known to be wrong.
+
 **Review gate:** you approve the full storyboard, scene by scene. Nothing proceeds to video generation until this gate is cleared. This is the hard stop before any expensive spend.
 
 ### 9. Video generation

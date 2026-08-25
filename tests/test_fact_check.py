@@ -11,6 +11,16 @@ from historical_video_ai.stages.fact_check import (
 from historical_video_ai.stages.research import Claim, FactSheet
 
 
+def _premise_conflict_payload(explanation: str, suggested_alternative):
+    return {
+        "flags": [],
+        "premise_conflict": {
+            "explanation": explanation,
+            "suggested_alternative": suggested_alternative,
+        },
+    }
+
+
 def _fake_completion(content: str):
     def _completion(**kwargs):
         return SimpleNamespace(
@@ -123,6 +133,70 @@ def test_run_fact_check_stage_raises_when_claim_text_does_not_match():
     }
 
     with pytest.raises(FactCheckError, match="doesn't exactly match any claim"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_fact_check_stage_parses_null_premise_conflict():
+    result = run_fact_check_stage(
+        _sample_fact_sheet(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_completion(json.dumps({"flags": [], "premise_conflict": None})),
+    )
+
+    assert result.premise_conflict is None
+
+
+def test_run_fact_check_stage_parses_premise_conflict_with_alternative():
+    payload = _premise_conflict_payload(
+        "The scene depicts a technology that didn't exist yet.",
+        "A close, historically plausible version of the scene.",
+    )
+
+    result = run_fact_check_stage(
+        _sample_fact_sheet(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert result.premise_conflict.explanation == "The scene depicts a technology that didn't exist yet."
+    assert (
+        result.premise_conflict.suggested_alternative
+        == "A close, historically plausible version of the scene."
+    )
+
+
+def test_run_fact_check_stage_parses_premise_conflict_with_no_alternative():
+    payload = _premise_conflict_payload("Nothing like this could have happened.", None)
+
+    result = run_fact_check_stage(
+        _sample_fact_sheet(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert result.premise_conflict.explanation == "Nothing like this could have happened."
+    assert result.premise_conflict.suggested_alternative is None
+
+
+def test_run_fact_check_stage_raises_when_premise_conflict_missing_explanation():
+    payload = {"flags": [], "premise_conflict": {"suggested_alternative": None}}
+
+    with pytest.raises(FactCheckError, match="missing 'explanation'"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_fact_check_stage_raises_when_suggested_alternative_not_string():
+    payload = _premise_conflict_payload("Impossible.", 42)
+
+    with pytest.raises(FactCheckError, match="must be a string or null"):
         run_fact_check_stage(
             _sample_fact_sheet(),
             model="anthropic/claude-sonnet-5",

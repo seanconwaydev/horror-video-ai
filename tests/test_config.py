@@ -76,6 +76,7 @@ def test_real_project_config_is_valid():
         "research",
         "fact_check",
         "previz",
+        "previz_review",
         "narrative",
         "narrative_review",
         "shot_list",
