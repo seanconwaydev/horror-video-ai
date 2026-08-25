@@ -51,7 +51,7 @@ import argparse
 import dataclasses
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -70,9 +70,21 @@ from historical_video_ai.stages.previz import (
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
 from historical_video_ai.stages.video_generation import run_video_generation_stage
 
+# 90x160 (Sora's exact 9:16 target ratio, tiny for speed) rather than a
+# bare 1x1 pixel -- video_generation's aspect-ratio guard (docs/decisions
+# /0011) genuinely opens and checks this image even in --mock mode (only
+# the litellm-facing calls are mocked, not local image processing), so a
+# 1x1 image used to fail --mock --video-gen-from with a real
+# VideoGenerationError instead of exercising the mock path.
 _MOCK_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAFoAAACgCAIAAAADw+wqAAABOUlEQVR4nO3SsQ3AMBAD"
+    "sY/339mpYvgyA1mpPuiZ2cNnnYUcf94RcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfI"
+    "EXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFy"
+    "hBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQc"
+    "IUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFH"
+    "yBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gR"
+    "coQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gxtxdJIAI/Sl4X"
+    "NwAAAABJRU5ErkJggg=="
 )
 
 
@@ -385,7 +397,7 @@ def _project_root() -> Path:
 
 
 def _run_dir() -> Path:
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     d = _project_root() / "outputs" / f"run_{run_id}"
     d.mkdir(parents=True, exist_ok=True)
     return d

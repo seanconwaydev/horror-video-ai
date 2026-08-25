@@ -19,15 +19,18 @@ reaches a terminal state, and video_content() fetches the finished bytes.
 
 Known-working, not just unverified-and-hoped-for: getting a real Sora-2
 call to succeed took two rounds of direct reproduction against real (if
-unpaid) requests, each surfacing a genuine litellm bug or a genuine API
-requirement, not a mistake in this module -- see
-_litellm_workarounds.py's video-generation workaround (internal params
-leaking into the request body) and this module's own comments on passing
-raw bytes instead of a Path (litellm's os.PathLike support for
-input_reference is broken) and resizing to Sora's exact required size
-(Sora rejects any reference image that doesn't pixel-match the requested
-`size`). A full, successful, paid run through to a downloaded video file
-has since been confirmed for real.
+unpaid) requests, each surfacing a genuine litellm bug, not a mistake in
+this module. One (litellm's own internal implementation details leaking
+into the request body) was worked around temporarily and the workaround
+has since been deleted -- see docs/decisions/0013-python-3.11-upgrade.md:
+upgrading to Python 3.11 unblocked the real litellm release (1.98.0) that
+fixes it for real, verified by direct reproduction before the workaround
+was removed, not assumed. The other (litellm's os.PathLike support for
+input_reference being broken) and Sora's exact-size requirement for the
+reference image are still handled directly in this module's own code
+(see comments below), since they're this project's own call-shape
+choices, not something an upstream fix resolves. A full, successful,
+paid run through to a downloaded video file has been confirmed for real.
 
 Duration note: OpenAI's own docs disagree with each other on what `seconds`
 accepts -- the API reference documents a strict `"4"`/`"8"`/`"12"` enum,
@@ -51,7 +54,6 @@ from pathlib import Path
 import litellm
 from PIL import Image
 
-from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
 
 # Sora-2 only accepts two fixed sizes (720x1280 portrait or 1280x720

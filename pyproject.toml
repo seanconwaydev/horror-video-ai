@@ -2,7 +2,7 @@
 name = "historical-video-ai"
 version = "0.1.0"
 description = "AI pipeline for generating historical educational YouTube videos, stage by stage with human review gates."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "litellm",
     "pyyaml",
