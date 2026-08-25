@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 
 import litellm
 
-from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.json_utils import strip_markdown_json_fence
 from historical_video_ai.stages.research import Claim, FactSheet
