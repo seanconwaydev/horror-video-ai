@@ -63,6 +63,15 @@ overwritten, so the reason it was rejected has something to point at.
 to 4 real API calls per scene (research, fact-check, and up to 3
 generate+review previz round trips) instead of 3.
 
+As of this writing, `run_previz_review_stage` has **not** been exercised
+against a live key from this repo -- `ANTHROPIC_API_KEY` was never set
+during development, so the vision-input call shape (litellm.completion()
+with a text block + an image_url block) is unverified. Confirmed working
+during development: `run_previz_stage` (real OpenAI image generation) and
+the premise-conflict flow (real DeepSeek research + fact-check, including
+the automatic re-verification pass). Treat the first real
+`run_previz_review_stage` call as a test, not a known-working thing.
+
 Explicitly out of scope: this only checks the image for depicting something
 *impossible*, not general image quality, composition, or whether it's a
 good match for the mood/tone of the scene -- those stay entirely a human

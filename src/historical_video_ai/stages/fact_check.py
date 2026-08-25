@@ -27,6 +27,7 @@ import litellm
 
 from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
+from historical_video_ai.json_utils import strip_markdown_json_fence
 from historical_video_ai.stages.research import Claim, FactSheet
 
 
@@ -232,7 +233,7 @@ def run_fact_check_stage(
     )
     raw_content = response.choices[0].message.content
     try:
-        data = json.loads(raw_content)
+        data = json.loads(strip_markdown_json_fence(raw_content))
     except json.JSONDecodeError as exc:
         raise FactCheckError(f"Fact-check stage response was not valid JSON: {exc}") from exc
     if not isinstance(data, dict) or "flags" not in data:

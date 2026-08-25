@@ -52,4 +52,65 @@ def _fix_message_forward_ref() -> None:
     litellm_types_utils.Message.model_rebuild(force=True)
 
 
+def _fix_video_generation_internal_params_leak() -> None:
+    """WORKAROUND(no upstream issue found as of 2026-08-25 -- see note
+    below): litellm.video_generation() builds a `local_vars = locals()`
+    snapshot of its own function scope (prompt, model, input_reference,
+    timeout, kwargs, etc.), later merges the decorator-injected `kwargs`
+    into it (`local_vars.update(kwargs)`), and passes that whole blob to
+    VideoGenerationRequestUtils.get_requested_video_generation_optional_param()
+    to compute the request's "optional params". That function only strips
+    litellm's own named internal params (via filter_out_litellm_params) --
+    it has no way to know `local_vars` (which, after the update, nests a
+    copy of itself) and `_is_async` are video_generation()'s own
+    implementation details, not real request fields. Both leak straight
+    through into the actual HTTP request body sent to the provider. For
+    OpenAI's videos endpoint (multipart/form-data, since an image is
+    attached) this fails outright: httpx's multipart encoder rejects
+    `local_vars`'s dict value with "Invalid type for value. Expected
+    primitive type, got <class 'dict'>" before any network call is even
+    made -- confirmed via direct reproduction, not just seen once in a live
+    run. Root-caused and reproduced in this project on 2026-08-25 while
+    building the video_generation stage; a directed search (GitHub issues,
+    PRs, and the relevant file's commit history) turned up nothing already
+    describing this specific leak, so this may be worth filing upstream --
+    that's your call, not something to do without asking, since it's a
+    public action under your account.
+
+    Verified 2026-08-25: no released litellm version fixes this on this
+    project's Python 3.10 (`.python-version`) -- 1.98.0 and the newest
+    published pre-release (1.99.0rc1) do fix the underlying leak (checked
+    by direct reproduction, bypassing the network, in isolated venvs), but
+    both are unrelated-ly broken on Python 3.10: they unconditionally
+    `from typing import NotRequired`, which doesn't exist before Python
+    3.11, so litellm fails to import at all. Effectively no usable released
+    fix exists for this project's environment, meeting this project's own
+    bar (CLAUDE.md's "Known upstream workarounds") for a workaround here
+    rather than an upgrade.
+    """
+    import litellm.videos.utils as litellm_video_utils
+
+    _LEAKED_INTERNAL_KEYS = ("local_vars", "_is_async")
+
+    original = litellm_video_utils.VideoGenerationRequestUtils.get_requested_video_generation_optional_param
+
+    # Self-deactivating: if upstream's own filtering already drops these
+    # keys (i.e. the bug is fixed), this probe call -- pure, no I/O, no
+    # network -- comes back clean and there's nothing to patch.
+    probe = original({"local_vars": {"marker": True}, "prompt": "p"})
+    if not any(key in probe for key in _LEAKED_INTERNAL_KEYS):
+        return
+
+    def _patched(params):
+        result = original(params)
+        for key in _LEAKED_INTERNAL_KEYS:
+            result.pop(key, None)
+        return result
+
+    litellm_video_utils.VideoGenerationRequestUtils.get_requested_video_generation_optional_param = (
+        staticmethod(_patched)
+    )
+
+
 _fix_message_forward_ref()
+_fix_video_generation_internal_params_leak()

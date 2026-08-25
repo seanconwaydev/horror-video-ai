@@ -21,6 +21,7 @@ import litellm
 
 from historical_video_ai import _litellm_workarounds  # noqa: F401 -- see CLAUDE.md
 from historical_video_ai.config import get_stage_model
+from historical_video_ai.json_utils import strip_markdown_json_fence
 
 
 class ResearchError(Exception):
@@ -89,7 +90,7 @@ exact shape:
 
 def _parse_claims(raw_content: str) -> list[Claim]:
     try:
-        data = json.loads(raw_content)
+        data = json.loads(strip_markdown_json_fence(raw_content))
     except json.JSONDecodeError as exc:
         raise ResearchError(f"Research stage response was not valid JSON: {exc}") from exc
 
