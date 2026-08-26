@@ -102,7 +102,11 @@ def _build_prompt(fact_check_result: FactCheckResult) -> str:
         f"Place: {fact_sheet.place}. A generic, unnamed person (third "
         f"person, not a specific named historical figure unless stated) "
         f"{fact_sheet.description}\n\n"
-        f"Accuracy details to reflect in the image:\n{detail_lines}"
+        f"Research claims about this place (these span its whole history, "
+        f"not just the moment above -- some describe the place at other "
+        f"times, e.g. a modern renovation or a technology from a different "
+        f"era, and must NOT appear in the image if they don't hold at "
+        f"{fact_sheet.time} specifically):\n{detail_lines}"
     )
 
 
