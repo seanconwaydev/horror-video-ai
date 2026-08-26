@@ -20,7 +20,8 @@ Flags:
   video into its source run_dir and appending to that run's existing log.
 - `--video-seconds`: requests a clip duration (docs/decisions/0012).
 - `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
-  every fact-check flag (docs/decisions/0017).
+  an "uncertain" fact-check flag, but stops the run on a "contradicted"
+  one rather than auto-accepting it (docs/decisions/0017, 0019).
 """
 
 from __future__ import annotations
@@ -163,17 +164,33 @@ def _prompt_if_missing(value: str | None, label: str, *, auto_yes: bool = False)
 
 def _resolve_flags(
     fact_sheet: FactSheet, flags: list[ClaimFlag], *, auto_yes: bool = False
-) -> FactSheet:
+) -> FactSheet | None:
     """Give the human the final say on each fact-check flag -- accept the
     claim as-is, cut it, or soften its wording (docs/pipeline.md stage 3
     review gate). Returns fact_sheet unchanged if there are no flags.
 
-    `auto_yes` (--yes) always accepts every flag as-is -- never auto-cuts
-    or auto-softens, since rewriting claim text isn't a safe default
-    without a human actually reading the concern.
+    `auto_yes` (--yes) auto-accepts an "uncertain" flag (a soft doubt, no
+    competing claim) but refuses to auto-accept a "contradicted" one (fact-
+    check asserting a specific competing fact) -- returns None to stop the
+    run instead, same as --yes already does for an unresolved premise
+    conflict (docs/decisions/0019). Auto-cut/auto-soften remain unsafe
+    defaults for the reason they always were -- rewriting or dropping claim
+    text isn't a call --yes can make without a human reading the concern --
+    and blind-accepting a claim fact-check specifically flagged as wrong is
+    the same kind of unsafe call in the other direction.
     """
     if not flags:
         return fact_sheet
+
+    if auto_yes:
+        contradicted = [f for f in flags if f.severity == "contradicted"]
+        if contradicted:
+            print("\n--yes won't auto-accept a contradicted fact-check flag:")
+            for flag in contradicted:
+                print(f"\nClaim: {flag.claim_text}")
+                print(f"Flag [contradicted]: {flag.concern}")
+            print("\nStopping -- rerun without --yes to review this claim.")
+            return None
 
     claims_by_text = {c.text: c for c in fact_sheet.claims}
     resolved_claims = list(fact_sheet.claims)
@@ -229,6 +246,7 @@ def _run_research_and_fact_check(
     completion_kwargs: dict,
     on_research_completed: Callable[[FactSheet], None] | None = None,
     auto_yes: bool = False,
+    fact_sheet: FactSheet | None = None,
 ) -> tuple[FactSheet, FactCheckResult] | None:
     """Run research then fact-check for real, pausing for the research
     review gate. Returns None if the human declines to proceed past
@@ -239,15 +257,25 @@ def _run_research_and_fact_check(
     right after it succeeds -- *before* fact-check runs, which can itself
     fail. Without this, a fact-check crash lost a real, already-paid-for
     research result with no way to recover it via --fixture (docs/decisions/0015).
+
+    `fact_sheet`, if given, skips the research call entirely and jumps
+    straight to fact-check against it -- used to resume a fixture whose
+    fact-check crashed before it ever completed (a research-only fixture,
+    per docs/decisions/0015).
     """
-    print(f"\n--- research (model: {research_model}) ---")
-    fact_sheet = run_research_stage(
-        time, place, description, model=research_model, **completion_kwargs
-    )
-    for c in fact_sheet.claims:
-        print(f"- {c.text} [source: {c.source}]")
-    if on_research_completed is not None:
-        on_research_completed(fact_sheet)
+    if fact_sheet is None:
+        print(f"\n--- research (model: {research_model}) ---")
+        fact_sheet = run_research_stage(
+            time, place, description, model=research_model, **completion_kwargs
+        )
+        for c in fact_sheet.claims:
+            print(f"- {c.text} [source: {c.source}]")
+        if on_research_completed is not None:
+            on_research_completed(fact_sheet)
+    else:
+        print("\n--- research (loaded from fixture) ---")
+        for c in fact_sheet.claims:
+            print(f"- {c.text} [source: {c.source}]")
     if not _confirm("\nProceed to fact-check with this research?", auto_yes=auto_yes):
         return None
 
@@ -465,27 +493,43 @@ def _write_log(out_dir: Path, log: dict) -> None:
     (out_dir / "run_log.json").write_text(json.dumps(log, indent=2, default=str))
 
 
-def _load_fixture(path: Path) -> FactCheckResult:
-    """Reconstruct a real FactSheet + FactCheckResult from a previously
-    saved run_log.json (or anything matching its shape), so research and
-    fact-check don't need to run -- and cost nothing -- again.
+def _load_fact_sheet_from_fixture(path: Path) -> FactSheet:
+    """Reconstruct just the FactSheet (time/place/description/claims) from
+    a saved run_log.json -- the part every fixture has, whether or not
+    fact-check ever ran against it (docs/decisions/0015 persists research
+    before fact-check, so a run that crashed at fact-check still has a
+    usable fixture here, just not a full one -- see `_load_fixture`).
 
-    Raises FileNotFoundError / KeyError as-is if the fixture is missing or
-    malformed, rather than silently degrading into an empty scene. Also
-    raises ValueError if time/place/description are missing or empty --
-    they're required (docs/decisions/0006) whether the scene came from a
-    live prompt or a fixture file."""
+    Raises ValueError if time/place/description are missing or empty
+    (docs/decisions/0006), and KeyError as-is if research_claims is absent.
+    """
     data = json.loads(path.read_text())
     for required_field in ("time", "place", "description"):
         if not data.get(required_field):
             raise ValueError(f"Fixture {path} is missing a non-empty '{required_field}'")
     claims = [Claim(**c) for c in data["research_claims"]]
-    fact_sheet = FactSheet(
+    return FactSheet(
         time=data["time"],
         place=data["place"],
         description=data["description"],
         claims=claims,
     )
+
+
+def _load_fixture(path: Path) -> FactCheckResult:
+    """Reconstruct a real FactSheet + FactCheckResult from a previously
+    saved run_log.json (or anything matching its shape), so research and
+    fact-check don't need to run -- and cost nothing -- again. Requires the
+    fixture to have a completed fact-check result already (a
+    `fact_check_flags` key) -- for a fixture that only has research so
+    far, use `_load_fact_sheet_from_fixture` and run fact-check for real.
+
+    Raises FileNotFoundError / KeyError as-is if the fixture is missing or
+    malformed, rather than silently degrading into an empty scene.
+    """
+    data = json.loads(path.read_text())
+    fact_sheet = _load_fact_sheet_from_fixture(path)
+    claims = fact_sheet.claims
     flags = [ClaimFlag(**f) for f in data["fact_check_flags"]]
 
     # Same invariant fact_check.py's _parse_flags enforces on a live model
@@ -716,8 +760,16 @@ def main() -> None:
     fact_check_model = args.experiment_model or get_stage_model("fact_check")
 
     if args.fixture:
-        fact_check_result = _load_fixture(args.fixture)
-        fact_sheet = fact_check_result.fact_sheet
+        # A fixture saved after a fact-check-stage crash has research but
+        # no fact_check_flags key yet (docs/decisions/0015 persists
+        # research before fact-check runs) -- that's a real, valid,
+        # cheaper-to-resume case, not a malformed fixture: run fact-check
+        # for real against the loaded research instead of requiring a full
+        # fixture. `_load_fixture` needs a completed fact-check result;
+        # peek at the raw fixture first to tell which case this is.
+        has_fact_check = "fact_check_flags" in json.loads(args.fixture.read_text())
+
+        fact_sheet = _load_fact_sheet_from_fixture(args.fixture)
         time, place, description = fact_sheet.time, fact_sheet.place, fact_sheet.description
         # Computed here, not before the scene is known -- see _run_dir's
         # docstring on why the directory name now carries a content hint,
@@ -726,16 +778,35 @@ def main() -> None:
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
 
-        print(f"\n--- research (loaded from fixture: {args.fixture}) ---")
-        for c in fact_sheet.claims:
-            print(f"- {c.text} [source: {c.source}]")
+        if has_fact_check:
+            fact_check_result = _load_fixture(args.fixture)
+            print(f"\n--- research (loaded from fixture: {args.fixture}) ---")
+            for c in fact_sheet.claims:
+                print(f"- {c.text} [source: {c.source}]")
 
-        print("\n--- fact-check (loaded from fixture) ---")
-        if fact_check_result.flags:
-            for f in fact_check_result.flags:
-                print(f"- [{f.severity}] {f.claim_text} -- {f.concern}")
+            print("\n--- fact-check (loaded from fixture) ---")
+            if fact_check_result.flags:
+                for f in fact_check_result.flags:
+                    print(f"- [{f.severity}] {f.claim_text} -- {f.concern}")
+            else:
+                print("No issues flagged.")
         else:
-            print("No issues flagged.")
+            print(f"\nFixture {args.fixture} has research but no completed fact-check -- running fact-check for real against it.")
+            result = _run_research_and_fact_check(
+                time,
+                place,
+                description,
+                research_model=research_model,
+                fact_check_model=fact_check_model,
+                completion_kwargs=completion_kwargs,
+                auto_yes=args.yes,
+                fact_sheet=fact_sheet,
+            )
+            if result is None:
+                _write_log(out_dir, log)
+                print(f"Stopped by user. Run artifacts saved in {out_dir}")
+                return
+            fact_sheet, fact_check_result = result
     else:
         time = _prompt_if_missing(args.time, "Time", auto_yes=args.yes)
         place = _prompt_if_missing(args.place, "Place", auto_yes=args.yes)
@@ -801,6 +872,11 @@ def main() -> None:
     _write_log(out_dir, log)
 
     resolved_fact_sheet = _resolve_flags(fact_sheet, fact_check_result.flags, auto_yes=args.yes)
+    if resolved_fact_sheet is None:
+        log["stopped_reason"] = "contradicted_flag_unresolved"
+        _write_log(out_dir, log)
+        print(f"Stopped. Run artifacts saved in {out_dir}")
+        return
     fact_check_result = dataclasses.replace(fact_check_result, fact_sheet=resolved_fact_sheet)
     log["research_claims"] = [dataclasses.asdict(c) for c in resolved_fact_sheet.claims]
     _write_log(out_dir, log)
