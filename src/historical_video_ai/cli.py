@@ -1,53 +1,26 @@
 """Interactive CLI entry point for the v1 pipeline: collects a scene
 (time, place, description), runs it through research -> fact-check ->
-previz, showing each stage's output and pausing for confirmation before
-continuing (except previz, which just runs and ends).
+previz (docs/decisions/0006). Run with `uv run historical-video-ai`.
 
-See docs/decisions/0006-narrow-v1-scope-single-image.md for why the
-pipeline is scoped this way. Run with `uv run historical-video-ai` (or
-`uv run python -m historical_video_ai.cli`).
+Refuses rather than fabricates in two cases: fact-check flagging the
+scene's premise as historically impossible (docs/decisions/0008,
+_resolve_premise_conflict -- offers a suggested alternative or your own
+corrected description, re-verified before continuing), and previz's own
+generated image failing independent review (docs/decisions/0009,
+_generate_previz_with_review -- regenerates blind up to
+_MAX_PREVIZ_ATTEMPTS times, then gives up).
 
-If fact-check flags the scene's own premise as historically impossible --
-not a single claim being wrong, but the requested scene depicting something
-that couldn't have existed or happened yet -- this pipeline refuses to
-generate an image of it as asked. See docs/decisions/0008-refuse-impossible-
-premises.md and _resolve_premise_conflict: you're offered a suggested
-historically-plausible alternative (if one exists), or can supply your own
-corrected description, which gets freshly re-verified before continuing;
-declining both stops the run.
-
-previz's *image* also gets independently reviewed before you see it -- a
-hedged, accurate text prompt can still produce an image that unambiguously
-depicts something impossible (see docs/decisions/0009-previz-image-review.md
-and PrevizReview's docstring). A rejected image is regenerated blind, no
-prompt rewriting between attempts, up to _MAX_PREVIZ_ATTEMPTS times; giving
-up after that stops the run with no image produced, same "refuse rather
-than fabricate" principle as the premise-conflict check.
-
-Two ways to avoid paying for research/fact-check on every iteration:
-- `--mock`: no network calls, no API keys at all -- synthetic placeholder
-  data for every stage. Good for exercising pipeline mechanics only.
-- `--fixture <path>`: replays a previously captured *real* research +
-  fact-check result (same shape this file already writes to run_log.json),
-  skipping those two API calls entirely while still running previz for
-  real. Use this once you've found a research output worth reusing --
-  see tests/fixtures/. Combine with --mock for fully offline iteration on
-  real historical claims with a zero-cost previz too.
-
-`--video-gen-from <run_dir> [<run_dir> ...]` runs stage 9 (video generation)
-standalone, skipping research, fact-check, and previz entirely: each given
-run directory must already contain a completed previz result, and becomes
-one scene's anchor image + prompt (see docs/decisions/0010-video-generation-
-model-and-standalone-stage.md). Passing multiple directories generates one
-clip per directory. Each video is written directly into its source
-run_dir (as video_<timestamp>.mp4, alongside that scene's own previz.png)
-rather than a separate new folder, and that run's existing run_log.json
-gets a "videos" entry appended rather than a new log file -- a scene's
-whole history (research through every video attempt) stays in one place.
-Combine with --mock to exercise the polling loop without a real API call.
---video-seconds requests a specific clip duration; see docs/decisions/
-0012-video-generation-duration.md for what's actually been confirmed to
-work against the real API.
+Flags:
+- `--mock`: no network calls, no API keys -- synthetic data for every stage.
+- `--fixture <path>`: replays a captured real research+fact-check result,
+  skipping those API calls while still running previz for real -- see
+  tests/fixtures/. Combine with --mock for a fully offline previz too.
+- `--video-gen-from <run_dir> [...]`: runs stage 9 standalone against one
+  or more completed previz outputs (docs/decisions/0010), writing each
+  video into its source run_dir and appending to that run's existing log.
+- `--video-seconds`: requests a clip duration (docs/decisions/0012).
+- `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
+  every fact-check flag (docs/decisions/0017).
 """
 
 from __future__ import annotations
@@ -94,7 +67,7 @@ _MOCK_PNG_B64 = (
 )
 
 
-def _mock_completion(**kwargs):
+def _mock_completion(**kwargs: object) -> SimpleNamespace:
     """No network call, no API key -- returns a plausible-shaped fake so
     the pipeline's mechanics (ordering, confirm-loop, run logging) can be
     exercised without cost or credentials. Used only with --mock."""
@@ -117,18 +90,18 @@ def _mock_completion(**kwargs):
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
-def _mock_image(**kwargs):
+def _mock_image(**kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
 
 
-def _mock_review_completion(**kwargs):
+def _mock_review_completion(**kwargs: object) -> SimpleNamespace:
     """No network call, no API key -- always accepts, so --mock exercises
     the previz-review loop's mechanics without cost or credentials."""
     content = json.dumps({"accepted": True, "concern": None})
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
-def _mock_video_generation(**kwargs):
+def _mock_video_generation(**kwargs: object) -> SimpleNamespace:
     """No network call, no API key -- returns a job already 'completed', so
     --video-gen-from --mock exercises the polling loop's mechanics (it just
     skips the loop entirely, since the job is terminal on creation) without
@@ -136,11 +109,11 @@ def _mock_video_generation(**kwargs):
     return SimpleNamespace(id="mock-video-id", status="completed", error=None)
 
 
-def _mock_video_status(**kwargs):
+def _mock_video_status(**kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(id="mock-video-id", status="completed", error=None)
 
 
-def _mock_video_content(**kwargs):
+def _mock_video_content(**kwargs: object) -> bytes:
     return b"[MOCK] not a real video file"
 
 
@@ -192,12 +165,8 @@ def _resolve_flags(
     fact_sheet: FactSheet, flags: list[ClaimFlag], *, auto_yes: bool = False
 ) -> FactSheet:
     """Give the human the final say on each fact-check flag -- accept the
-    claim as-is, cut it, or soften its wording -- per docs/pipeline.md's
-    stage 3 review gate. Previously nothing did this: previz silently
-    auto-excluded "contradicted" claims (unreliably -- see fact_check.py's
-    claim_text validation) and left "uncertain" ones untouched either way,
-    with no way to override either outcome. Returns fact_sheet unchanged if
-    there are no flags to resolve.
+    claim as-is, cut it, or soften its wording (docs/pipeline.md stage 3
+    review gate). Returns fact_sheet unchanged if there are no flags.
 
     `auto_yes` (--yes) always accepts every flag as-is -- never auto-cuts
     or auto-softens, since rewriting claim text isn't a safe default
@@ -261,21 +230,15 @@ def _run_research_and_fact_check(
     on_research_completed: Callable[[FactSheet], None] | None = None,
     auto_yes: bool = False,
 ) -> tuple[FactSheet, FactCheckResult] | None:
-    """Run research then fact-check for real, printing progress and pausing
-    for the research review gate. Returns None if the human declines to
-    proceed past research. Shared so a premise-conflict correction (see
-    _resolve_premise_conflict) can re-run this exact sequence on a
-    corrected description, rather than duplicating it.
+    """Run research then fact-check for real, pausing for the research
+    review gate. Returns None if the human declines to proceed past
+    research. Shared so a premise-conflict correction
+    (_resolve_premise_conflict) can re-run this on a corrected description.
 
     `on_research_completed`, if given, is called with the research output
     right after it succeeds -- *before* fact-check runs, which can itself
-    fail (a real, observed case: fact-check's own response-parsing
-    crashing on a malformed flag). Without this, main()'s run_log.json only
-    recorded research_claims after fact-check also completed, so a
-    fact-check-stage crash lost a real, already-paid-for research result
-    with no way to recover it via --fixture -- the same gap previz's
-    on_image_generated hook (see _generate_previz_with_review) closed for
-    previz images.
+    fail. Without this, a fact-check crash lost a real, already-paid-for
+    research result with no way to recover it via --fixture (docs/decisions/0015).
     """
     print(f"\n--- research (model: {research_model}) ---")
     fact_sheet = run_research_stage(
@@ -311,22 +274,17 @@ def _resolve_premise_conflict(
     on_research_completed: Callable[[FactSheet], None] | None = None,
     auto_yes: bool = False,
 ) -> tuple[FactSheet, FactCheckResult] | None:
-    """Per docs/decisions/0008-refuse-impossible-premises.md: if fact-check
-    flagged the scene's own premise as historically impossible, push back
-    instead of silently proceeding (previz would refuse anyway -- see its
-    PrevizError check -- but that's a last-resort safety net, not a
-    substitute for actually asking). Offers the suggested alternative if
-    there is one, or lets the human supply their own corrected description,
-    then re-verifies it for real with one fresh research + fact-check pass
-    (per your call: correcting the premise re-runs research rather than
-    reusing the old claims, since they were shaped by the original,
-    impossible premise).
+    """If fact-check flagged the scene's own premise as historically
+    impossible (docs/decisions/0008), push back instead of silently
+    proceeding -- previz would refuse anyway, but that's a last-resort
+    safety net, not a substitute for asking. Offers the suggested
+    alternative, or lets the human supply their own, then re-verifies with
+    one fresh research + fact-check pass (correcting the premise re-runs
+    research rather than reusing claims shaped by the old, impossible one).
 
     Returns the resolved (fact_sheet, fact_check_result) pair, or None if
-    the human chose to stop. Only re-verifies once -- if the corrected
-    description still has an unresolved premise conflict, that's reported
-    and treated as a stop rather than looping indefinitely; try a fresh run
-    instead.
+    the human stopped. Only re-verifies once -- a still-conflicted
+    corrected description is treated as a stop, not a retry loop.
     """
     conflict = fact_check_result.premise_conflict
     if conflict is None:
@@ -396,29 +354,17 @@ def _generate_previz_with_review(
     on_image_generated: Callable[[PrevizResult], None] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate previz's image, then have an independent pass review the
-    actual image -- not just the text prompt -- against the scene (see
-    docs/decisions/0009-previz-image-review.md). On rejection, regenerates
-    blind: no prompt rewriting between attempts, per your call to avoid
-    that rabbit hole in favor of a hard cap (_MAX_PREVIZ_ATTEMPTS).
+    actual image against the scene (docs/decisions/0009). On rejection,
+    regenerates blind (no prompt rewriting), capped at _MAX_PREVIZ_ATTEMPTS.
 
-    Returns (accepted PrevizResult, attempt log) once accepted, or
-    (None, attempt log) if every attempt was rejected -- giving up rather
-    than looping indefinitely, same principle as _resolve_premise_conflict.
-    A rejected attempt's image is archived as previz_attempt_<n>_rejected
-    .png (rather than silently overwritten by the next attempt) so the
-    reason it was rejected has something to point at.
+    Returns (accepted PrevizResult, attempt log), or (None, attempt log)
+    if every attempt was rejected. A rejected attempt's image is archived
+    as previz_attempt_<n>_rejected.png rather than overwritten.
 
     `on_image_generated`, if given, is called with each attempt's
-    PrevizResult right after the image is written -- *before* the review
-    call, which can itself fail (a real, observed case: previz_review's
-    model raising an auth error on a missing API key). Without this,
-    main()'s run_log.json only recorded previz_image_path/prompt_used after
-    this whole function returned, which meant a review-stage crash left a
-    real, already-generated (and already paid for) image on disk with no
-    record of it in the log -- exactly the gap --video-gen-from's
-    _load_previz_output depends on not having. Hooking in here instead of
-    writing the log directly keeps this function's only concern generation
-    + review, not log-file format.
+    PrevizResult right after the image is written -- *before* review runs,
+    which can itself fail. Without this, a review-stage crash left a real,
+    already-paid-for image on disk with no record of it in the log.
     """
     attempts: list[dict] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
@@ -564,18 +510,14 @@ def _load_fixture(path: Path) -> FactCheckResult:
 
 
 def _load_previz_output(run_dir: Path) -> tuple[Path, str]:
-    """Load a previously generated previz image and the prompt used to
-    produce it from an existing run's run_log.json, so --video-gen-from can
-    run stage 9 standalone against real previz output instead of requiring
-    a fresh research -> fact-check -> previz pass every time. Reuses the
-    run_log.json this file already writes rather than inventing a separate
-    manifest format for (image, prompt) pairs -- see
-    docs/decisions/0010-video-generation-model-and-standalone-stage.md.
+    """Load a previously generated previz image and its prompt from an
+    existing run's run_log.json, so --video-gen-from can run stage 9
+    standalone instead of requiring a fresh research/fact-check/previz
+    pass every time (docs/decisions/0010).
 
-    Raises FileNotFoundError if run_dir has no run_log.json, or if the
-    image path it references no longer exists on disk, and ValueError if
-    the log doesn't show a completed previz result -- fails loud rather
-    than silently treating an incomplete or stale run as usable input.
+    Raises FileNotFoundError if run_dir has no run_log.json or the image
+    it references no longer exists, and ValueError if the log doesn't show
+    a completed previz result.
     """
     log_path = run_dir / "run_log.json"
     if not log_path.exists():
@@ -608,46 +550,22 @@ def _run_video_generation_only(
     video_seconds: str | None = None,
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
-    already-completed previz outputs, skipping research, fact-check, and
-    previz entirely for this invocation. Each run_dir becomes one scene's
-    anchor image + prompt -- multiple directories today stands in for the
-    future multi-scene case, where each approved shot becomes its own
-    image-to-video job. See docs/decisions/0010-video-generation-model-and-
-    standalone-stage.md.
+    already-completed previz outputs, skipping research/fact-check/previz
+    for this invocation (docs/decisions/0010). Each run_dir is one scene's
+    anchor image + prompt; blocks and polls each to completion before
+    starting the next (0010's v1 choice, not the SQS fan-out named for
+    this stage in 0004). Lets VideoGenerationError propagate uncaught,
+    same fail-loud convention as every other stage.
 
-    Blocks and polls each job to completion before starting the next --
-    0010's v1 choice, not the SQS fan-out already named for this stage in
-    docs/decisions/0004 for when there's real multi-scene volume to justify
-    a queue.
+    `video_seconds`, if given, requests that duration (see 0012 for why
+    it's not validated client-side).
 
-    Lets VideoGenerationError propagate uncaught on failure, same
-    fail-loud convention as every other stage -- this doesn't try to
-    continue past a failed scene and finish the rest.
-
-    `video_seconds`, if given, requests that clip duration from the
-    provider (see run_video_generation_stage's own docstring and
-    docs/decisions/0012 for why this isn't validated client-side --
-    OpenAI's own docs disagree with each other about what's accepted).
-    Left as None, the stage's own default applies.
-
-    Each video is written directly into its source run_dir (as
-    `video_<timestamp>.mp4`) rather than into a new directory -- an
-    earlier version copied the previz image into a freshly-created output
-    folder instead, but that meant duplicating the image on disk for every
-    video attempt, for no real benefit over just writing the video where
-    the image already lives. `run_dir` doubles as `output_dir`; no
-    separate parameter is needed for tests to redirect it away from the
-    real project's outputs/ directory the way `_generate_previz_with_
-    review`'s `out_dir` does, since callers already pass a tmp_path-based
-    run_dir in tests. Each video gets a fresh UTC-timestamped filename
-    (not a fixed `video_scene_<n>.mp4`) so re-running this against the
-    same previz output -- e.g. trying a different `--video-seconds` --
-    accumulates videos side by side instead of overwriting the last one.
-
-    The scene's own run_log.json (already holding its research, fact-check,
-    and previz history) gets a `"videos"` list appended to -- one entry per
-    attempt -- rather than this writing a separate log file, so a scene's
-    entire history lives in the one file, in the one folder.
+    Each video is written directly into its source run_dir as
+    `video_<timestamp>.mp4` -- the timestamp avoids collisions when
+    re-running against the same previz output (e.g. a different
+    duration), and the scene's existing run_log.json gets a `"videos"`
+    list appended to rather than a separate log file, so one folder holds
+    a scene's whole history.
     """
     video_kwargs = (
         {
