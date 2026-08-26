@@ -14,8 +14,11 @@
 research:
   model: "perplexity/sonar-deep-research"
 
+# gemini-2.5-flash was retired by Google (real 404: "no longer available
+# to new users") -- moved to gemini-3.6-flash, Google's own suggested
+# replacement, verified working. See docs/decisions/0018.
 fact_check:
-  model: "gemini/gemini-2.5-flash"
+  model: "gemini/gemini-3.6-flash"
 
 previz:
   model: "gemini/gemini-2.5-flash-image"
