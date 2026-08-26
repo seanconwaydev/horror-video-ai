@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import litellm
 import pytest
 
 from historical_video_ai.config import get_stage_model
@@ -138,6 +139,68 @@ def test_run_previz_stage_resolves_model_from_config_when_not_passed(tmp_path):
     run_previz_stage(_fact_check_result(), image_fn=_image_fn, output_dir=tmp_path)
 
     assert captured["model"] == get_stage_model("previz")
+
+
+def test_run_previz_stage_retries_on_transient_error_then_succeeds(tmp_path):
+    calls = {"n": 0}
+
+    def _flaky_image_fn(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise litellm.exceptions.ServiceUnavailableError(
+                message="simulated 503", llm_provider="gemini", model="gemini-2.5-flash-image"
+            )
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    retries_seen = []
+    result = run_previz_stage(
+        _fact_check_result(),
+        image_fn=_flaky_image_fn,
+        output_dir=tmp_path,
+        sleep_fn=lambda _seconds: None,
+        on_transient_retry=lambda n, exc: retries_seen.append((n, type(exc).__name__)),
+    )
+
+    assert result.image_path.exists()
+    assert calls["n"] == 3
+    assert retries_seen == [(1, "ServiceUnavailableError"), (2, "ServiceUnavailableError")]
+
+
+def test_run_previz_stage_raises_after_exhausting_transient_retries(tmp_path):
+    def _always_503(**kwargs):
+        raise litellm.exceptions.ServiceUnavailableError(
+            message="simulated 503", llm_provider="gemini", model="gemini-2.5-flash-image"
+        )
+
+    with pytest.raises(litellm.exceptions.ServiceUnavailableError):
+        run_previz_stage(
+            _fact_check_result(),
+            image_fn=_always_503,
+            output_dir=tmp_path,
+            sleep_fn=lambda _seconds: None,
+        )
+
+
+def test_run_previz_stage_does_not_retry_non_transient_errors(tmp_path):
+    # A real content rejection or bad request will fail the identical way
+    # on a retry -- only errors judged transient get retried.
+    calls = {"n": 0}
+
+    def _auth_error(**kwargs):
+        calls["n"] += 1
+        raise litellm.exceptions.AuthenticationError(
+            message="bad key", llm_provider="gemini", model="gemini-2.5-flash-image"
+        )
+
+    with pytest.raises(litellm.exceptions.AuthenticationError):
+        run_previz_stage(
+            _fact_check_result(),
+            image_fn=_auth_error,
+            output_dir=tmp_path,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert calls["n"] == 1
 
 
 def _write_tiny_png(tmp_path):

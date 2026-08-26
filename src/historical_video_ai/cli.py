@@ -39,10 +39,15 @@ standalone, skipping research, fact-check, and previz entirely: each given
 run directory must already contain a completed previz result, and becomes
 one scene's anchor image + prompt (see docs/decisions/0010-video-generation-
 model-and-standalone-stage.md). Passing multiple directories generates one
-clip per directory. Combine with --mock to exercise the polling loop without
-a real API call. --video-seconds requests a specific clip duration; see
-docs/decisions/0012-video-generation-duration.md for what's actually been
-confirmed to work against the real API.
+clip per directory. Each video is written directly into its source
+run_dir (as video_<timestamp>.mp4, alongside that scene's own previz.png)
+rather than a separate new folder, and that run's existing run_log.json
+gets a "videos" entry appended rather than a new log file -- a scene's
+whole history (research through every video attempt) stays in one place.
+Combine with --mock to exercise the polling loop without a real API call.
+--video-seconds requests a specific clip duration; see docs/decisions/
+0012-video-generation-duration.md for what's actually been confirmed to
+work against the real API.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -143,7 +149,14 @@ def _mock_video_content(**kwargs):
 _MAX_PREVIZ_ATTEMPTS = 3
 
 
-def _confirm(prompt: str) -> bool:
+def _confirm(prompt: str, *, auto_yes: bool = False) -> bool:
+    """`auto_yes` (--yes) answers every confirm prompt as yes without
+    calling input() at all -- see docs/decisions/0017-non-interactive-mode.md.
+    Prints the prompt either way, so a run's transcript still shows every
+    decision point even when nothing was actually typed."""
+    if auto_yes:
+        print(f"{prompt} [y/n]: y (--yes)")
+        return True
     while True:
         answer = input(f"{prompt} [y/n]: ").strip().lower()
         if answer in ("y", "yes"):
@@ -153,25 +166,43 @@ def _confirm(prompt: str) -> bool:
         print("Please answer y or n.")
 
 
-def _prompt_if_missing(value: str | None, label: str) -> str:
+def _prompt_if_missing(value: str | None, label: str, *, auto_yes: bool = False) -> str:
     """time/place/description are all required (docs/decisions/0006) --
     loop until a non-empty value is given, printing an explicit error on
     every empty attempt (whether it came in empty via a CLI flag or was
-    left blank at the prompt) rather than silently re-prompting."""
+    left blank at the prompt) rather than silently re-prompting.
+
+    `auto_yes` (--yes) can't answer a free-text field -- there's nothing
+    sensible to guess -- so a missing value under --yes raises instead of
+    blocking on input(), which would just hang (or crash with EOFError)
+    in a genuinely non-interactive context anyway.
+    """
+    if not value and auto_yes:
+        raise ValueError(
+            f"{label} is required and cannot be empty -- --yes can't answer this "
+            "for you, pass it explicitly as a flag."
+        )
     while not value:
         print(f"Error: {label} is required and cannot be empty.")
         value = input(f"{label}: ").strip()
     return value
 
 
-def _resolve_flags(fact_sheet: FactSheet, flags: list[ClaimFlag]) -> FactSheet:
+def _resolve_flags(
+    fact_sheet: FactSheet, flags: list[ClaimFlag], *, auto_yes: bool = False
+) -> FactSheet:
     """Give the human the final say on each fact-check flag -- accept the
     claim as-is, cut it, or soften its wording -- per docs/pipeline.md's
     stage 3 review gate. Previously nothing did this: previz silently
     auto-excluded "contradicted" claims (unreliably -- see fact_check.py's
     claim_text validation) and left "uncertain" ones untouched either way,
     with no way to override either outcome. Returns fact_sheet unchanged if
-    there are no flags to resolve."""
+    there are no flags to resolve.
+
+    `auto_yes` (--yes) always accepts every flag as-is -- never auto-cuts
+    or auto-softens, since rewriting claim text isn't a safe default
+    without a human actually reading the concern.
+    """
     if not flags:
         return fact_sheet
 
@@ -183,6 +214,9 @@ def _resolve_flags(fact_sheet: FactSheet, flags: list[ClaimFlag]) -> FactSheet:
         claim = claims_by_text[flag.claim_text]
         print(f"\nClaim: {claim.text}")
         print(f"Flag [{flag.severity}]: {flag.concern}")
+        if auto_yes:
+            print("(a)ccept / (c)ut / (s)often this claim? [a/c/s]: a (--yes)")
+            continue
         action = ""
         while action not in ("a", "c", "s"):
             action = input("(a)ccept / (c)ut / (s)often this claim? [a/c/s]: ").strip().lower()
@@ -201,6 +235,21 @@ def _resolve_flags(fact_sheet: FactSheet, flags: list[ClaimFlag]) -> FactSheet:
     return dataclasses.replace(fact_sheet, claims=resolved_claims)
 
 
+def _record_research_claims(
+    fact_sheet: FactSheet, *, research_model: str, out_dir: Path, log: dict
+) -> None:
+    """Persist research's output to `log` immediately -- used as
+    `_run_research_and_fact_check`'s `on_research_completed` callback, from
+    both of its call sites in `main()` (the initial pass and a premise-
+    conflict re-verification pass), so a fact-check-stage crash right
+    after either one doesn't lose the research it would otherwise have
+    recorded. See docs/decisions/0015-persist-research-before-fact-check.md.
+    """
+    log["research_model"] = research_model
+    log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
+    _write_log(out_dir, log)
+
+
 def _run_research_and_fact_check(
     time: str,
     place: str,
@@ -209,19 +258,34 @@ def _run_research_and_fact_check(
     research_model: str,
     fact_check_model: str,
     completion_kwargs: dict,
+    on_research_completed: Callable[[FactSheet], None] | None = None,
+    auto_yes: bool = False,
 ) -> tuple[FactSheet, FactCheckResult] | None:
     """Run research then fact-check for real, printing progress and pausing
     for the research review gate. Returns None if the human declines to
     proceed past research. Shared so a premise-conflict correction (see
     _resolve_premise_conflict) can re-run this exact sequence on a
-    corrected description, rather than duplicating it."""
+    corrected description, rather than duplicating it.
+
+    `on_research_completed`, if given, is called with the research output
+    right after it succeeds -- *before* fact-check runs, which can itself
+    fail (a real, observed case: fact-check's own response-parsing
+    crashing on a malformed flag). Without this, main()'s run_log.json only
+    recorded research_claims after fact-check also completed, so a
+    fact-check-stage crash lost a real, already-paid-for research result
+    with no way to recover it via --fixture -- the same gap previz's
+    on_image_generated hook (see _generate_previz_with_review) closed for
+    previz images.
+    """
     print(f"\n--- research (model: {research_model}) ---")
     fact_sheet = run_research_stage(
         time, place, description, model=research_model, **completion_kwargs
     )
     for c in fact_sheet.claims:
         print(f"- {c.text} [source: {c.source}]")
-    if not _confirm("\nProceed to fact-check with this research?"):
+    if on_research_completed is not None:
+        on_research_completed(fact_sheet)
+    if not _confirm("\nProceed to fact-check with this research?", auto_yes=auto_yes):
         return None
 
     print(f"\n--- fact-check (model: {fact_check_model}) ---")
@@ -244,6 +308,8 @@ def _resolve_premise_conflict(
     research_model: str,
     fact_check_model: str,
     completion_kwargs: dict,
+    on_research_completed: Callable[[FactSheet], None] | None = None,
+    auto_yes: bool = False,
 ) -> tuple[FactSheet, FactCheckResult] | None:
     """Per docs/decisions/0008-refuse-impossible-premises.md: if fact-check
     flagged the scene's own premise as historically impossible, push back
@@ -271,12 +337,20 @@ def _resolve_premise_conflict(
     new_description: str | None = None
     if conflict.suggested_alternative:
         print(f"Closest historically plausible version: {conflict.suggested_alternative}")
-        if _confirm("Use this instead?"):
+        if _confirm("Use this instead?", auto_yes=auto_yes):
             new_description = conflict.suggested_alternative
     else:
         print("No reasonably close, historically plausible version of this scene was found.")
 
     if new_description is None:
+        if auto_yes:
+            # Nothing sensible to auto-supply for a free-text corrected
+            # description -- stop cleanly rather than guess one.
+            print(
+                "Stopping -- --yes can't supply a corrected description for an "
+                "unresolved premise conflict with no suggested alternative."
+            )
+            return None
         if _confirm("Provide your own corrected description instead?"):
             new_description = _prompt_if_missing(None, "Corrected description")
         else:
@@ -291,6 +365,8 @@ def _resolve_premise_conflict(
         research_model=research_model,
         fact_check_model=fact_check_model,
         completion_kwargs=completion_kwargs,
+        on_research_completed=on_research_completed,
+        auto_yes=auto_yes,
     )
     if result is None:
         print("Stopping -- declined to proceed past research on the corrected description.")
@@ -348,7 +424,13 @@ def _generate_previz_with_review(
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
         print(f"\n--- previz (model: {previz_model}, attempt {attempt}/{_MAX_PREVIZ_ATTEMPTS}) ---")
         previz_result = run_previz_stage(
-            fact_check_result, model=previz_model, output_dir=out_dir, **image_kwargs
+            fact_check_result,
+            model=previz_model,
+            output_dir=out_dir,
+            on_transient_retry=lambda n, exc: print(
+                f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+            ),
+            **image_kwargs,
         )
         print(f"Image saved to {previz_result.image_path}")
         if on_image_generated is not None:
@@ -382,6 +464,27 @@ def _generate_previz_with_review(
     return None, attempts
 
 
+def _slugify(text: str, max_length: int = 40) -> str:
+    """Turn free text into a short, filesystem-safe fragment for a run
+    directory name -- lowercase, every run of non-alphanumeric characters
+    collapsed to a single hyphen, trimmed to `max_length` without cutting
+    a word in half where a hyphen boundary is nearby, and hyphens stripped
+    from both ends.
+
+    Returns "" if nothing usable remains (empty input, or input that's
+    entirely punctuation) -- callers should treat an empty slug as "no
+    context available" rather than tack on a trailing separator with
+    nothing after it.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if len(slug) <= max_length:
+        return slug
+    truncated = slug[:max_length]
+    if "-" in truncated:
+        truncated = truncated.rsplit("-", 1)[0]
+    return truncated
+
+
 def _project_root() -> Path:
     """Walk up from this file looking for pyproject.toml, so outputs/
     always lands in the same place regardless of the directory the command
@@ -396,9 +499,18 @@ def _project_root() -> Path:
     return here.parents[2]  # fallback: src/historical_video_ai/cli.py -> repo root
 
 
-def _run_dir() -> Path:
+def _run_dir(slug: str | None = None) -> Path:
+    """Create (and return) this run's output directory, named
+    `run_<timestamp>` or `run_<timestamp>_<slug>` if `slug` is given and
+    non-empty. The timestamp alone told you *when* a run happened but
+    nothing about *what* it was -- telling scenes apart meant opening
+    run_log.json in each candidate folder. `slug` should already be a
+    filesystem-safe fragment (see `_slugify`) -- this function doesn't
+    sanitize it itself, so callers building one from free text must slugify
+    it first."""
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    d = _project_root() / "outputs" / f"run_{run_id}"
+    dir_name = f"run_{run_id}_{slug}" if slug else f"run_{run_id}"
+    d = _project_root() / "outputs" / dir_name
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -492,7 +604,6 @@ def _run_video_generation_only(
     run_dirs: list[Path],
     *,
     mock: bool,
-    out_dir: Path,
     video_model: str | None = None,
     video_seconds: str | None = None,
 ) -> None:
@@ -513,16 +624,30 @@ def _run_video_generation_only(
     fail-loud convention as every other stage -- this doesn't try to
     continue past a failed scene and finish the rest.
 
-    `out_dir` is a required parameter rather than computed here (same
-    reason as `_generate_previz_with_review`'s `out_dir`) -- keeps this
-    testable against a tmp_path instead of writing into the real project's
-    outputs/ directory.
-
     `video_seconds`, if given, requests that clip duration from the
     provider (see run_video_generation_stage's own docstring and
     docs/decisions/0012 for why this isn't validated client-side --
     OpenAI's own docs disagree with each other about what's accepted).
     Left as None, the stage's own default applies.
+
+    Each video is written directly into its source run_dir (as
+    `video_<timestamp>.mp4`) rather than into a new directory -- an
+    earlier version copied the previz image into a freshly-created output
+    folder instead, but that meant duplicating the image on disk for every
+    video attempt, for no real benefit over just writing the video where
+    the image already lives. `run_dir` doubles as `output_dir`; no
+    separate parameter is needed for tests to redirect it away from the
+    real project's outputs/ directory the way `_generate_previz_with_
+    review`'s `out_dir` does, since callers already pass a tmp_path-based
+    run_dir in tests. Each video gets a fresh UTC-timestamped filename
+    (not a fixed `video_scene_<n>.mp4`) so re-running this against the
+    same previz output -- e.g. trying a different `--video-seconds` --
+    accumulates videos side by side instead of overwriting the last one.
+
+    The scene's own run_log.json (already holding its research, fact-check,
+    and previz history) gets a `"videos"` list appended to -- one entry per
+    attempt -- rather than this writing a separate log file, so a scene's
+    entire history lives in the one file, in the one folder.
     """
     video_kwargs = (
         {
@@ -536,27 +661,24 @@ def _run_video_generation_only(
     )
 
     video_model = video_model or get_stage_model("video_generation")
-    log = {
-        "mode": "video_generation_only",
-        "mock": mock,
-        "video_generation_model": video_model,
-        "video_seconds_requested": video_seconds,
-        "source_previz_runs": [str(d) for d in run_dirs],
-        "scenes": [],
-    }
-    _write_log(out_dir, log)
 
     for i, run_dir in enumerate(run_dirs, start=1):
         print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
         image_path, prompt = _load_previz_output(run_dir)
         print(f"Source: {run_dir} (image: {image_path})")
 
+        # Microsecond precision, not just seconds -- two attempts against
+        # the same previz output (e.g. comparing --video-seconds values)
+        # can easily land in the same second, and a filename collision
+        # would silently overwrite the earlier video instead of
+        # accumulating both.
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
         result = run_video_generation_stage(
             image_path,
             prompt,
             model=video_model,
-            output_dir=out_dir,
-            output_filename=f"video_scene_{i}.mp4",
+            output_dir=run_dir,
+            output_filename=f"video_{timestamp}.mp4",
             **({"seconds": video_seconds} if video_seconds is not None else {}),
             **video_kwargs,
         )
@@ -564,19 +686,21 @@ def _run_video_generation_only(
             f"Video saved to {result.video_path} "
             f"(requested {result.seconds_requested}s, provider reports {result.seconds_actual}s)"
         )
-        log["scenes"].append(
+
+        log_path = run_dir / "run_log.json"
+        log = json.loads(log_path.read_text())
+        log.setdefault("videos", []).append(
             {
-                "source_previz_run": str(run_dir),
-                "source_image_path": str(result.source_image_path),
-                "prompt_used": result.prompt_used,
+                "video_generation_model": video_model,
                 "video_path": str(result.video_path),
                 "seconds_requested": result.seconds_requested,
                 "seconds_actual": result.seconds_actual,
+                "mock": mock,
             }
         )
-        _write_log(out_dir, log)
+        log_path.write_text(json.dumps(log, indent=2, default=str))
 
-    print(f"\nDone. Run artifacts saved in {out_dir}")
+    print("\nDone.")
 
 
 def main() -> None:
@@ -590,6 +714,17 @@ def main() -> None:
         "--mock",
         action="store_true",
         help="No network calls, no API keys -- exercise the pipeline's mechanics only.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "Non-interactive: auto-confirm every 'Proceed?' prompt and "
+            "auto-accept every fact-check flag as-is (never auto-cut or "
+            "auto-soften). --time/--place/--description must be given as "
+            "flags in this mode -- there's nothing sensible to prompt for "
+            "interactively. See docs/decisions/0017-non-interactive-mode.md."
+        ),
     )
     parser.add_argument(
         "--fixture",
@@ -651,7 +786,6 @@ def main() -> None:
         _run_video_generation_only(
             args.video_gen_from,
             mock=args.mock,
-            out_dir=_run_dir(),
             video_seconds=args.video_seconds,
         )
         return
@@ -663,12 +797,14 @@ def main() -> None:
     research_model = args.experiment_model or get_stage_model("research")
     fact_check_model = args.experiment_model or get_stage_model("fact_check")
 
-    out_dir = _run_dir()
-
     if args.fixture:
         fact_check_result = _load_fixture(args.fixture)
         fact_sheet = fact_check_result.fact_sheet
         time, place, description = fact_sheet.time, fact_sheet.place, fact_sheet.description
+        # Computed here, not before the scene is known -- see _run_dir's
+        # docstring on why the directory name now carries a content hint,
+        # not just a timestamp.
+        out_dir = _run_dir(_slugify(description))
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
 
@@ -683,9 +819,12 @@ def main() -> None:
         else:
             print("No issues flagged.")
     else:
-        time = _prompt_if_missing(args.time, "Time")
-        place = _prompt_if_missing(args.place, "Place")
-        description = _prompt_if_missing(args.description, "What the main character does")
+        time = _prompt_if_missing(args.time, "Time", auto_yes=args.yes)
+        place = _prompt_if_missing(args.place, "Place", auto_yes=args.yes)
+        description = _prompt_if_missing(
+            args.description, "What the main character does", auto_yes=args.yes
+        )
+        out_dir = _run_dir(_slugify(description))
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
 
         result = _run_research_and_fact_check(
@@ -695,6 +834,10 @@ def main() -> None:
             research_model=research_model,
             fact_check_model=fact_check_model,
             completion_kwargs=completion_kwargs,
+            auto_yes=args.yes,
+            on_research_completed=lambda fs: _record_research_claims(
+                fs, research_model=research_model, out_dir=out_dir, log=log
+            ),
         )
         if result is None:
             _write_log(out_dir, log)
@@ -720,6 +863,10 @@ def main() -> None:
         research_model=research_model,
         fact_check_model=fact_check_model,
         completion_kwargs=completion_kwargs,
+        auto_yes=args.yes,
+        on_research_completed=lambda fs: _record_research_claims(
+            fs, research_model=research_model, out_dir=out_dir, log=log
+        ),
     )
     if resolved is None:
         log["stopped_reason"] = "premise_conflict_unresolved"
@@ -735,12 +882,12 @@ def main() -> None:
     log["fact_check_flags"] = [dataclasses.asdict(f) for f in fact_check_result.flags]
     _write_log(out_dir, log)
 
-    resolved_fact_sheet = _resolve_flags(fact_sheet, fact_check_result.flags)
+    resolved_fact_sheet = _resolve_flags(fact_sheet, fact_check_result.flags, auto_yes=args.yes)
     fact_check_result = dataclasses.replace(fact_check_result, fact_sheet=resolved_fact_sheet)
     log["research_claims"] = [dataclasses.asdict(c) for c in resolved_fact_sheet.claims]
     _write_log(out_dir, log)
 
-    if not _confirm("\nProceed to previz with this fact-check result?"):
+    if not _confirm("\nProceed to previz with this fact-check result?", auto_yes=args.yes):
         print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
 

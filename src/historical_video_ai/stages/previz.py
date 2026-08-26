@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,25 @@ import litellm
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.json_utils import strip_markdown_json_fence
 from historical_video_ai.stages.fact_check import FactCheckResult
+
+# Errors worth retrying automatically -- transient in nature (server
+# overload, a network blip, a rate limit that clears with time), unlike
+# e.g. AuthenticationError or ContentPolicyViolationError, where retrying
+# the identical request will just fail the identical way. Added after
+# hitting real, repeated Gemini 503 "high demand" errors in real runs --
+# litellm's own num_retries doesn't cover this: confirmed by direct
+# reproduction that it's wired only into litellm.acompletion()'s async
+# retry path, not sync image_generation() at all (see docs/decisions/0016).
+_TRANSIENT_IMAGE_ERRORS = (
+    litellm.exceptions.ServiceUnavailableError,
+    litellm.exceptions.RateLimitError,
+    litellm.exceptions.Timeout,
+    litellm.exceptions.InternalServerError,
+    litellm.exceptions.APIConnectionError,
+    litellm.exceptions.BadGatewayError,
+)
+_MAX_TRANSIENT_RETRIES = 3
+_TRANSIENT_RETRY_DELAY_SECONDS = 5.0
 
 
 class PrevizError(Exception):
@@ -112,13 +132,27 @@ def run_previz_stage(
     model: str | None = None,
     image_fn: Callable = litellm.image_generation,
     output_dir: Path = Path("outputs"),
+    sleep_fn: Callable[[float], None] = time.sleep,
+    on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizResult:
     """Generate one still image from a fact-checked scene.
 
     `model` defaults to the pinned model for the "previz" stage in
     config/models.yaml. `image_fn` defaults to litellm.image_generation and
     exists as an injection point for tests -- pass a fake to avoid making a
-    real API call or writing a real file.
+    real API call or writing a real file. `sleep_fn` defaults to time.sleep
+    for the same reason: tests inject a no-op so a retry doesn't actually
+    wait in real time.
+
+    Retries the image call up to _MAX_TRANSIENT_RETRIES times, with a fixed
+    delay between attempts, on errors judged transient (see
+    _TRANSIENT_IMAGE_ERRORS and docs/decisions/0016-previz-transient-retry.md)
+    -- added after hitting real, repeated Gemini 503s. Anything not in that
+    set (a real content rejection, a bad request, an auth failure) still
+    fails on the first attempt, since retrying an identical request that
+    was rejected for a non-transient reason would just fail the same way
+    again. `on_transient_retry`, if given, is called with (attempt number,
+    exception) before each retry -- cli.py uses this to print progress.
 
     Raises PrevizError if fact_check_result still carries an unresolved
     premise conflict (see docs/decisions/0008-refuse-impossible-premises.md
@@ -137,7 +171,17 @@ def run_previz_stage(
     resolved_model = model or get_stage_model("previz")
     prompt = _build_prompt(fact_check_result)
 
-    response = image_fn(model=resolved_model, prompt=prompt, size=_PREVIZ_SIZE_HINT)
+    response = None
+    for attempt in range(1, _MAX_TRANSIENT_RETRIES + 1):
+        try:
+            response = image_fn(model=resolved_model, prompt=prompt, size=_PREVIZ_SIZE_HINT)
+            break
+        except _TRANSIENT_IMAGE_ERRORS as exc:
+            if attempt == _MAX_TRANSIENT_RETRIES:
+                raise
+            if on_transient_retry is not None:
+                on_transient_retry(attempt, exc)
+            sleep_fn(_TRANSIENT_RETRY_DELAY_SECONDS)
 
     try:
         item = response.data[0]
