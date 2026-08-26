@@ -74,7 +74,7 @@ def test_run_fact_check_stage_parses_flags():
     payload = {
         "flags": [
             {
-                "claim_text": "Kitty Hawk was a remote, sparsely populated coastal area in 1903.",
+                "claim_number": 1,
                 "concern": "Source doesn't specifically support 'sparsely populated'.",
                 "severity": "uncertain",
             }
@@ -90,6 +90,11 @@ def test_run_fact_check_stage_parses_flags():
     assert len(result.flags) == 1
     assert result.flags[0].severity == "uncertain"
     assert "sparsely populated" in result.flags[0].concern
+    # claim_text is resolved from our own claims list by number, not
+    # copied from the model's response.
+    assert result.flags[0].claim_text == (
+        "Kitty Hawk was a remote, sparsely populated coastal area in 1903."
+    )
 
 
 def test_run_fact_check_stage_raises_for_invalid_json():
@@ -114,7 +119,7 @@ def test_run_fact_check_stage_raises_for_invalid_severity():
     payload = {
         "flags": [
             {
-                "claim_text": "x",
+                "claim_number": 1,
                 "concern": "y",
                 "severity": "definitely_wrong",
             }
@@ -129,23 +134,60 @@ def test_run_fact_check_stage_raises_for_invalid_severity():
         )
 
 
-def test_run_fact_check_stage_raises_when_claim_text_does_not_match():
-    # A model that paraphrases or appends detail (date, source) instead of
-    # copying claim_text verbatim -- observed in a real DeepSeek response --
-    # breaks anything downstream trying to correlate the flag back to its
-    # claim, so this must fail loud rather than let the mismatch through.
+def test_run_fact_check_stage_raises_for_missing_claim_number():
+    payload = {"flags": [{"concern": "y", "severity": "uncertain"}]}
+
+    with pytest.raises(FactCheckError, match="valid integer 'claim_number'"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_fact_check_stage_raises_for_non_integer_claim_number():
+    # Regression case for the class of bug this replaced: a model that
+    # would previously have paraphrased or appended detail (date, source)
+    # instead of copying claim_text verbatim -- observed for real with
+    # DeepSeek -- now can't produce anything ambiguous here, since
+    # claim_number is either a valid index or it's rejected outright.
     payload = {
         "flags": [
             {
-                "claim_text": "Kitty Hawk was a remote, sparsely populated coastal area in 1903. "
-                "(date: 1903-12-17) [source: Smithsonian National Air and Space Museum]",
-                "concern": "Paraphrased instead of copied verbatim.",
+                "claim_number": "the first one",
+                "concern": "y",
                 "severity": "uncertain",
             }
         ]
     }
 
-    with pytest.raises(FactCheckError, match="doesn't exactly match any claim"):
+    with pytest.raises(FactCheckError, match="valid integer 'claim_number'"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_fact_check_stage_rejects_boolean_claim_number():
+    # bool is a subclass of int in Python -- guard against `true` silently
+    # being accepted as claim 1.
+    payload = {"flags": [{"claim_number": True, "concern": "y", "severity": "uncertain"}]}
+
+    with pytest.raises(FactCheckError, match="valid integer 'claim_number'"):
+        run_fact_check_stage(
+            _sample_fact_sheet(),
+            model="anthropic/claude-sonnet-5",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_fact_check_stage_raises_for_out_of_range_claim_number():
+    payload = {
+        "flags": [{"claim_number": 2, "concern": "y", "severity": "uncertain"}]
+    }  # _sample_fact_sheet() only has 1 claim
+
+    with pytest.raises(FactCheckError, match="out of range"):
         run_fact_check_stage(
             _sample_fact_sheet(),
             model="anthropic/claude-sonnet-5",

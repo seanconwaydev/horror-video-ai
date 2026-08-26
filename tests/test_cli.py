@@ -1,16 +1,23 @@
 import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
+    _confirm,
     _generate_previz_with_review,
     _load_fixture,
     _load_previz_output,
+    _prompt_if_missing,
     _resolve_flags,
     _resolve_premise_conflict,
+    _run_dir,
+    _run_research_and_fact_check,
     _run_video_generation_only,
+    _slugify,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
@@ -148,6 +155,42 @@ def _fact_sheet_with_two_claims() -> FactSheet:
     )
 
 
+def test_confirm_auto_yes_returns_true_without_calling_input(monkeypatch):
+    def _explode(_prompt):
+        raise AssertionError("input() should not be called under auto_yes")
+
+    monkeypatch.setattr("builtins.input", _explode)
+
+    assert _confirm("Proceed?", auto_yes=True) is True
+
+
+def test_prompt_if_missing_auto_yes_raises_on_empty_value():
+    with pytest.raises(ValueError, match="Time is required"):
+        _prompt_if_missing(None, "Time", auto_yes=True)
+
+
+def test_prompt_if_missing_auto_yes_passes_through_a_given_value():
+    # auto_yes only matters when the value is missing -- an already-given
+    # value (e.g. from a CLI flag) is returned as-is.
+    assert _prompt_if_missing("July 1969", "Time", auto_yes=True) == "July 1969"
+
+
+def test_resolve_flags_auto_yes_accepts_every_flag_without_calling_input(monkeypatch):
+    def _explode(_prompt):
+        raise AssertionError("input() should not be called under auto_yes")
+
+    monkeypatch.setattr("builtins.input", _explode)
+    fact_sheet = _fact_sheet_with_two_claims()
+    flags = [
+        ClaimFlag(claim_text="Claim A", concern="Might be off.", severity="uncertain"),
+        ClaimFlag(claim_text="Claim B", concern="Also might be off.", severity="contradicted"),
+    ]
+
+    resolved = _resolve_flags(fact_sheet, flags, auto_yes=True)
+
+    assert resolved.claims == fact_sheet.claims
+
+
 def test_resolve_flags_returns_same_fact_sheet_when_no_flags():
     fact_sheet = _fact_sheet_with_two_claims()
 
@@ -248,6 +291,74 @@ def _resolve_premise_conflict_kwargs(completion_fn):
         "fact_check_model": "anthropic/claude-sonnet-5",
         "completion_kwargs": {"completion_fn": completion_fn},
     }
+
+
+def test_run_research_and_fact_check_calls_on_research_completed_before_fact_check(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "y")  # "Proceed to fact-check?"
+    calls = []
+
+    result = _run_research_and_fact_check(
+        "December 1903",
+        "Kitty Hawk, North Carolina",
+        "A man watches a flying machine lift off from the dunes.",
+        research_model="anthropic/claude-sonnet-5",
+        fact_check_model="anthropic/claude-sonnet-5",
+        completion_kwargs={"completion_fn": _fake_reverify_completion()},
+        on_research_completed=calls.append,
+    )
+
+    assert result is not None
+    assert len(calls) == 1
+    assert calls[0].claims[0].text == "A newly researched claim for the corrected scene."
+
+
+def test_run_research_and_fact_check_on_research_completed_survives_a_fact_check_crash(
+    monkeypatch,
+):
+    # Regression test: research succeeding, then fact-check's own response
+    # parsing crashing, used to mean the research output was never
+    # persisted anywhere -- on_research_completed must still fire for it.
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    calls = []
+
+    def _crashing_fact_check(**kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        if "Claims to check" in prompt:
+            raise RuntimeError("simulated fact-check crash")
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "claims": [
+                                    {
+                                        "text": "A claim from research.",
+                                        "source": "A source",
+                                        "date": None,
+                                        "names": [],
+                                    }
+                                ]
+                            }
+                        )
+                    )
+                )
+            ]
+        )
+
+    with pytest.raises(RuntimeError, match="simulated fact-check crash"):
+        _run_research_and_fact_check(
+            "December 1903",
+            "Kitty Hawk, North Carolina",
+            "A man watches a flying machine lift off from the dunes.",
+            research_model="anthropic/claude-sonnet-5",
+            fact_check_model="anthropic/claude-sonnet-5",
+            completion_kwargs={"completion_fn": _crashing_fact_check},
+            on_research_completed=calls.append,
+        )
+
+    assert len(calls) == 1
+    assert calls[0].claims[0].text == "A claim from research."
 
 
 def test_resolve_premise_conflict_returns_unchanged_when_no_conflict():
@@ -471,26 +582,88 @@ def test_load_previz_output_raises_when_image_file_missing(tmp_path):
         _load_previz_output(run_dir)
 
 
-def test_run_video_generation_only_generates_one_clip_per_run_dir(tmp_path):
+def test_run_video_generation_only_writes_video_into_source_run_dir(tmp_path):
+    # The video lands directly in the source previz run's own directory --
+    # right next to the previz.png it came from -- rather than a separate
+    # new folder that only ever held a copy of the image.
     source_a = tmp_path / "source_run_a"
     source_b = tmp_path / "source_run_b"
     _write_previz_run_log(source_a, prompt="Scene A's prompt.")
     _write_previz_run_log(source_b, prompt="Scene B's prompt.")
-    out_dir = tmp_path / "video_run"
-    out_dir.mkdir()
 
-    _run_video_generation_only(
-        [source_a, source_b], mock=True, out_dir=out_dir, video_model="openai/sora-2"
-    )
+    _run_video_generation_only([source_a, source_b], mock=True, video_model="openai/sora-2")
 
-    assert (out_dir / "video_scene_1.mp4").exists()
-    assert (out_dir / "video_scene_2.mp4").exists()
-    log = json.loads((out_dir / "run_log.json").read_text())
-    assert log["mode"] == "video_generation_only"
-    assert [s["prompt_used"] for s in log["scenes"]] == [
-        "Scene A's prompt.",
-        "Scene B's prompt.",
-    ]
+    videos_a = list(source_a.glob("video_*.mp4"))
+    videos_b = list(source_b.glob("video_*.mp4"))
+    assert len(videos_a) == 1
+    assert len(videos_b) == 1
+    assert (source_a / "previz.png").exists()  # untouched, still there too
+
+
+def test_run_video_generation_only_appends_to_existing_run_log(tmp_path):
+    # Regression test: this used to write a brand new run_log.json into a
+    # separate output folder ("mode": "video_generation_only") instead of
+    # extending the scene's own existing log -- fragmenting one scene's
+    # history (research through video) across two files in two folders.
+    source_a = tmp_path / "source_run_a"
+    _write_previz_run_log(source_a, prompt="Scene A's prompt.")
+    original_log = json.loads((source_a / "run_log.json").read_text())
+
+    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+
+    log = json.loads((source_a / "run_log.json").read_text())
+    # Everything previz/research/fact-check already wrote is still there.
+    assert log["previz_prompt_used"] == original_log["previz_prompt_used"]
+    assert len(log["videos"]) == 1
+    assert log["videos"][0]["video_generation_model"] == "openai/sora-2"
+    assert Path(log["videos"][0]["video_path"]).parent == source_a
+
+
+def test_run_video_generation_only_accumulates_multiple_video_attempts(tmp_path):
+    # Re-running against the same previz output (e.g. trying a different
+    # --video-seconds) should add another video, not overwrite the last one.
+    source_a = tmp_path / "source_run_a"
+    _write_previz_run_log(source_a, prompt="Scene A's prompt.")
+
+    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+
+    assert len(list(source_a.glob("video_*.mp4"))) == 2
+    log = json.loads((source_a / "run_log.json").read_text())
+    assert len(log["videos"]) == 2
+
+
+def test_slugify_lowercases_and_hyphenates():
+    assert _slugify("A Young Dockworker Wades!") == "a-young-dockworker-wades"
+
+
+def test_slugify_truncates_at_a_word_boundary():
+    text = ("a" * 20) + " " + ("b" * 20)  # 41 chars once hyphenated
+    result = _slugify(text, max_length=25)
+    assert len(result) <= 25
+    assert result == "a" * 20  # cut back to the hyphen boundary, not mid-word
+
+
+def test_slugify_returns_empty_for_content_free_input():
+    assert _slugify("   ...   ") == ""
+
+
+def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):
+    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+
+    d = _run_dir("a-flood-rescue-scene")
+
+    assert d.parent == tmp_path / "outputs"
+    assert re.match(r"^run_\d{8}-\d{6}_a-flood-rescue-scene$", d.name)
+    assert d.exists()
+
+
+def test_run_dir_omits_slug_when_not_given(tmp_path, monkeypatch):
+    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+
+    d = _run_dir()
+
+    assert re.match(r"^run_\d{8}-\d{6}$", d.name)
 
 
 def test_generate_previz_with_review_calls_on_image_generated_before_review(tmp_path):

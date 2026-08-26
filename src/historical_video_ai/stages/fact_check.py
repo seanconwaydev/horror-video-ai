@@ -101,7 +101,8 @@ exists, suggest it; a human decides how to proceed.
 
 Scene -- Time: {time} | Place: {place} | What happens: {description}
 
-Claims to check:
+Claims to check (numbered -- refer to a claim by its number in "flags" below, \
+don't copy its text):
 {claims_block}
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching this \
@@ -113,7 +114,7 @@ historically plausible given the claims above:
 {{
   "flags": [
     {{
-      "claim_text": "<the exact claim text you're flagging>",
+      "claim_number": <the number of the claim you're flagging, from the numbered list above>,
       "concern": "<specifically what's wrong or uncertain, and why>",
       "severity": "<'contradicted' if you have reason to believe it's wrong, 'uncertain'
         if you can't find independent support either way>"
@@ -134,19 +135,32 @@ when the scene's premise is fine.)
 
 def _format_claims(claims: list[Claim]) -> str:
     lines = []
-    for c in claims:
+    for i, c in enumerate(claims, start=1):
         date_part = f" (date: {c.date})" if c.date else ""
-        lines.append(f"- {c.text}{date_part} [source: {c.source}]")
+        lines.append(f"{i}. {c.text}{date_part} [source: {c.source}]")
     return "\n".join(lines) if lines else "(no claims)"
 
 
 def _parse_flags(raw_flags: list, claims: list[Claim]) -> list[ClaimFlag]:
-    known_claim_texts = {c.text for c in claims}
-
+    """Parse the model's flags, resolving each one's `claim_number` back to
+    the real claim's text ourselves -- see docs/decisions/0014-fact-check-
+    claims-by-number.md for why this replaced asking the model to copy
+    claim_text back verbatim. `ClaimFlag.claim_text` is populated from our
+    own claims list, not the model's response, so it's always exactly
+    right by construction; nothing downstream (cli.py's _resolve_flags,
+    previz, --fixture loading) needed to change."""
     flags: list[ClaimFlag] = []
     for i, raw_flag in enumerate(raw_flags):
-        if not isinstance(raw_flag, dict) or not raw_flag.get("claim_text"):
-            raise FactCheckError(f"Flag {i} is missing 'claim_text'")
+        if not isinstance(raw_flag, dict):
+            raise FactCheckError(f"Flag {i} is not a JSON object")
+        claim_number = raw_flag.get("claim_number")
+        # bool is a subclass of int in Python -- isinstance(True, int) is
+        # True -- so exclude it explicitly rather than accept "true" as
+        # claim number 1.
+        if not isinstance(claim_number, int) or isinstance(claim_number, bool):
+            raise FactCheckError(
+                f"Flag {i} is missing a valid integer 'claim_number' (got {claim_number!r})"
+            )
         if not raw_flag.get("concern"):
             raise FactCheckError(f"Flag {i} is missing 'concern'")
         severity = raw_flag.get("severity")
@@ -155,22 +169,14 @@ def _parse_flags(raw_flags: list, claims: list[Claim]) -> list[ClaimFlag]:
                 f"Flag {i} has an invalid 'severity' ({severity!r}); "
                 "expected 'contradicted' or 'uncertain'"
             )
-        claim_text = raw_flag["claim_text"]
-        if claim_text not in known_claim_texts:
-            # A model that paraphrases or appends extra detail (date, source)
-            # instead of copying the claim text verbatim breaks every later
-            # attempt to correlate this flag back to its claim -- e.g.
-            # previz silently failing to exclude a claim it should have.
-            # Fail loud here instead, matching this project's convention of
-            # not letting malformed model output degrade silently downstream.
+        if not (1 <= claim_number <= len(claims)):
             raise FactCheckError(
-                f"Flag {i}'s 'claim_text' doesn't exactly match any claim from "
-                f"research (the model may have paraphrased or added detail "
-                f"instead of copying it verbatim): {claim_text!r}"
+                f"Flag {i}'s 'claim_number' ({claim_number}) is out of range -- "
+                f"there are {len(claims)} claim(s), numbered 1 to {len(claims)}"
             )
         flags.append(
             ClaimFlag(
-                claim_text=claim_text,
+                claim_text=claims[claim_number - 1].text,
                 concern=raw_flag["concern"],
                 severity=severity,
             )
@@ -213,10 +219,10 @@ def run_fact_check_stage(
     a fake to avoid making a real API call.
 
     Raises FactCheckError if the model's response isn't valid JSON, is
-    missing required fields, flags a claim_text that doesn't exactly match
-    one of fact_sheet's claims, or has a malformed premise_conflict --
-    rather than returning a partial/guessed result, or a flag nothing
-    downstream can reliably act on.
+    missing required fields, flags a claim_number outside the range of
+    fact_sheet's claims, or has a malformed premise_conflict -- rather
+    than returning a partial/guessed result, or a flag nothing downstream
+    can reliably act on.
     """
     resolved_model = model or get_stage_model("fact_check")
 
