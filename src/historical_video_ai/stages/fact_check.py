@@ -209,20 +209,16 @@ def run_fact_check_stage(
     completion_fn: Callable = litellm.completion,
 ) -> FactCheckResult:
     """Independently review `fact_sheet`'s claims for accuracy, and check
-    whether the scene's own premise conflicts with what research found (see
-    PremiseConflict and docs/decisions/0008-refuse-impossible-premises.md).
+    whether the scene's own premise conflicts with what research found
+    (PremiseConflict, docs/decisions/0008).
 
-    `model` defaults to the pinned model for the "fact_check" stage in
-    config/models.yaml (see docs/decisions/0003 and 0007 -- pinned to a
-    different provider than research on purpose). `completion_fn` defaults
-    to litellm.completion and exists as an injection point for tests -- pass
-    a fake to avoid making a real API call.
+    `model` defaults to the pinned "fact_check" model (docs/decisions/0007
+    -- a different provider than research, on purpose). `completion_fn` is
+    an injection point for tests.
 
-    Raises FactCheckError if the model's response isn't valid JSON, is
-    missing required fields, flags a claim_number outside the range of
-    fact_sheet's claims, or has a malformed premise_conflict -- rather
-    than returning a partial/guessed result, or a flag nothing downstream
-    can reliably act on.
+    Raises FactCheckError if the response isn't valid JSON, is missing
+    required fields, flags a claim_number outside range, or has a
+    malformed premise_conflict.
     """
     resolved_model = model or get_stage_model("fact_check")
 

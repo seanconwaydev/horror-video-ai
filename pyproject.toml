@@ -27,5 +27,18 @@ build-backend = "uv_build"
 src = ["src"]
 line-length = 100
 
+[tool.ruff.lint]
+extend-select = [
+    "ANN001", # missing type annotation for a function argument
+    "ANN201", # missing return type annotation for a public function
+    "ANN202", # missing return type annotation for a private function
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests aren't held to this -- pytest fixtures (tmp_path, monkeypatch, ...)
+# are conventionally left unannotated, and every test function returns
+# None, which would be pure noise to write out on every one of them.
+"tests/*" = ["ANN001", "ANN201", "ANN202"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

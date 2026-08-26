@@ -1,34 +1,14 @@
 """Stage 8 (scoped down for v1): Previz -- render one still image from a
 verified scene, skipping the script/shot-list/per-scene-prompt stages this
-normally sits downstream of.
+normally sits downstream of. See docs/pipeline.md ("8. Previz") and
+docs/decisions/0006-narrow-v1-scope-single-image.md.
 
-See docs/pipeline.md ("8. Previz") for the stage's full role in the eventual
-pipeline, and docs/decisions/0006-narrow-v1-scope-single-image.md for why
-this v1 version builds its prompt directly from the fact-check stage's
-output instead of a per-scene video prompt.
-
-Model note: pinned to Gemini's image model (gemini/gemini-2.5-flash-image),
-moved off the original OpenAI placeholder from docs/decisions/0007 -- see
-docs/decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md for
-why: Sora-2 (the video_generation stage's model) requires an exact-pixel
-match to one of its two fixed sizes (720x1280 or 1280x720), and none of
-gpt-image-1-mini's three fixed sizes even shares that aspect ratio, forcing
-a large, content-losing crop. Gemini's 9:16 output is a near-exact match
-(within ~0.8%), letting video_generation resize instead of crop -- no scene
-content lost. Requests a 9:16-ish `size` (mapped internally to Gemini's
-`imageConfig.aspectRatio`, not an exact pixel size -- gemini-2.5-flash-image
-doesn't support requesting an exact size, only an aspect ratio) so the
-output is close to Sora's target ratio.
-
-The request/response call shape (litellm.image_generation() normalizing
-Gemini's response to the same ImageResponse/b64_json shape OpenAI's API
-uses) was verified by direct reproduction against litellm's real
-request-building code, bypassing the network -- unlike the previous OpenAI
-placeholder, this isn't a blind guess at the call shape. It has still not
-been exercised against a live Gemini key from this repo, though -- treat
-the first real run as a test for actual output quality/behavior, not for
-whether the call shape itself works (same caveat as the research and
-fact_check stages' real backends).
+Model: gemini/gemini-2.5-flash-image (docs/decisions/0011) -- moved off
+the original OpenAI placeholder because its 9:16 output is a ~0.8% match
+to Sora-2's exact required ratio, letting video_generation resize instead
+of crop. Requests a 9:16-ish `size` (Gemini only supports an aspect-ratio
+hint, not an exact pixel size). Confirmed working end to end against a
+real key, not just a call-shape guess.
 """
 
 from __future__ import annotations
@@ -137,29 +117,18 @@ def run_previz_stage(
 ) -> PrevizResult:
     """Generate one still image from a fact-checked scene.
 
-    `model` defaults to the pinned model for the "previz" stage in
-    config/models.yaml. `image_fn` defaults to litellm.image_generation and
-    exists as an injection point for tests -- pass a fake to avoid making a
-    real API call or writing a real file. `sleep_fn` defaults to time.sleep
-    for the same reason: tests inject a no-op so a retry doesn't actually
-    wait in real time.
+    `model` defaults to the pinned "previz" model; `image_fn`/`sleep_fn`
+    are injection points for tests (avoid a real API call / real waiting).
 
-    Retries the image call up to _MAX_TRANSIENT_RETRIES times, with a fixed
-    delay between attempts, on errors judged transient (see
-    _TRANSIENT_IMAGE_ERRORS and docs/decisions/0016-previz-transient-retry.md)
-    -- added after hitting real, repeated Gemini 503s. Anything not in that
-    set (a real content rejection, a bad request, an auth failure) still
-    fails on the first attempt, since retrying an identical request that
-    was rejected for a non-transient reason would just fail the same way
-    again. `on_transient_retry`, if given, is called with (attempt number,
-    exception) before each retry -- cli.py uses this to print progress.
+    Retries the image call up to _MAX_TRANSIENT_RETRIES times on errors
+    judged transient (_TRANSIENT_IMAGE_ERRORS, docs/decisions/0016) --
+    added after real, repeated Gemini 503s. Non-transient errors (content
+    rejection, bad request, auth) fail immediately. `on_transient_retry`,
+    if given, is called with (attempt number, exception) before each retry.
 
-    Raises PrevizError if fact_check_result still carries an unresolved
-    premise conflict (see docs/decisions/0008-refuse-impossible-premises.md
-    -- this pipeline refuses to depict a scene fact-check flagged as
-    historically impossible, rather than fabricate it) or if the response
-    doesn't contain image data in a recognized shape, rather than silently
-    producing an empty/broken file.
+    Raises PrevizError if `fact_check_result` still carries an unresolved
+    premise conflict (docs/decisions/0008 -- refuses rather than fabricate)
+    or if the response has no recognizable image data.
     """
     if fact_check_result.premise_conflict is not None:
         raise PrevizError(
@@ -259,26 +228,16 @@ def run_previz_review_stage(
 ) -> PrevizReview:
     """Independently review a previz-generated image against the scene it
     was supposed to depict -- an adversarial check on the actual image, not
-    just the text prompt (see docs/decisions/0009-previz-image-review.md,
-    and PrevizReview's docstring for why this is needed even when the
-    prompt itself was accurate).
+    just the text prompt (docs/decisions/0009).
 
-    `model` defaults to the pinned model for the "previz_review" stage in
-    config/models.yaml -- deliberately vision-capable and a different
-    provider than previz's own image model, same "not the same model
-    checking its own work" reasoning as fact_check vs. research.
-    `completion_fn` defaults to litellm.completion and exists as an
-    injection point for tests -- pass a fake to avoid a real API call.
-
-    Unverified: this call (vision input via litellm.completion(), i.e. a
-    message content list with a text block and an image_url block) has not
-    been exercised against a live key from this repo -- ANTHROPIC_API_KEY
-    was never set during development. Treat the first real run as a test,
-    not a known-working thing (same caveat as run_previz_stage's own image
-    generation call).
+    `model` defaults to the pinned "previz_review" model -- deliberately
+    vision-capable and a different provider than previz's own image model,
+    same reasoning as fact_check vs. research. `completion_fn` is an
+    injection point for tests. Confirmed working against a real key,
+    including catching real anachronisms in generated images.
 
     Raises PrevizError if the model's response isn't valid JSON or is
-    missing required fields, matching this project's fail-loud convention.
+    missing required fields.
     """
     resolved_model = model or get_stage_model("previz_review")
     fact_sheet = fact_check_result.fact_sheet

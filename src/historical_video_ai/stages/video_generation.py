@@ -1,46 +1,24 @@
 """Stage 9: Video generation -- render one video clip from a single
-approved previz image and the prompt that produced it.
+approved previz image and the prompt that produced it. See
+docs/pipeline.md ("9. Video generation") and docs/decisions/0010 for why
+this is scoped to one image + one prompt per call (the caller loops for
+multiple scenes -- cli.py's `_run_video_generation_only`).
 
-See docs/pipeline.md ("9. Video generation") for the stage's role in the
-eventual pipeline, and docs/decisions/0010-video-generation-model-and-
-standalone-stage.md for why this is scoped to one image + one prompt per
-call (multiple scenes are the caller's loop, not this function's job -- see
-cli.py's `_run_video_generation_only`) and why the pinned model is a
-placeholder.
+Model: openai/sora-2, a placeholder (docs/decisions/0010) -- Veo (via
+vertex_ai/gemini) is a real next candidate. Video generation is an async
+job: video_generation() creates it, video_status() is polled to a
+terminal state, video_content() fetches the finished bytes.
 
-Model note: pinned to an OpenAI video model (`openai/sora-2`) as a starting
-placeholder, not a rigorously compared decision -- see docs/decisions/0010.
-Google's Veo (via the vertex_ai/gemini providers) is a real next candidate,
-per that ADR.
+Two real litellm bugs had to be found and fixed to get a real call
+working: an internal-params leak (fixed upstream since, no longer worked
+around here -- docs/decisions/0013) and broken os.PathLike support for
+input_reference (still handled in this module, see comments below).
+Confirmed end to end, including a full paid run producing a downloaded
+video file.
 
-Unlike previz's synchronous image_generation() call, video generation is an
-async job: video_generation() creates it, video_status() is polled until it
-reaches a terminal state, and video_content() fetches the finished bytes.
-
-Known-working, not just unverified-and-hoped-for: getting a real Sora-2
-call to succeed took two rounds of direct reproduction against real (if
-unpaid) requests, each surfacing a genuine litellm bug, not a mistake in
-this module. One (litellm's own internal implementation details leaking
-into the request body) was worked around temporarily and the workaround
-has since been deleted -- see docs/decisions/0013-python-3.11-upgrade.md:
-upgrading to Python 3.11 unblocked the real litellm release (1.98.0) that
-fixes it for real, verified by direct reproduction before the workaround
-was removed, not assumed. The other (litellm's os.PathLike support for
-input_reference being broken) and Sora's exact-size requirement for the
-reference image are still handled directly in this module's own code
-(see comments below), since they're this project's own call-shape
-choices, not something an upstream fix resolves. A full, successful,
-paid run through to a downloaded video file has been confirmed for real.
-
-Duration note: OpenAI's own docs disagree with each other on what `seconds`
-accepts -- the API reference documents a strict `"4"`/`"8"`/`"12"` enum,
-the guide separately claims support up to 20 seconds. Resolved by testing
-against the real API, not by reading further: `seconds="20"` was requested
-and the completed job's own `seconds` field confirmed a real 20-second
-clip was delivered, not silently clamped. The guide was right; the
-reference page's enum is stale or incomplete. See docs/decisions/0012 for
-the full comparison, including the measured effect of duration on
-generation time.
+Duration: `seconds` accepts values beyond OpenAI's own documented enum --
+confirmed by testing `seconds="20"` directly against the real API and
+getting a real 20-second clip back, not a silent clamp (docs/decisions/0012).
 """
 
 from __future__ import annotations
@@ -109,22 +87,17 @@ class VideoGenerationResult:
 
 
 def _resize_reference_image(image_bytes: bytes, target_size: tuple[int, int]) -> bytes:
-    """Resize a reference image to exactly `target_size`, required because
-    Sora rejects a reference image that isn't pixel-exact to the video's
-    requested size (confirmed by reproduction: "Inpaint image must match
-    the requested width and height"). A plain resize only makes sense when
-    the source is already close to the target aspect ratio -- otherwise
-    it's a distorting stretch, not the barely-perceptible adjustment this
-    is meant to be (see docs/decisions/0011). Padding was considered and
-    rejected instead of resizing: OpenAI's own docs confirm the reference
-    image becomes the video's literal first frame with no
-    outpainting/masking, so padding bars would get baked into the video as
-    fake visible content, not held invisibly like real letterboxing.
+    """Resize a reference image to exactly `target_size` -- Sora rejects
+    any reference image that isn't pixel-exact to the video's requested
+    size. Only makes sense when the source is already close to the target
+    ratio; otherwise it's a distorting stretch (docs/decisions/0011).
+    Padding was considered and rejected: OpenAI's docs confirm the
+    reference image becomes the video's literal first frame, so padding
+    bars would get baked in as fake visible content.
 
     Raises VideoGenerationError if the source aspect ratio deviates from
     the target by more than _MAX_ASPECT_RATIO_DEVIATION, rather than
-    silently stretching a mismatched image (e.g. previz's old landscape
-    default) into a badly distorted video.
+    silently producing a badly distorted video.
     """
     with Image.open(io.BytesIO(image_bytes)) as img:
         width, height = img.size
@@ -171,29 +144,18 @@ def run_video_generation_stage(
 ) -> VideoGenerationResult:
     """Generate one video clip from a single reference image and prompt.
 
-    `model` defaults to the pinned model for the "video_generation" stage in
-    config/models.yaml. `seconds` requests a clip duration -- passed through
-    to the provider as-is, not validated here, since OpenAI's own docs
-    disagree with each other about what values above "4"/"8"/"12" are
-    actually accepted (see this module's docstring and docs/decisions/0012).
-    A value the provider rejects surfaces as a normal API error, same as any
-    other bad parameter. `video_fn`/`status_fn`/`content_fn` default to
-    litellm's video_generation/video_status/video_content and exist as
-    injection points for tests -- pass fakes to avoid a real API call, real
-    waiting, or writing a real file. `sleep_fn` defaults to time.sleep for
-    the same reason: tests inject a no-op so the polling loop doesn't
-    actually wait in real time.
+    `model` defaults to the pinned "video_generation" model. `seconds` is
+    passed through unvalidated (docs/decisions/0012 -- OpenAI's own docs
+    disagree about what's accepted); a rejected value surfaces as a normal
+    API error. `video_fn`/`status_fn`/`content_fn`/`sleep_fn` are
+    injection points for tests.
 
-    Polls at `poll_interval_seconds` between checks, up to
-    `max_poll_attempts` times, before giving up -- bounded the same way
-    previz's regeneration loop is bounded (docs/decisions/0009), rather than
-    waiting indefinitely on a job that may never finish.
+    Polls at `poll_interval_seconds` up to `max_poll_attempts` times before
+    giving up, rather than waiting indefinitely on a job that never finishes.
 
-    Raises VideoGenerationError if `image_path` doesn't exist, the creation
-    response has no job id, the job ends in a recognized failure status, the
-    job never reaches a terminal status within `max_poll_attempts`, or the
-    finished job returns no video bytes -- fail-loud on anything unexpected
-    rather than silently producing an empty or missing file.
+    Raises VideoGenerationError if `image_path` doesn't exist, the job has
+    no id, ends in a failure status, never reaches a terminal status in
+    time, or returns no video bytes.
     """
     if not image_path.exists():
         raise VideoGenerationError(f"Reference image not found: {image_path}")
