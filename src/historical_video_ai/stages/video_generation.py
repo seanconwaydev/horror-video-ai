@@ -16,9 +16,12 @@ input_reference (still handled in this module, see comments below).
 Confirmed end to end, including a full paid run producing a downloaded
 video file.
 
-Duration: `seconds` accepts values beyond OpenAI's own documented enum --
-confirmed by testing `seconds="20"` directly against the real API and
-getting a real 20-second clip back, not a silent clamp (docs/decisions/0012).
+Duration: `seconds` is validated against OpenAI's documented enum before
+any API call (docs/decisions/0020) -- confirmed by testing `seconds="20"`
+and `seconds="8"` directly against the real API (docs/decisions/0012), and
+by a real failure: an undocumented value ("6") didn't cleanly reject, it
+corrupted the request in a way that surfaced as an unrelated-looking error
+about `input_reference`, not a clear "bad seconds value" message.
 """
 
 from __future__ import annotations
@@ -126,6 +129,13 @@ def _resize_reference_image(image_bytes: bytes, target_size: tuple[int, int]) ->
 # each other about what's allowed above this.
 _DEFAULT_VIDEO_SECONDS = "4"
 
+# The full enum from OpenAI's video-generation guide (the page 0012 found
+# more trustworthy than the API reference page, which only lists
+# "4"/"8"/"12"). "4", "8", and "20" are confirmed directly against the
+# real API by this project (0012, 0020); "12" and "16" aren't individually
+# confirmed yet but are accepted since they're consistently documented.
+_VALID_VIDEO_SECONDS = frozenset({"4", "8", "12", "16", "20"})
+
 
 def run_video_generation_stage(
     image_path: Path,
@@ -145,18 +155,27 @@ def run_video_generation_stage(
     """Generate one video clip from a single reference image and prompt.
 
     `model` defaults to the pinned "video_generation" model. `seconds` is
-    passed through unvalidated (docs/decisions/0012 -- OpenAI's own docs
-    disagree about what's accepted); a rejected value surfaces as a normal
-    API error. `video_fn`/`status_fn`/`content_fn`/`sleep_fn` are
-    injection points for tests.
+    validated against `_VALID_VIDEO_SECONDS` before any API call
+    (docs/decisions/0020) -- reversing 0012's original "let the provider
+    reject it" stance now that a real off-enum value ("6") was observed to
+    corrupt the request instead of cleanly rejecting, surfacing as a
+    confusing, unrelated `input_reference` error rather than a clear
+    message about the duration. `video_fn`/`status_fn`/`content_fn`/
+    `sleep_fn` are injection points for tests.
 
     Polls at `poll_interval_seconds` up to `max_poll_attempts` times before
     giving up, rather than waiting indefinitely on a job that never finishes.
 
-    Raises VideoGenerationError if `image_path` doesn't exist, the job has
-    no id, ends in a failure status, never reaches a terminal status in
-    time, or returns no video bytes.
+    Raises VideoGenerationError if `seconds` isn't one of
+    `_VALID_VIDEO_SECONDS`, `image_path` doesn't exist, the job has no id,
+    ends in a failure status, never reaches a terminal status in time, or
+    returns no video bytes.
     """
+    if seconds not in _VALID_VIDEO_SECONDS:
+        raise VideoGenerationError(
+            f"Requested duration {seconds!r} isn't a supported value -- Sora accepts "
+            f"{sorted(_VALID_VIDEO_SECONDS, key=int)} seconds."
+        )
     if not image_path.exists():
         raise VideoGenerationError(f"Reference image not found: {image_path}")
 

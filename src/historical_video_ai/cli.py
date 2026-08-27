@@ -18,7 +18,10 @@ Flags:
 - `--video-gen-from <run_dir> [...]`: runs stage 9 standalone against one
   or more completed previz outputs (docs/decisions/0010), writing each
   video into its source run_dir and appending to that run's existing log.
-- `--video-seconds`: requests a clip duration (docs/decisions/0012).
+- `--video-seconds`: requests a clip duration, validated against Sora's
+  documented values before any API call (docs/decisions/0012, 0020).
+- `--video-prompt`: overrides the saved previz prompt for --video-gen-from,
+  to test a hand-written prompt against an already-approved image.
 - `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
   an "uncertain" fact-check flag, but stops the run on a "contradicted"
   one rather than auto-accepting it (docs/decisions/0017, 0019).
@@ -553,11 +556,17 @@ def _load_fixture(path: Path) -> FactCheckResult:
     return FactCheckResult(fact_sheet=fact_sheet, flags=flags, premise_conflict=premise_conflict)
 
 
-def _load_previz_output(run_dir: Path) -> tuple[Path, str]:
+def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) -> tuple[Path, str]:
     """Load a previously generated previz image and its prompt from an
     existing run's run_log.json, so --video-gen-from can run stage 9
     standalone instead of requiring a fresh research/fact-check/previz
     pass every time (docs/decisions/0010).
+
+    `prompt_override` (--video-prompt), if given, is returned instead of
+    the saved previz prompt -- lets a hand-written, video-specific prompt
+    be tested against an already-approved image without a fresh (and
+    separately costly) previz pass. Still requires the run to have a
+    valid image on disk; only the *text* is substituted.
 
     Raises FileNotFoundError if run_dir has no run_log.json or the image
     it references no longer exists, and ValueError if the log doesn't show
@@ -569,7 +578,7 @@ def _load_previz_output(run_dir: Path) -> tuple[Path, str]:
 
     data = json.loads(log_path.read_text())
     image_path_str = data.get("previz_image_path")
-    prompt_used = data.get("previz_prompt_used")
+    prompt_used = prompt_override or data.get("previz_prompt_used")
     if not image_path_str or not prompt_used:
         raise ValueError(
             f"{log_path} has no completed previz result (missing "
@@ -592,6 +601,7 @@ def _run_video_generation_only(
     mock: bool,
     video_model: str | None = None,
     video_seconds: str | None = None,
+    video_prompt: str | None = None,
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
     already-completed previz outputs, skipping research/fact-check/previz
@@ -603,6 +613,13 @@ def _run_video_generation_only(
 
     `video_seconds`, if given, requests that duration (see 0012 for why
     it's not validated client-side).
+
+    `video_prompt` (--video-prompt), if given, replaces the saved previz
+    prompt for every run_dir -- a deliberately simple one-override-for-all
+    shape, since this exists for testing one hand-written prompt against
+    one (or a few identically-treated) already-approved image(s), not for
+    driving several different scenes' worth of independent prompts at
+    once.
 
     Each video is written directly into its source run_dir as
     `video_<timestamp>.mp4` -- the timestamp avoids collisions when
@@ -626,7 +643,7 @@ def _run_video_generation_only(
 
     for i, run_dir in enumerate(run_dirs, start=1):
         print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
-        image_path, prompt = _load_previz_output(run_dir)
+        image_path, prompt = _load_previz_output(run_dir, prompt_override=video_prompt)
         print(f"Source: {run_dir} (image: {image_path})")
 
         # Microsecond precision, not just seconds -- two attempts against
@@ -658,6 +675,11 @@ def _run_video_generation_only(
                 "seconds_requested": result.seconds_requested,
                 "seconds_actual": result.seconds_actual,
                 "mock": mock,
+                # Recorded per attempt, not just once for the run, so
+                # comparing several --video-prompt overrides against the
+                # same image stays traceable -- which prompt produced
+                # which file -- instead of only the latest being visible.
+                "prompt_used": prompt,
             }
         )
         log_path.write_text(json.dumps(log, indent=2, default=str))
@@ -714,12 +736,21 @@ def main() -> None:
     parser.add_argument(
         "--video-seconds",
         help=(
-            "Requested clip duration in seconds, passed through to the "
-            "video_generation stage as-is (only used with --video-gen-from). "
-            "Not validated client-side -- OpenAI's own docs disagree with "
-            "each other about what's accepted above \"4\"/\"8\"/\"12\" (see "
-            "docs/decisions/0012). Defaults to the stage's own default if "
-            "not given."
+            "Requested clip duration in seconds (only used with "
+            "--video-gen-from) -- one of \"4\", \"8\", \"12\", \"16\", "
+            "\"20\"; any other value is rejected before any API call "
+            "(docs/decisions/0012, 0020). Defaults to the stage's own "
+            "default if not given."
+        ),
+    )
+    parser.add_argument(
+        "--video-prompt",
+        help=(
+            "Override the saved previz prompt with this text for "
+            "--video-gen-from (applied to every RUN_DIR given). Lets a "
+            "hand-written, video-specific prompt be tested against an "
+            "already-approved previz image without paying for a fresh "
+            "research/fact-check/previz pass just to change the wording."
         ),
     )
     parser.add_argument(
@@ -749,6 +780,7 @@ def main() -> None:
             args.video_gen_from,
             mock=args.mock,
             video_seconds=args.video_seconds,
+            video_prompt=args.video_prompt,
         )
         return
 
