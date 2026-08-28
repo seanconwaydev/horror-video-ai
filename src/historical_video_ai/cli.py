@@ -24,7 +24,14 @@ Flags:
   to test a hand-written prompt against an already-approved image.
 - `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
   an "uncertain" fact-check flag, but stops the run on a "contradicted"
-  one rather than auto-accepting it (docs/decisions/0017, 0019).
+  one rather than auto-accepting it (docs/decisions/0017, 0019), and skips
+  (rather than auto-proceeding past) any scene a moderation pre-flight
+  flags before video generation (docs/decisions/0022).
+
+Every --video-gen-from scene also runs a two-layer moderation pre-flight
+(docs/decisions/0022, stages/moderation.py) before the paid video-
+generation call: a free policy-category check plus a paid pose/risk
+review, both against the actual image and prompt about to be submitted.
 """
 
 from __future__ import annotations
@@ -44,6 +51,10 @@ from historical_video_ai.stages.fact_check import (
     FactCheckResult,
     PremiseConflict,
     run_fact_check_stage,
+)
+from historical_video_ai.stages.moderation import (
+    run_moderation_policy_check,
+    run_moderation_risk_review,
 )
 from historical_video_ai.stages.previz import (
     PrevizResult,
@@ -119,6 +130,18 @@ def _mock_video_status(**kwargs: object) -> SimpleNamespace:
 
 def _mock_video_content(**kwargs: object) -> bytes:
     return b"[MOCK] not a real video file"
+
+
+def _mock_moderation_policy_check(**kwargs: object) -> SimpleNamespace:
+    """No network call, no API key -- always comes back clean, so --mock
+    exercises the moderation pre-flight's mechanics (docs/decisions/0022)
+    without cost or credentials."""
+    return SimpleNamespace(results=[SimpleNamespace(flagged=False, categories={})])
+
+
+def _mock_moderation_risk_review(**kwargs: object) -> SimpleNamespace:
+    content = json.dumps({"flagged": False, "concern": None})
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
@@ -653,6 +676,7 @@ def _run_video_generation_only(
     run_dirs: list[Path],
     *,
     mock: bool,
+    auto_yes: bool = False,
     video_model: str | None = None,
     video_seconds: str | None = None,
     video_prompt: str | None = None,
@@ -664,6 +688,17 @@ def _run_video_generation_only(
     starting the next (0010's v1 choice, not the SQS fan-out named for
     this stage in 0004). Lets VideoGenerationError propagate uncaught,
     same fail-loud convention as every other stage.
+
+    Before each scene's paid video-generation call, runs the two-layer
+    moderation pre-flight (docs/decisions/0022) -- a free policy-category
+    check plus a paid pose/risk review, both against the actual image and
+    prompt about to be submitted. A flag from either layer prints the
+    concern and requires confirmation (`_confirm`) to proceed with that
+    scene; under `auto_yes` (--yes), a flag skips that scene rather than
+    auto-proceeding, same precedent as 0019's contradicted-flag refusal.
+    This skips only the flagged scene, not the whole run -- each run_dir is
+    an independent scene, and one flagged scene shouldn't block generating
+    the others.
 
     `video_seconds`, if given, requests that duration (see 0012 for why
     it's not validated client-side).
@@ -695,6 +730,12 @@ def _run_video_generation_only(
         if mock
         else {}
     )
+    policy_check_kwargs = (
+        {"moderation_fn": _mock_moderation_policy_check} if mock else {}
+    )
+    risk_review_kwargs = (
+        {"completion_fn": _mock_moderation_risk_review} if mock else {}
+    )
 
     video_model = video_model or get_stage_model("video_generation")
 
@@ -710,6 +751,40 @@ def _run_video_generation_only(
         print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
         image_path, prompt = _load_previz_output(run_dir, prompt_override=video_prompt)
         print(f"Source: {run_dir} (image: {image_path})")
+
+        print("Running moderation pre-flight (docs/decisions/0022)...")
+        policy_result = run_moderation_policy_check(prompt, image_path, **policy_check_kwargs)
+        risk_review = run_moderation_risk_review(image_path, **risk_review_kwargs)
+
+        concerns = []
+        if policy_result.flagged:
+            concerns.append(
+                "omni-moderation-latest flagged categories: "
+                + ", ".join(policy_result.flagged_categories)
+            )
+        if risk_review.flagged:
+            concerns.append(f"pose/risk review: {risk_review.concern}")
+
+        if concerns:
+            print("\nModeration pre-flight raised a concern before spending on video generation:")
+            for concern in concerns:
+                print(f"- {concern}")
+            log_path = run_dir / "run_log.json"
+            log = json.loads(log_path.read_text())
+            log.setdefault("moderation_preflight_flags", []).append(
+                {"concerns": concerns, "prompt_used": prompt}
+            )
+            log_path.write_text(json.dumps(log, indent=2, default=str))
+
+            if auto_yes:
+                print(
+                    "\n--yes won't auto-proceed past a moderation pre-flight flag -- "
+                    f"skipping {run_dir}. Rerun without --yes to review and confirm."
+                )
+                continue
+            if not _confirm("Proceed with video generation for this scene anyway?"):
+                print(f"Skipped {run_dir} by user choice.")
+                continue
 
         # Microsecond precision, not just seconds -- two attempts against
         # the same previz output (e.g. comparing --video-seconds values)
@@ -844,6 +919,7 @@ def main() -> None:
         _run_video_generation_only(
             args.video_gen_from,
             mock=args.mock,
+            auto_yes=args.yes,
             video_seconds=args.video_seconds,
             video_prompt=args.video_prompt,
         )

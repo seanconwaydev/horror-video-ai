@@ -78,6 +78,8 @@ def test_real_project_config_is_valid():
         "previz",
         "previz_review",
         "video_generation",
+        "moderation_check",
+        "moderation_review",
         "narrative",
         "narrative_review",
         "shot_list",
