@@ -98,6 +98,25 @@ def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
     assert "undeveloped in 1903" in result.prompt_used
 
 
+def test_run_previz_stage_prompt_warns_against_claims_from_other_eras(tmp_path):
+    # Regression test: a real run depicting Giza in 1991-1993 included a
+    # true, correctly-cited research claim about a *recent* LED lighting
+    # upgrade at the pyramids -- with no signal that it didn't apply to the
+    # depicted moment, the image model rendered modern wall lamps into the
+    # scene three times in a row (all three real reviews rejected it for
+    # exactly this anachronism). The prompt must now tell the model claims
+    # can describe other eras and only the stated Time should be depicted.
+    result = run_previz_stage(
+        _fact_check_result(),
+        model="gemini/gemini-2.5-flash-image",
+        image_fn=_fake_image_fn(_TINY_PNG_B64),
+        output_dir=tmp_path,
+    )
+
+    assert "December 1903" in result.prompt_used
+    assert "other times" in result.prompt_used
+
+
 def test_run_previz_stage_refuses_unresolved_premise_conflict(tmp_path):
     result_with_conflict = FactCheckResult(
         fact_sheet=_fact_check_result().fact_sheet,

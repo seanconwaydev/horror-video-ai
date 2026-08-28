@@ -9,6 +9,7 @@ from PIL import Image
 from historical_video_ai.cli import (
     _confirm,
     _generate_previz_with_review,
+    _load_fact_sheet_from_fixture,
     _load_fixture,
     _load_previz_output,
     _prompt_if_missing,
@@ -93,6 +94,28 @@ def test_load_fixture_reconstructs_flags(tmp_path):
     ]
 
 
+def test_load_fact_sheet_from_fixture_works_without_fact_check_flags(tmp_path):
+    # Regression test: a fixture saved after a real fact-check-stage crash
+    # has research but no "fact_check_flags" key at all (docs/decisions/
+    # 0015 persists research before fact-check runs) -- this must still
+    # load, unlike _load_fixture which requires a completed fact-check.
+    payload = {
+        "time": "December 1903",
+        "place": "Kitty Hawk, North Carolina",
+        "description": "watches a flying machine lift off from the dunes.",
+        "research_claims": [
+            {"text": "A claim.", "source": "A source", "date": None, "names": []}
+        ],
+    }
+    path = tmp_path / "fixture.json"
+    path.write_text(json.dumps(payload))
+
+    fact_sheet = _load_fact_sheet_from_fixture(path)
+
+    assert fact_sheet.time == "December 1903"
+    assert fact_sheet.claims == [Claim(text="A claim.", source="A source")]
+
+
 @pytest.mark.parametrize("missing_field", ["time", "place", "description"])
 def test_load_fixture_raises_for_empty_required_field(tmp_path, missing_field):
     path = _write_fixture(tmp_path, **{missing_field: ""})
@@ -175,7 +198,7 @@ def test_prompt_if_missing_auto_yes_passes_through_a_given_value():
     assert _prompt_if_missing("July 1969", "Time", auto_yes=True) == "July 1969"
 
 
-def test_resolve_flags_auto_yes_accepts_every_flag_without_calling_input(monkeypatch):
+def test_resolve_flags_auto_yes_accepts_uncertain_flags_without_calling_input(monkeypatch):
     def _explode(_prompt):
         raise AssertionError("input() should not be called under auto_yes")
 
@@ -183,12 +206,33 @@ def test_resolve_flags_auto_yes_accepts_every_flag_without_calling_input(monkeyp
     fact_sheet = _fact_sheet_with_two_claims()
     flags = [
         ClaimFlag(claim_text="Claim A", concern="Might be off.", severity="uncertain"),
-        ClaimFlag(claim_text="Claim B", concern="Also might be off.", severity="contradicted"),
+        ClaimFlag(claim_text="Claim B", concern="Also might be off.", severity="uncertain"),
     ]
 
     resolved = _resolve_flags(fact_sheet, flags, auto_yes=True)
 
     assert resolved.claims == fact_sheet.claims
+
+
+def test_resolve_flags_auto_yes_stops_on_a_contradicted_flag(monkeypatch):
+    # A "contradicted" flag means fact-check asserts a specific competing
+    # fact, not just soft doubt -- --yes must not blind-accept that (a real
+    # run did exactly this once; the flag happened to itself be a
+    # fact-check false positive, but --yes had no way to know that either
+    # way). See docs/decisions/0019.
+    def _explode(_prompt):
+        raise AssertionError("input() should not be called under auto_yes")
+
+    monkeypatch.setattr("builtins.input", _explode)
+    fact_sheet = _fact_sheet_with_two_claims()
+    flags = [
+        ClaimFlag(claim_text="Claim A", concern="Might be off.", severity="uncertain"),
+        ClaimFlag(claim_text="Claim B", concern="Actually wrong.", severity="contradicted"),
+    ]
+
+    resolved = _resolve_flags(fact_sheet, flags, auto_yes=True)
+
+    assert resolved is None
 
 
 def test_resolve_flags_returns_same_fact_sheet_when_no_flags():
@@ -291,6 +335,39 @@ def _resolve_premise_conflict_kwargs(completion_fn):
         "fact_check_model": "anthropic/claude-sonnet-5",
         "completion_kwargs": {"completion_fn": completion_fn},
     }
+
+
+def test_run_research_and_fact_check_skips_research_when_fact_sheet_given(monkeypatch):
+    # Resuming a research-only fixture (docs/decisions/0015/0018): research
+    # is already known, so this should jump straight to fact-check without
+    # calling run_research_stage (which would need a real research call).
+    monkeypatch.setattr("builtins.input", lambda _: "y")  # "Proceed to fact-check?"
+    existing_fact_sheet = _fact_sheet_with_two_claims()
+    research_calls = []
+
+    def _completion(**kwargs):
+        research_calls.append(kwargs["messages"][0]["content"])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"flags": []})))]
+        )
+
+    result = _run_research_and_fact_check(
+        existing_fact_sheet.time,
+        existing_fact_sheet.place,
+        existing_fact_sheet.description,
+        research_model="anthropic/claude-sonnet-5",
+        fact_check_model="anthropic/claude-sonnet-5",
+        completion_kwargs={"completion_fn": _completion},
+        fact_sheet=existing_fact_sheet,
+    )
+
+    assert result is not None
+    new_fact_sheet, fact_check_result = result
+    assert new_fact_sheet is existing_fact_sheet
+    assert fact_check_result.flags == []
+    # Only one completion call happened -- fact-check's -- not a research one.
+    assert len(research_calls) == 1
+    assert "Claims to check" in research_calls[0]
 
 
 def test_run_research_and_fact_check_calls_on_research_completed_before_fact_check(monkeypatch):
