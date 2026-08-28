@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
+    _check_video_prompt_practices,
     _confirm,
     _generate_previz_with_review,
     _load_fact_sheet_from_fixture,
@@ -739,6 +740,61 @@ def test_run_video_generation_only_video_prompt_overrides_saved_prompt(tmp_path)
     # The original previz prompt on record is untouched -- only this
     # video attempt used the override.
     assert log["previz_prompt_used"] == "Scene A's original previz prompt."
+
+
+def test_check_video_prompt_practices_flags_missing_character_block():
+    found = _check_video_prompt_practices("Just a plain description with no structure.")
+    assert any("CHARACTER" in w for w in found)
+
+
+def test_check_video_prompt_practices_flags_missing_audio():
+    found = _check_video_prompt_practices("CHARACTER: Someone\nAction: walks.")
+    assert any("Audio" in w for w in found)
+
+
+def test_check_video_prompt_practices_flags_too_many_beats():
+    prompt = "CHARACTER: Someone\nAudio: footsteps.\n" + "".join(
+        f"({n}-{n + 1}s) Something happens.\n" for n in range(5)
+    )
+    found = _check_video_prompt_practices(prompt)
+    assert any("beats" in w for w in found)
+
+
+def test_check_video_prompt_practices_flags_risky_wording():
+    prompt = "CHARACTER: Someone\nAudio: footsteps.\nAction: prepares to attack with a weapon."
+    found = _check_video_prompt_practices(prompt)
+    assert any("attack" in w and "weapon" in w for w in found)
+
+
+def test_check_video_prompt_practices_returns_nothing_for_a_well_formed_prompt():
+    prompt = (
+        "CHARACTER: Someone\n"
+        "ROLE: main\n"
+        "(0-3s) Action: walks calmly across a room.\n"
+        "Audio: footsteps on wood."
+    )
+    assert _check_video_prompt_practices(prompt) == []
+
+
+def test_run_video_generation_only_prints_practice_warnings_but_still_generates(
+    tmp_path, capsys
+):
+    # Advisory only -- warnings are printed, generation still proceeds.
+    source_a = tmp_path / "source_run_a"
+    _write_previz_run_log(source_a, prompt="Scene A's original previz prompt.")
+
+    _run_video_generation_only(
+        [source_a],
+        mock=True,
+        video_model="openai/sora-2",
+        video_prompt="No structure at all here.",
+    )
+
+    captured = capsys.readouterr()
+    assert "doesn't follow known best practice" in captured.out
+    assert "CHARACTER" in captured.out
+    log = json.loads((source_a / "run_log.json").read_text())
+    assert len(log["videos"]) == 1  # still generated despite the warnings
 
 
 def test_run_video_generation_only_accumulates_multiple_video_attempts(tmp_path):
