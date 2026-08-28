@@ -44,6 +44,23 @@ previz_review:
 video_generation:
   model: "openai/sora-2"
 
+# moderation_check / moderation_review: a pre-flight pair gating every real
+# video_generation call, not a pipeline.md-numbered stage of its own -- see
+# docs/decisions/0022-video-generation-moderation-preflight.md.
+#
+# moderation_check (layer 1, free): OpenAI's own omni-moderation-latest
+# endpoint via litellm.moderation() -- the only model it supports today.
+# moderation_review (layer 2, paid): an independent vision-capable model
+# checking for pose/action patterns known to trip Sora's own moderation
+# even when no literal policy category is violated. Same model as
+# previz_review, same "not the same model checking its own work" reasoning.
+
+moderation_check:
+  model: "openai/omni-moderation-latest"
+
+moderation_review:
+  model: "anthropic/claude-sonnet-5"
+
 # Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
 # stay as placeholders so the full pipeline vision in docs/pipeline.md still
 # has a config slot waiting for it. Untouched, still "anthropic/claude-sonnet-5"
