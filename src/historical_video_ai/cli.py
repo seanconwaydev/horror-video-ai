@@ -595,6 +595,60 @@ def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) ->
     return image_path, prompt_used
 
 
+# Wording that has actually tripped real Sora moderation in this project
+# (docs/playbook/video-generation-prompting.md) -- not a claimed-complete
+# list, just the concrete evidence gathered so far.
+_VIDEO_PROMPT_RISK_WORDS = frozenset(
+    {"fight", "attack", "kill", "blood", "injury", "weapon", "battle", "war", "die", "tactical"}
+)
+# Research found 2-3 sequential beats is the practical ceiling for one
+# generation call before quality degrades (docs/playbook/video-generation-
+# prompting.md) -- flagged, not enforced, since a human may have a good
+# reason to try more anyway.
+_MAX_RECOMMENDED_BEATS = 3
+
+
+def _check_video_prompt_practices(prompt: str) -> list[str]:
+    """Cheap, mechanical checks against docs/playbook/video-generation-
+    prompting.md's findings -- advisory only, never blocks a run. Exists
+    because a hand-written --video-prompt is free-form text with no
+    structure enforced anywhere, and it's easy to leave out something the
+    playbook already learned the hard way (a real run did exactly this).
+    Deliberately narrow: flags concrete, objectively-checkable omissions
+    (no character block, no audio direction, too many beats crammed into
+    one call, wording that's tripped real moderation before) rather than
+    judging actual prompt quality, which isn't something this can do
+    reliably and isn't its job -- a human still decides whether to proceed.
+    """
+    found = []
+    if "CHARACTER:" not in prompt:
+        found.append(
+            "no 'CHARACTER:' block -- character consistency across beats relies on "
+            "reusing one verbatim"
+        )
+    if "Audio:" not in prompt:
+        found.append(
+            "no 'Audio:' direction -- Sora generates audio natively and expects to be "
+            "told what to hear"
+        )
+    beat_count = len(re.findall(r"\(\d+-\d+s\)", prompt))
+    if beat_count > _MAX_RECOMMENDED_BEATS:
+        found.append(
+            f"{beat_count} timecoded beats in one prompt -- {_MAX_RECOMMENDED_BEATS} is "
+            "the practical ceiling before quality degrades; consider a separate image + "
+            "generation per beat instead"
+        )
+    risk_words = sorted(
+        w for w in _VIDEO_PROMPT_RISK_WORDS if re.search(rf"\b{w}\b", prompt, re.IGNORECASE)
+    )
+    if risk_words:
+        found.append(
+            f"wording that has tripped real moderation before: {', '.join(risk_words)} -- "
+            "consider neutral, film-direction language instead"
+        )
+    return found
+
+
 def _run_video_generation_only(
     run_dirs: list[Path],
     *,
@@ -619,7 +673,10 @@ def _run_video_generation_only(
     shape, since this exists for testing one hand-written prompt against
     one (or a few identically-treated) already-approved image(s), not for
     driving several different scenes' worth of independent prompts at
-    once.
+    once. When `video_prompt` is given, it's checked against
+    `_check_video_prompt_practices` first -- printed as warnings, never
+    blocking (docs/decisions/0021) -- since this is free-form hand-written
+    text with nothing else enforcing the playbook's own findings on it.
 
     Each video is written directly into its source run_dir as
     `video_<timestamp>.mp4` -- the timestamp avoids collisions when
@@ -640,6 +697,14 @@ def _run_video_generation_only(
     )
 
     video_model = video_model or get_stage_model("video_generation")
+
+    if video_prompt is not None:
+        practice_warnings = _check_video_prompt_practices(video_prompt)
+        if practice_warnings:
+            print("\n--video-prompt doesn't follow known best practice:")
+            for warning in practice_warnings:
+                print(f"- {warning}")
+            print("Proceeding anyway -- this is advisory, not a block.")
 
     for i, run_dir in enumerate(run_dirs, start=1):
         print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
