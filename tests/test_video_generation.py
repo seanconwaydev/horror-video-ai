@@ -113,6 +113,30 @@ def test_run_video_generation_stage_raises_when_aspect_ratio_too_different(tmp_p
         )
 
 
+def test_run_video_generation_stage_rejects_undocumented_seconds_value(tmp_path):
+    # Regression test: a real off-enum value ("6") didn't cleanly reject
+    # at the API -- it corrupted the request in a way that surfaced as an
+    # unrelated `input_reference` error, not a clear "bad duration"
+    # message (docs/decisions/0020). Must be caught before any API call.
+    image_path = _write_fake_image(tmp_path)
+
+    def _explode(**kwargs):
+        raise AssertionError("video_fn should not be called for an invalid seconds value")
+
+    with pytest.raises(VideoGenerationError, match="isn't a supported value"):
+        run_video_generation_stage(
+            image_path,
+            "a prompt",
+            model="openai/sora-2",
+            seconds="6",
+            video_fn=_explode,
+            status_fn=_explode,
+            content_fn=_explode,
+            sleep_fn=lambda _seconds: None,
+            output_dir=tmp_path,
+        )
+
+
 def test_run_video_generation_stage_defaults_seconds_and_passes_it_through(tmp_path):
     image_path = _write_fake_image(tmp_path)
     captured = {}

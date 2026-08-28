@@ -631,6 +631,21 @@ def test_load_previz_output_returns_image_path_and_prompt(tmp_path):
     assert prompt == "Scene one's prompt."
 
 
+def test_load_previz_output_prompt_override_replaces_saved_prompt(tmp_path):
+    # --video-prompt: test a hand-written prompt against an already-
+    # approved image without a fresh previz pass. Image path still comes
+    # from the saved run -- only the prompt text is substituted.
+    run_dir = tmp_path / "run_1"
+    image_path = _write_previz_run_log(run_dir, prompt="Scene one's prompt.")
+
+    result_image_path, prompt = _load_previz_output(
+        run_dir, prompt_override="A hand-written video-specific prompt."
+    )
+
+    assert result_image_path == image_path
+    assert prompt == "A hand-written video-specific prompt."
+
+
 def test_load_previz_output_raises_when_no_run_log(tmp_path):
     run_dir = tmp_path / "run_missing"
     run_dir.mkdir()
@@ -694,6 +709,36 @@ def test_run_video_generation_only_appends_to_existing_run_log(tmp_path):
     assert len(log["videos"]) == 1
     assert log["videos"][0]["video_generation_model"] == "openai/sora-2"
     assert Path(log["videos"][0]["video_path"]).parent == source_a
+
+
+def test_run_video_generation_only_records_prompt_used_per_video(tmp_path):
+    source_a = tmp_path / "source_run_a"
+    _write_previz_run_log(source_a, prompt="Scene A's prompt.")
+
+    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+
+    log = json.loads((source_a / "run_log.json").read_text())
+    assert log["videos"][0]["prompt_used"] == "Scene A's prompt."
+
+
+def test_run_video_generation_only_video_prompt_overrides_saved_prompt(tmp_path):
+    # --video-prompt: test a hand-written prompt against an already-
+    # approved image without a fresh previz pass.
+    source_a = tmp_path / "source_run_a"
+    _write_previz_run_log(source_a, prompt="Scene A's original previz prompt.")
+
+    _run_video_generation_only(
+        [source_a],
+        mock=True,
+        video_model="openai/sora-2",
+        video_prompt="A hand-written, timecoded video prompt.",
+    )
+
+    log = json.loads((source_a / "run_log.json").read_text())
+    assert log["videos"][0]["prompt_used"] == "A hand-written, timecoded video prompt."
+    # The original previz prompt on record is untouched -- only this
+    # video attempt used the override.
+    assert log["previz_prompt_used"] == "Scene A's original previz prompt."
 
 
 def test_run_video_generation_only_accumulates_multiple_video_attempts(tmp_path):
