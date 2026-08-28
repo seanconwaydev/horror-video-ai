@@ -23,8 +23,6 @@ both pass clean.
 
 from __future__ import annotations
 
-import base64
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +30,8 @@ from pathlib import Path
 import litellm
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.json_utils import strip_markdown_json_fence
+from historical_video_ai.image_utils import build_image_content_block
+from historical_video_ai.json_utils import parse_json_response
 
 
 class ModerationError(Exception):
@@ -74,11 +73,10 @@ def run_moderation_policy_check(
     'flagged'.
     """
     resolved_model = model or get_stage_model("moderation_check")
-    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     response = moderation_fn(
         input=[
             {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            build_image_content_block(image_path),
         ],
         model=resolved_model,
     )
@@ -132,10 +130,7 @@ null if flagged is false>"
 
 
 def _parse_risk_review(raw_content: str) -> ModerationRiskReview:
-    try:
-        data = json.loads(strip_markdown_json_fence(raw_content))
-    except json.JSONDecodeError as exc:
-        raise ModerationError(f"Moderation risk review response was not valid JSON: {exc}") from exc
+    data = parse_json_response(raw_content, ModerationError, "Moderation risk review response")
 
     if not isinstance(data, dict) or "flagged" not in data:
         raise ModerationError("Moderation risk review response is missing 'flagged'")
@@ -170,7 +165,6 @@ def run_moderation_risk_review(
     known_patterns_block = "\n".join(f"- {p}" for p in _KNOWN_MODERATION_RISK_PATTERNS)
     prompt = _RISK_REVIEW_PROMPT_TEMPLATE.format(known_patterns=known_patterns_block)
 
-    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     response = completion_fn(
         model=resolved_model,
         messages=[
@@ -178,10 +172,7 @@ def run_moderation_risk_review(
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-                    },
+                    build_image_content_block(image_path),
                 ],
             }
         ],

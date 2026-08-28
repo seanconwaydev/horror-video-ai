@@ -218,12 +218,24 @@ def _resolve_flags(
             print("\nStopping -- rerun without --yes to review this claim.")
             return None
 
-    claims_by_text = {c.text: c for c in fact_sheet.claims}
-    resolved_claims = list(fact_sheet.claims)
+    # Indexed, not keyed by text: nothing upstream prevents two distinct
+    # claims from sharing identical text, and resolving one must not
+    # silently affect an unrelated claim that merely happens to match.
+    # `claimed_indices` tracks which original positions a flag has already
+    # consumed, so each flag resolves exactly one claim -- the first
+    # not-yet-consumed match -- rather than every claim with that text.
+    resolved_claims: list[Claim | None] = list(fact_sheet.claims)
+    claimed_indices: set[int] = set()
 
     print("\nResolve flagged claims:")
     for flag in flags:
-        claim = claims_by_text[flag.claim_text]
+        idx = next(
+            i
+            for i, c in enumerate(fact_sheet.claims)
+            if i not in claimed_indices and c.text == flag.claim_text
+        )
+        claimed_indices.add(idx)
+        claim = fact_sheet.claims[idx]
         print(f"\nClaim: {claim.text}")
         print(f"Flag [{flag.severity}]: {flag.concern}")
         if auto_yes:
@@ -233,18 +245,15 @@ def _resolve_flags(
         while action not in ("a", "c", "s"):
             action = input("(a)ccept / (c)ut / (s)often this claim? [a/c/s]: ").strip().lower()
         if action == "c":
-            resolved_claims = [c for c in resolved_claims if c.text != claim.text]
+            resolved_claims[idx] = None
         elif action == "s":
             new_text = ""
             while not new_text:
                 new_text = input("New text for this claim: ").strip()
-            resolved_claims = [
-                dataclasses.replace(c, text=new_text) if c.text == claim.text else c
-                for c in resolved_claims
-            ]
+            resolved_claims[idx] = dataclasses.replace(claim, text=new_text)
         # "a" (accept): keep the claim exactly as research produced it.
 
-    return dataclasses.replace(fact_sheet, claims=resolved_claims)
+    return dataclasses.replace(fact_sheet, claims=[c for c in resolved_claims if c is not None])
 
 
 def _record_research_claims(
@@ -491,12 +500,21 @@ def _project_root() -> Path:
     was invoked from. (Previously outputs/ was created relative to the
     current working directory, which silently nested outputs/outputs/ if
     you happened to be inside a prior run's outputs/ folder when you ran
-    the command again.)"""
+    the command again.)
+
+    Raises RuntimeError if no ancestor has a pyproject.toml -- fail loud
+    rather than guess at a directory (e.g. a fixed parents[2] offset) that
+    was never actually confirmed to be the project root, which would risk
+    reintroducing the exact silent-nesting bug this function exists to
+    prevent."""
     here = Path(__file__).resolve()
     for candidate in (here, *here.parents):
         if (candidate / "pyproject.toml").exists():
             return candidate
-    return here.parents[2]  # fallback: src/historical_video_ai/cli.py -> repo root
+    raise RuntimeError(
+        f"Could not find pyproject.toml in any ancestor directory of {here} -- "
+        "outputs/ needs a real, confirmed project root."
+    )
 
 
 def _run_dir(slug: str | None = None) -> Path:
@@ -517,6 +535,10 @@ def _run_dir(slug: str | None = None) -> Path:
 
 def _write_log(out_dir: Path, log: dict) -> None:
     (out_dir / "run_log.json").write_text(json.dumps(log, indent=2, default=str))
+
+
+def _read_log(out_dir: Path) -> dict:
+    return json.loads((out_dir / "run_log.json").read_text())
 
 
 def _load_fact_sheet_from_fixture(path: Path) -> FactSheet:
@@ -654,15 +676,24 @@ def _check_video_prompt_practices(prompt: str) -> list[str]:
             "no 'Audio:' direction -- Sora generates audio natively and expects to be "
             "told what to hear"
         )
-    beat_count = len(re.findall(r"\(\d+-\d+s\)", prompt))
+    # [-–] not just "-": the playbook's own documented timecode format
+    # ("(0–3s)") uses an en-dash, not an ASCII hyphen -- an ASCII-only
+    # pattern silently counted zero beats in a prompt written exactly the
+    # way the playbook shows.
+    beat_count = len(re.findall(r"\(\d+[-–]\d+s\)", prompt))
     if beat_count > _MAX_RECOMMENDED_BEATS:
         found.append(
             f"{beat_count} timecoded beats in one prompt -- {_MAX_RECOMMENDED_BEATS} is "
             "the practical ceiling before quality degrades; consider a separate image + "
             "generation per beat instead"
         )
+    # \w* not a bare \b...\b: catches regular inflected forms ("attacking",
+    # "weapons", "killing") that an exact-word match silently let through --
+    # still not exhaustive for irregular forms ("die" -> "dying"), same
+    # "concrete evidence, not a claimed-complete list" scope as the word
+    # list itself above.
     risk_words = sorted(
-        w for w in _VIDEO_PROMPT_RISK_WORDS if re.search(rf"\b{w}\b", prompt, re.IGNORECASE)
+        w for w in _VIDEO_PROMPT_RISK_WORDS if re.search(rf"\b{w}\w*\b", prompt, re.IGNORECASE)
     )
     if risk_words:
         found.append(
@@ -769,12 +800,11 @@ def _run_video_generation_only(
             print("\nModeration pre-flight raised a concern before spending on video generation:")
             for concern in concerns:
                 print(f"- {concern}")
-            log_path = run_dir / "run_log.json"
-            log = json.loads(log_path.read_text())
+            log = _read_log(run_dir)
             log.setdefault("moderation_preflight_flags", []).append(
                 {"concerns": concerns, "prompt_used": prompt}
             )
-            log_path.write_text(json.dumps(log, indent=2, default=str))
+            _write_log(run_dir, log)
 
             if auto_yes:
                 print(
@@ -806,8 +836,7 @@ def _run_video_generation_only(
             f"(requested {result.seconds_requested}s, provider reports {result.seconds_actual}s)"
         )
 
-        log_path = run_dir / "run_log.json"
-        log = json.loads(log_path.read_text())
+        log = _read_log(run_dir)
         log.setdefault("videos", []).append(
             {
                 "video_generation_model": video_model,
@@ -822,7 +851,7 @@ def _run_video_generation_only(
                 "prompt_used": prompt,
             }
         )
-        log_path.write_text(json.dumps(log, indent=2, default=str))
+        _write_log(run_dir, log)
 
     print("\nDone.")
 

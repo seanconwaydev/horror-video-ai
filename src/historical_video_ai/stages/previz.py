@@ -14,7 +14,6 @@ real key, not just a call-shape guess.
 from __future__ import annotations
 
 import base64
-import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,8 +22,10 @@ from pathlib import Path
 import litellm
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.json_utils import strip_markdown_json_fence
+from historical_video_ai.image_utils import build_image_content_block
+from historical_video_ai.json_utils import parse_json_response
 from historical_video_ai.stages.fact_check import FactCheckResult
+from historical_video_ai.stages.video_generation import _TARGET_VIDEO_SIZE_STR
 
 # Errors worth retrying automatically -- transient in nature (server
 # overload, a network blip, a rate limit that clears with time), unlike
@@ -51,13 +52,14 @@ class PrevizError(Exception):
 
 
 # Requests the aspect ratio closest to Sora-2's fixed 720x1280 portrait size
-# (video_generation.py's own target size for the same reason -- see
+# -- imported from video_generation.py rather than a second hardcoded
+# "720x1280", so the two modules can't silently drift apart (see
 # docs/decisions/0011). gemini-2.5-flash-image only supports requesting an
 # aspect ratio, not an exact pixel size, so this is a hint litellm maps to
 # Gemini's nearest named ratio ("9:16"), not a literal request for these
 # exact pixels -- video_generation.py still resizes the actual output to
 # Sora's exact required dimensions before submission.
-_PREVIZ_SIZE_HINT = "720x1280"
+_PREVIZ_SIZE_HINT = _TARGET_VIDEO_SIZE_STR
 
 
 @dataclass(frozen=True)
@@ -205,10 +207,7 @@ markdown fences) matching this exact shape:
 
 
 def _parse_review(raw_content: str) -> PrevizReview:
-    try:
-        data = json.loads(strip_markdown_json_fence(raw_content))
-    except json.JSONDecodeError as exc:
-        raise PrevizError(f"Previz review response was not valid JSON: {exc}") from exc
+    data = parse_json_response(raw_content, PrevizError, "Previz review response")
 
     if not isinstance(data, dict) or "accepted" not in data:
         raise PrevizError("Previz review response is missing 'accepted'")
@@ -253,7 +252,6 @@ def run_previz_review_stage(
         claims_block=detail_lines or "(no claims)",
     )
 
-    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     response = completion_fn(
         model=resolved_model,
         messages=[
@@ -261,10 +259,7 @@ def run_previz_review_stage(
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-                    },
+                    build_image_content_block(image_path),
                 ],
             }
         ],
