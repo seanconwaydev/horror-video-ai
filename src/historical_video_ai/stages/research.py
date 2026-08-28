@@ -13,14 +13,13 @@ be wired in here the way Gemini's grounding does (see the fact_check stage).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import litellm
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.json_utils import strip_markdown_json_fence
+from historical_video_ai.json_utils import parse_json_response
 
 
 class ResearchError(Exception):
@@ -88,10 +87,7 @@ exact shape:
 
 
 def _parse_claims(raw_content: str) -> list[Claim]:
-    try:
-        data = json.loads(strip_markdown_json_fence(raw_content))
-    except json.JSONDecodeError as exc:
-        raise ResearchError(f"Research stage response was not valid JSON: {exc}") from exc
+    data = parse_json_response(raw_content, ResearchError, "Research stage response")
 
     if not isinstance(data, dict) or "claims" not in data:
         raise ResearchError("Research stage response is missing 'claims'")

@@ -13,6 +13,7 @@ from historical_video_ai.cli import (
     _load_fact_sheet_from_fixture,
     _load_fixture,
     _load_previz_output,
+    _project_root,
     _prompt_if_missing,
     _resolve_flags,
     _resolve_premise_conflict,
@@ -276,6 +277,28 @@ def test_resolve_flags_soften_replaces_claim_text_only(monkeypatch):
     assert resolved_a.text == "A softened version of claim A"
     assert resolved_a.source == "Source A"  # only text changes, not the rest of the claim
     assert resolved.claims[1].text == "Claim B"
+
+
+def test_resolve_flags_cut_does_not_affect_an_unflagged_claim_with_identical_text(monkeypatch):
+    # Regression test: nothing upstream prevents two distinct claims from
+    # sharing identical text. Cutting the flagged one must not silently
+    # remove an unflagged claim that merely happens to match by text.
+    fact_sheet = FactSheet(
+        time="December 1903",
+        place="Kitty Hawk, North Carolina",
+        description="watches a flying machine lift off from the dunes.",
+        claims=[
+            Claim(text="Duplicate text", source="Source A"),
+            Claim(text="Duplicate text", source="Source B"),
+        ],
+    )
+    flags = [ClaimFlag(claim_text="Duplicate text", concern="Wrong.", severity="contradicted")]
+    monkeypatch.setattr("builtins.input", lambda _: "c")
+
+    resolved = _resolve_flags(fact_sheet, flags)
+
+    assert len(resolved.claims) == 1
+    assert resolved.claims[0].source == "Source B"
 
 
 def test_resolve_flags_reprompts_on_invalid_action(monkeypatch):
@@ -760,8 +783,27 @@ def test_check_video_prompt_practices_flags_too_many_beats():
     assert any("beats" in w for w in found)
 
 
+def test_check_video_prompt_practices_flags_too_many_beats_with_en_dash_timecodes():
+    # Regression test: the playbook's own documented timecode format uses
+    # an en-dash ("(0–3s)"), not an ASCII hyphen -- a prompt written
+    # exactly that way must still be counted.
+    prompt = "CHARACTER: Someone\nAudio: footsteps.\n" + "".join(
+        f"({n}–{n + 1}s) Something happens.\n" for n in range(5)
+    )
+    found = _check_video_prompt_practices(prompt)
+    assert any("beats" in w for w in found)
+
+
 def test_check_video_prompt_practices_flags_risky_wording():
     prompt = "CHARACTER: Someone\nAudio: footsteps.\nAction: prepares to attack with a weapon."
+    found = _check_video_prompt_practices(prompt)
+    assert any("attack" in w and "weapon" in w for w in found)
+
+
+def test_check_video_prompt_practices_flags_inflected_risky_wording():
+    # Regression test: an exact-word match let inflected forms of the same
+    # risk words through undetected.
+    prompt = "CHARACTER: Someone\nAudio: footsteps.\nAction: soldiers attacking with weapons."
     found = _check_video_prompt_practices(prompt)
     assert any("attack" in w and "weapon" in w for w in found)
 
@@ -824,6 +866,15 @@ def test_slugify_truncates_at_a_word_boundary():
 
 def test_slugify_returns_empty_for_content_free_input():
     assert _slugify("   ...   ") == ""
+
+
+def test_project_root_raises_when_no_pyproject_toml_found(monkeypatch):
+    # Regression test: the old fallback silently guessed a fixed parents[2]
+    # offset instead of failing loud when no ancestor has a pyproject.toml.
+    monkeypatch.setattr(Path, "exists", lambda self: False)
+
+    with pytest.raises(RuntimeError, match="Could not find pyproject.toml"):
+        _project_root()
 
 
 def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):

@@ -18,6 +18,7 @@ any fence still raises the same JSONDecodeError it always would.
 
 from __future__ import annotations
 
+import json
 import re
 
 _FENCE_PATTERN = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
@@ -34,3 +35,17 @@ def strip_markdown_json_fence(raw: str) -> str:
     stripped = raw.strip()
     match = _FENCE_PATTERN.match(stripped)
     return match.group(1).strip() if match else raw
+
+
+def parse_json_response(raw_content: str, error_cls: type[Exception], context: str) -> object:
+    """Strip a markdown fence if present, then `json.loads` the result --
+    the try/strip/parse/except shape every stage repeats after asking a
+    model to "respond with ONLY a JSON object". Raises
+    `error_cls(f"{context} was not valid JSON: {exc}")` on failure, so each
+    stage keeps its own exception type and message wording while sharing
+    the actual parsing step.
+    """
+    try:
+        return json.loads(strip_markdown_json_fence(raw_content))
+    except json.JSONDecodeError as exc:
+        raise error_cls(f"{context} was not valid JSON: {exc}") from exc
