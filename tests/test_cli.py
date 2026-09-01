@@ -9,7 +9,9 @@ from PIL import Image
 from historical_video_ai.cli import (
     _check_video_prompt_practices,
     _confirm,
+    _generate_beats_with_choices,
     _generate_previz_with_review,
+    _generate_scene_references,
     _load_fact_sheet_from_fixture,
     _load_fixture,
     _load_previz_output,
@@ -24,6 +26,7 @@ from historical_video_ai.cli import (
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
+from historical_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
 
 _TINY_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -629,6 +632,201 @@ def test_generate_previz_with_review_gives_up_after_max_attempts(tmp_path):
     # every rejected attempt archived, no final previz.png left behind
     for n in (1, 2, 3):
         assert (tmp_path / f"previz_attempt_{n}_rejected.png").exists()
+
+
+def _character() -> Character:
+    return Character(
+        id="influencer",
+        face_build="young woman, mid-20s",
+        hair="light brown wavy",
+        wardrobe_signature="white crop top, gray leggings",
+        wardrobe_flexible="accessories may vary",
+        distinguishing_detail="a glowing phone",
+    )
+
+
+def _location() -> Location:
+    return Location(
+        id="street",
+        architecture="stone-paved Pompeii street",
+        fixed_props="an archway entrance",
+        ambient_light="bright midday sun",
+    )
+
+
+def _beat(location_id="street", action="checks her phone") -> Beat:
+    return Beat(
+        location_id=location_id,
+        subject="The influencer",
+        action=action,
+        camera="medium shot",
+        lighting="bright midday sun",
+        style="photorealistic",
+        audio="street ambience",
+        duration_seconds="3",
+    )
+
+
+def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    character_refs, location_refs = _generate_scene_references(
+        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        previz_model="gemini/gemini-2.5-flash-image",
+        image_kwargs={"image_fn": _fake_image_fn},
+        out_dir=tmp_path,
+    )
+
+    assert character_refs["influencer"] == tmp_path / "character_influencer" / "reference.png"
+    assert location_refs["street"] == tmp_path / "location_street" / "reference.png"
+
+
+def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypatch):
+    # First reference offered is rejected ("n"), the regenerated one accepted.
+    responses = iter(["n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    calls = {"n": 0}
+
+    def _counting_image_fn(**kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    character_refs, _ = _generate_scene_references(
+        ScenePlan(characters=[_character()], locations=[], beats=[_beat()]),
+        previz_model="gemini/gemini-2.5-flash-image",
+        image_kwargs={"image_fn": _counting_image_fn},
+        out_dir=tmp_path,
+    )
+
+    assert calls["n"] == 2
+    assert "influencer" in character_refs
+
+
+def _write_reference_png(tmp_path, name):
+    import base64
+
+    path = tmp_path / name
+    path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+    return path
+
+
+def _generate_beats_with_choices_kwargs(out_dir, *, image_fn=_fake_image_fn, edit_fn=_fake_image_fn):
+    return {
+        "previz_model": "gemini/gemini-2.5-flash-image",
+        "review_model": "anthropic/claude-sonnet-5",
+        "image_kwargs": {"image_fn": image_fn, "edit_fn": edit_fn},
+        "review_kwargs": {"completion_fn": _fake_review_completion([(True, None)])},
+        "out_dir": out_dir,
+    }
+
+
+def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
+    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+    char_ref = _write_reference_png(tmp_path, "char_ref.png")
+    loc_ref = _write_reference_png(tmp_path, "loc_ref.png")
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={"influencer": char_ref},
+        location_refs={"street": loc_ref},
+        auto_yes=True,
+        **_generate_beats_with_choices_kwargs(tmp_path),
+    )
+
+    assert len(results) == 1
+    assert results[0]["image_path"] is not None
+    assert results[0]["beat"]["action"] == "checks her phone"
+
+
+def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_path, monkeypatch):
+    responses = iter(["r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    calls = {"n": 0}
+
+    def _counting_image_fn(**kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_counting_image_fn)
+    # Each generation attempt (the rerolled one and the accepted one) goes
+    # through its own previz_review pass before the human choice is even
+    # asked -- two accepted verdicts needed, not one.
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None), (True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert calls["n"] == 2  # one rerolled attempt, then the accepted one
+    assert results[0]["image_path"] is not None
+
+
+def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(tmp_path, monkeypatch):
+    # "e" to edit, then a new action, blank for every other field, then "a" to accept.
+    responses = iter(
+        ["e", "street", "The influencer", "smiles warmly", "", "", "", "", "", "a"]
+    )
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None), (True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["beat"]["action"] == "smiles warmly"
+
+
+def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected(tmp_path):
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")] * 3)}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is None
+    assert len(results[0]["attempts"]) == 3
+
+
+def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_path):
+    # Documented v1 simplification (docs/decisions/0024): Beat has no
+    # character_id field, so with multiple characters the first is used
+    # for every beat.
+    second_character = Character(
+        id="second",
+        face_build="a man",
+        hair="short",
+        wardrobe_signature="a tunic",
+        wardrobe_flexible="none",
+        distinguishing_detail="a beard",
+    )
+    scene_plan = ScenePlan(
+        characters=[_character(), second_character], locations=[_location()], beats=[_beat()]
+    )
+    char_ref = _write_reference_png(tmp_path, "char.png")
+    second_char_ref = _write_reference_png(tmp_path, "char2.png")
+    loc_ref = _write_reference_png(tmp_path, "loc.png")
+    captured = {}
+
+    def _capturing_edit_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={"influencer": char_ref, "second": second_char_ref},
+        location_refs={"street": loc_ref},
+        auto_yes=True,
+        **_generate_beats_with_choices_kwargs(tmp_path, edit_fn=_capturing_edit_fn),
+    )
+
+    assert captured["image"][0] == char_ref.read_bytes()
     assert not (tmp_path / "previz.png").exists()
 
 

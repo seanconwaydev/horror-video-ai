@@ -8,10 +8,15 @@ from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.previz import (
     PrevizError,
+    build_character_sheet_prompt,
+    build_location_reference_prompt,
+    run_beat_image_stage,
     run_previz_review_stage,
     run_previz_stage,
+    run_reference_image_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet
+from historical_video_ai.stages.scene_planning import Beat, Character, Location
 
 # A tiny valid 1x1 PNG, base64-encoded, so tests never touch a real API or
 # write anything that isn't a real (if trivial) image file.
@@ -220,6 +225,237 @@ def test_run_previz_stage_does_not_retry_non_transient_errors(tmp_path):
         )
 
     assert calls["n"] == 1
+
+
+def _write_reference_png(tmp_path, name="reference.png"):
+    import base64
+
+    path = tmp_path / name
+    path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+    return path
+
+
+def test_run_previz_stage_uses_edit_fn_when_character_reference_given(tmp_path):
+    character_ref = _write_reference_png(tmp_path, "character.png")
+    captured = {}
+
+    def _edit_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    def _exploding_image_fn(**kwargs):
+        raise AssertionError("plain image_fn should not be called when a reference is given")
+
+    result = run_previz_stage(
+        _fact_check_result(),
+        image_fn=_exploding_image_fn,
+        edit_fn=_edit_fn,
+        character_reference=character_ref,
+        output_dir=tmp_path,
+    )
+
+    assert result.image_path.exists()
+    assert captured["image"] == character_ref.read_bytes()
+    assert isinstance(captured["image"], bytes)  # raw bytes, not a Path (litellm's real bug)
+
+
+def test_run_previz_stage_sends_both_references_as_a_list_when_both_given(tmp_path):
+    character_ref = _write_reference_png(tmp_path, "character.png")
+    location_ref = _write_reference_png(tmp_path, "location.png")
+    captured = {}
+
+    def _edit_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    run_previz_stage(
+        _fact_check_result(),
+        edit_fn=_edit_fn,
+        character_reference=character_ref,
+        location_reference=location_ref,
+        output_dir=tmp_path,
+    )
+
+    assert captured["image"] == [character_ref.read_bytes(), location_ref.read_bytes()]
+
+
+def test_run_previz_stage_retries_edit_fn_on_transient_error_then_succeeds(tmp_path):
+    character_ref = _write_reference_png(tmp_path, "character.png")
+    calls = {"n": 0}
+
+    def _flaky_edit_fn(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise litellm.exceptions.ServiceUnavailableError(
+                message="simulated 503", llm_provider="gemini", model="gemini-2.5-flash-image"
+            )
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    result = run_previz_stage(
+        _fact_check_result(),
+        edit_fn=_flaky_edit_fn,
+        character_reference=character_ref,
+        output_dir=tmp_path,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.image_path.exists()
+    assert calls["n"] == 2
+
+
+def test_run_reference_image_stage_writes_image_and_returns_prompt(tmp_path):
+    result = run_reference_image_stage(
+        "A neutral character reference shot.",
+        model="gemini/gemini-2.5-flash-image",
+        image_fn=_fake_image_fn(_TINY_PNG_B64),
+        output_dir=tmp_path,
+    )
+
+    assert result.image_path.exists()
+    assert result.image_path.name == "reference.png"
+    assert result.prompt_used == "A neutral character reference shot."
+
+
+def test_run_reference_image_stage_raises_when_no_image_data(tmp_path):
+    def _empty_image_fn(**kwargs):
+        return SimpleNamespace(data=[])
+
+    with pytest.raises(PrevizError, match="no image data"):
+        run_reference_image_stage(
+            "A neutral character reference shot.",
+            image_fn=_empty_image_fn,
+            output_dir=tmp_path,
+        )
+
+
+def test_run_reference_image_stage_retries_on_transient_error_then_succeeds(tmp_path):
+    calls = {"n": 0}
+
+    def _flaky_image_fn(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise litellm.exceptions.ServiceUnavailableError(
+                message="simulated 503", llm_provider="gemini", model="gemini-2.5-flash-image"
+            )
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    result = run_reference_image_stage(
+        "A neutral location reference shot.",
+        image_fn=_flaky_image_fn,
+        output_dir=tmp_path,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.image_path.exists()
+    assert calls["n"] == 3
+
+
+def test_run_reference_image_stage_resolves_model_from_config_when_not_passed(tmp_path):
+    captured = {}
+
+    def _image_fn(**kwargs):
+        captured["model"] = kwargs["model"]
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    run_reference_image_stage("A neutral reference shot.", image_fn=_image_fn, output_dir=tmp_path)
+
+    assert captured["model"] == get_stage_model("previz")
+
+
+def _character() -> Character:
+    return Character(
+        id="influencer",
+        face_build="young woman, mid-20s",
+        hair="light brown wavy",
+        wardrobe_signature="white crop top, gray leggings",
+        wardrobe_flexible="accessories may vary",
+        distinguishing_detail="a glowing phone",
+    )
+
+
+def _location() -> Location:
+    return Location(
+        id="street",
+        architecture="stone-paved Pompeii street",
+        fixed_props="an archway entrance",
+        ambient_light="bright midday sun",
+    )
+
+
+def _beat() -> Beat:
+    return Beat(
+        location_id="street",
+        subject="The influencer",
+        action="checks her phone, puzzled",
+        camera="medium shot, three-quarter angle",
+        lighting="bright midday sun",
+        style="photorealistic",
+        audio="street ambience",
+        duration_seconds="3",
+    )
+
+
+def test_build_character_sheet_prompt_includes_all_character_fields():
+    prompt = build_character_sheet_prompt(_character())
+    assert "light brown wavy" in prompt
+    assert "white crop top, gray leggings" in prompt
+    assert "a glowing phone" in prompt
+    assert "reference sheet, not a story moment" in prompt
+
+
+def test_build_location_reference_prompt_includes_all_location_fields():
+    prompt = build_location_reference_prompt(_location())
+    assert "stone-paved Pompeii street" in prompt
+    assert "an archway entrance" in prompt
+    assert "location reference, not a character shot" in prompt
+
+
+def test_run_beat_image_stage_writes_image_and_prompt_includes_beat_fields(tmp_path):
+    result = run_beat_image_stage(
+        _beat(),
+        character=_character(),
+        location=_location(),
+        model="gemini/gemini-2.5-flash-image",
+        image_fn=_fake_image_fn(_TINY_PNG_B64),
+        output_dir=tmp_path,
+    )
+
+    assert result.image_path.exists()
+    assert "checks her phone, puzzled" in result.prompt_used
+    assert "stone-paved Pompeii street" in result.prompt_used
+    assert "light brown wavy" in result.prompt_used
+
+
+def test_run_beat_image_stage_omits_character_block_when_none_given(tmp_path):
+    result = run_beat_image_stage(
+        _beat(),
+        character=None,
+        location=_location(),
+        image_fn=_fake_image_fn(_TINY_PNG_B64),
+        output_dir=tmp_path,
+    )
+
+    assert "CHARACTER:" not in result.prompt_used
+
+
+def test_run_beat_image_stage_uses_edit_fn_when_references_given(tmp_path):
+    character_ref = _write_reference_png(tmp_path, "character.png")
+    location_ref = _write_reference_png(tmp_path, "location.png")
+    captured = {}
+
+    def _edit_fn(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    run_beat_image_stage(
+        _beat(),
+        character_reference=character_ref,
+        location_reference=location_ref,
+        edit_fn=_edit_fn,
+        output_dir=tmp_path,
+    )
+
+    assert captured["image"] == [character_ref.read_bytes(), location_ref.read_bytes()]
 
 
 def _write_tiny_png(tmp_path):
