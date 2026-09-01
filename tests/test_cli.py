@@ -15,6 +15,7 @@ from historical_video_ai.cli import (
     _load_fact_sheet_from_fixture,
     _load_fixture,
     _load_previz_output,
+    _load_video_gen_targets,
     _project_root,
     _prompt_if_missing,
     _resolve_flags,
@@ -894,6 +895,122 @@ def test_load_previz_output_raises_when_image_file_missing(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="no longer exists"):
         _load_previz_output(run_dir)
+
+
+def _write_beat_image(run_dir, name, *, action="checks her phone") -> dict:
+    beat_dir = run_dir / name
+    beat_dir.mkdir(parents=True, exist_ok=True)
+    image_path = beat_dir / "previz.png"
+    Image.new("RGB", (720, 1280), color="blue").save(image_path, format="PNG")
+    return {
+        "index": int(name.split("_")[1]),
+        "beat": {"action": action},
+        "image_path": str(image_path),
+        "prompt_used": f"Prompt for {name}.",
+        "attempts": [{"attempt": 1, "accepted": True, "concern": None}],
+    }
+
+
+def _write_multi_beat_run_log(run_dir, *, beats=None):
+    """A new-style scene-plan run (docs/decisions/0023/0024) -- one
+    real image per accepted beat, mirroring _generate_beats_with_choices's
+    actual output shape."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if beats is None:
+        beats = [_write_beat_image(run_dir, "beat_1"), _write_beat_image(run_dir, "beat_2")]
+    log = {"previz_beats": beats}
+    (run_dir / "run_log.json").write_text(json.dumps(log))
+    return beats
+
+
+def test_load_video_gen_targets_old_style_returns_single_target(tmp_path):
+    run_dir = tmp_path / "run_old"
+    image_path = _write_previz_run_log(run_dir, prompt="Scene A's prompt.")
+
+    targets = _load_video_gen_targets(run_dir)
+
+    assert len(targets) == 1
+    assert targets[0].image_path == image_path
+    assert targets[0].prompt_used == "Scene A's prompt."
+    assert targets[0].output_dir == run_dir
+    assert targets[0].beat_index is None
+
+
+def test_load_video_gen_targets_multi_beat_returns_one_target_per_accepted_beat(tmp_path):
+    run_dir = tmp_path / "run_new"
+    beats = _write_multi_beat_run_log(run_dir)
+
+    targets = _load_video_gen_targets(run_dir)
+
+    assert len(targets) == 2
+    assert targets[0].image_path == Path(beats[0]["image_path"])
+    assert targets[0].prompt_used == "Prompt for beat_1."
+    assert targets[0].output_dir == Path(beats[0]["image_path"]).parent
+    assert targets[0].beat_index == 1
+    assert targets[1].beat_index == 2
+
+
+def test_load_video_gen_targets_skips_beats_with_no_accepted_image(tmp_path):
+    run_dir = tmp_path / "run_new"
+    accepted = _write_beat_image(run_dir, "beat_1")
+    rejected = {
+        "index": 2,
+        "beat": {"action": "rejected beat"},
+        "image_path": None,
+        "attempts": [{"attempt": 1, "accepted": False, "concern": "Anachronism."}] * 3,
+    }
+    _write_multi_beat_run_log(run_dir, beats=[accepted, rejected])
+
+    targets = _load_video_gen_targets(run_dir)
+
+    assert len(targets) == 1
+    assert targets[0].beat_index == 1
+
+
+def test_load_video_gen_targets_raises_when_no_beat_has_an_accepted_image(tmp_path):
+    run_dir = tmp_path / "run_new"
+    rejected = {
+        "index": 1,
+        "beat": {"action": "rejected beat"},
+        "image_path": None,
+        "attempts": [],
+    }
+    _write_multi_beat_run_log(run_dir, beats=[rejected])
+
+    with pytest.raises(ValueError, match="no beat produced an accepted image"):
+        _load_video_gen_targets(run_dir)
+
+
+def test_load_video_gen_targets_raises_when_accepted_beat_has_no_prompt_used(tmp_path):
+    run_dir = tmp_path / "run_new"
+    beat = _write_beat_image(run_dir, "beat_1")
+    del beat["prompt_used"]
+    _write_multi_beat_run_log(run_dir, beats=[beat])
+
+    with pytest.raises(ValueError, match="no recorded 'prompt_used'"):
+        _load_video_gen_targets(run_dir)
+
+
+def test_load_video_gen_targets_prompt_override_applies_to_every_beat(tmp_path):
+    run_dir = tmp_path / "run_new"
+    _write_multi_beat_run_log(run_dir)
+
+    targets = _load_video_gen_targets(run_dir, prompt_override="A hand-written prompt.")
+
+    assert all(t.prompt_used == "A hand-written prompt." for t in targets)
+
+
+def test_run_video_generation_only_generates_one_video_per_beat(tmp_path):
+    run_dir = tmp_path / "run_new"
+    _write_multi_beat_run_log(run_dir)
+
+    _run_video_generation_only([run_dir], mock=True, video_model="openai/sora-2")
+
+    log = json.loads((run_dir / "run_log.json").read_text())
+    assert len(log["previz_beats"][0]["videos"]) == 1
+    assert len(log["previz_beats"][1]["videos"]) == 1
+    assert list((run_dir / "beat_1").glob("video_*.mp4"))
+    assert list((run_dir / "beat_2").glob("video_*.mp4"))
 
 
 def test_run_video_generation_only_writes_video_into_source_run_dir(tmp_path):
