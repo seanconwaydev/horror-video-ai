@@ -788,6 +788,116 @@ def _load_fixture(path: Path) -> FactCheckResult:
     return FactCheckResult(fact_sheet=fact_sheet, flags=flags, premise_conflict=premise_conflict)
 
 
+@dataclasses.dataclass(frozen=True)
+class VideoGenTarget:
+    """One (image, prompt) pair ready for video generation -- either the
+    whole of an old-style single-image run (docs/decisions/0010), or one
+    accepted beat within a new-style multi-beat scene-plan run
+    (docs/decisions/0023/0024's --video-gen-from follow-up).
+
+    `beat_index` is None for the old-style case; for a beat, it locates
+    where to record a video/moderation-flag result back in the parent
+    run's run_log.json (see _record_video_gen_result) -- nested under
+    that beat's own entry, not mixed into one flat list across every beat.
+    """
+
+    run_dir: Path
+    image_path: Path
+    prompt_used: str
+    output_dir: Path
+    label: str
+    beat_index: int | None
+
+
+def _load_video_gen_targets(
+    run_dir: Path, *, prompt_override: str | None = None
+) -> list[VideoGenTarget]:
+    """Expand one run_dir into its video-generation targets. A new-style
+    run (a "previz_beats" list in its run_log.json, docs/decisions/0023)
+    produces one target per beat that has an accepted image -- a beat
+    with no accepted image (every previz_review attempt was rejected) is
+    silently skipped, not an error, since that's a real, expected
+    per-beat outcome. An old-style run (docs/decisions/0010) produces a
+    single target, via _load_previz_output unchanged.
+
+    Raises FileNotFoundError if run_dir has no run_log.json or a
+    referenced image no longer exists, and ValueError if there's no
+    completed previz result to work from (old-style: see
+    _load_previz_output; new-style: no beat produced an accepted image,
+    or an accepted beat has no recorded prompt_used -- a run from before
+    docs/decisions/0024 started saving it).
+    """
+    log_path = run_dir / "run_log.json"
+    if not log_path.exists():
+        raise FileNotFoundError(f"No run_log.json found in {run_dir}")
+    data = json.loads(log_path.read_text())
+
+    if "previz_beats" not in data:
+        image_path, prompt_used = _load_previz_output(run_dir, prompt_override=prompt_override)
+        return [
+            VideoGenTarget(
+                run_dir=run_dir,
+                image_path=image_path,
+                prompt_used=prompt_used,
+                output_dir=run_dir,
+                label=run_dir.name,
+                beat_index=None,
+            )
+        ]
+
+    targets = []
+    for beat_result in data["previz_beats"]:
+        if beat_result.get("image_path") is None:
+            continue
+        index = beat_result["index"]
+        prompt_used = prompt_override or beat_result.get("prompt_used")
+        if not prompt_used:
+            raise ValueError(
+                f"{log_path}: beat {index} has an accepted image but no recorded "
+                "'prompt_used' -- pass --video-prompt, or point --video-gen-from at a run "
+                "generated after docs/decisions/0024 started recording it."
+            )
+        image_path = Path(beat_result["image_path"])
+        if not image_path.exists():
+            raise FileNotFoundError(
+                f"Beat {index}'s image referenced by {log_path} no longer exists: {image_path}"
+            )
+        targets.append(
+            VideoGenTarget(
+                run_dir=run_dir,
+                image_path=image_path,
+                prompt_used=prompt_used,
+                output_dir=image_path.parent,
+                label=f"{run_dir.name} beat {index}",
+                beat_index=index,
+            )
+        )
+    if not targets:
+        raise ValueError(
+            f"{log_path} has a scene plan but no beat produced an accepted image -- "
+            "nothing to generate video from."
+        )
+    return targets
+
+
+def _record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> None:
+    """Append `entry` to list `key` in this target's run_log.json -- at
+    the top level for an old-style single-image run, or nested under the
+    matching beat's own entry in "previz_beats" for a new-style
+    multi-beat run, so a beat's video/moderation history stays co-located
+    with that beat's own record instead of mixed into one flat list
+    across every beat."""
+    log = _read_log(target.run_dir)
+    if target.beat_index is None:
+        log.setdefault(key, []).append(entry)
+    else:
+        for beat_result in log["previz_beats"]:
+            if beat_result["index"] == target.beat_index:
+                beat_result.setdefault(key, []).append(entry)
+                break
+    _write_log(target.run_dir, log)
+
+
 def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) -> tuple[Path, str]:
     """Load a previously generated previz image and its prompt from an
     existing run's run_log.json, so --video-gen-from can run stage 9
@@ -901,22 +1011,25 @@ def _run_video_generation_only(
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
     already-completed previz outputs, skipping research/fact-check/previz
-    for this invocation (docs/decisions/0010). Each run_dir is one scene's
-    anchor image + prompt; blocks and polls each to completion before
-    starting the next (0010's v1 choice, not the SQS fan-out named for
-    this stage in 0004). Lets VideoGenerationError propagate uncaught,
-    same fail-loud convention as every other stage.
+    for this invocation (docs/decisions/0010). Each run_dir expands into
+    one or more `VideoGenTarget`s (`_load_video_gen_targets`) -- a single
+    target for an old-style single-image run, or one target per accepted
+    beat for a new-style multi-beat scene-plan run (docs/decisions/0023/
+    0024). Blocks and polls each target to completion before starting the
+    next (0010's v1 choice, not the SQS fan-out named for this stage in
+    0004). Lets VideoGenerationError propagate uncaught, same fail-loud
+    convention as every other stage.
 
-    Before each scene's paid video-generation call, runs the two-layer
+    Before each target's paid video-generation call, runs the two-layer
     moderation pre-flight (docs/decisions/0022) -- a free policy-category
     check plus a paid pose/risk review, both against the actual image and
     prompt about to be submitted. A flag from either layer prints the
     concern and requires confirmation (`_confirm`) to proceed with that
-    scene; under `auto_yes` (--yes), a flag skips that scene rather than
+    target; under `auto_yes` (--yes), a flag skips that target rather than
     auto-proceeding, same precedent as 0019's contradicted-flag refusal.
-    This skips only the flagged scene, not the whole run -- each run_dir is
-    an independent scene, and one flagged scene shouldn't block generating
-    the others.
+    This skips only the flagged target, not the whole run -- each target is
+    independent, and one flagged target shouldn't block generating the
+    others.
 
     `video_seconds`, if given, requests that duration (see 0012 for why
     it's not validated client-side).
@@ -965,14 +1078,21 @@ def _run_video_generation_only(
                 print(f"- {warning}")
             print("Proceeding anyway -- this is advisory, not a block.")
 
-    for i, run_dir in enumerate(run_dirs, start=1):
-        print(f"\n--- video generation (model: {video_model}, scene {i}/{len(run_dirs)}) ---")
-        image_path, prompt = _load_previz_output(run_dir, prompt_override=video_prompt)
-        print(f"Source: {run_dir} (image: {image_path})")
+    targets = [
+        target
+        for run_dir in run_dirs
+        for target in _load_video_gen_targets(run_dir, prompt_override=video_prompt)
+    ]
+
+    for i, target in enumerate(targets, start=1):
+        print(f"\n--- video generation (model: {video_model}, scene {i}/{len(targets)}) ---")
+        print(f"Source: {target.label} (image: {target.image_path})")
 
         print("Running moderation pre-flight (docs/decisions/0022)...")
-        policy_result = run_moderation_policy_check(prompt, image_path, **policy_check_kwargs)
-        risk_review = run_moderation_risk_review(image_path, **risk_review_kwargs)
+        policy_result = run_moderation_policy_check(
+            target.prompt_used, target.image_path, **policy_check_kwargs
+        )
+        risk_review = run_moderation_risk_review(target.image_path, **risk_review_kwargs)
 
         concerns = []
         if policy_result.flagged:
@@ -987,20 +1107,18 @@ def _run_video_generation_only(
             print("\nModeration pre-flight raised a concern before spending on video generation:")
             for concern in concerns:
                 print(f"- {concern}")
-            log = _read_log(run_dir)
-            log.setdefault("moderation_preflight_flags", []).append(
-                {"concerns": concerns, "prompt_used": prompt}
+            _record_video_gen_result(
+                target, "moderation_preflight_flags", {"concerns": concerns, "prompt_used": target.prompt_used}
             )
-            _write_log(run_dir, log)
 
             if auto_yes:
                 print(
                     "\n--yes won't auto-proceed past a moderation pre-flight flag -- "
-                    f"skipping {run_dir}. Rerun without --yes to review and confirm."
+                    f"skipping {target.label}. Rerun without --yes to review and confirm."
                 )
                 continue
             if not _confirm("Proceed with video generation for this scene anyway?"):
-                print(f"Skipped {run_dir} by user choice.")
+                print(f"Skipped {target.label} by user choice.")
                 continue
 
         # Microsecond precision, not just seconds -- two attempts against
@@ -1010,10 +1128,10 @@ def _run_video_generation_only(
         # accumulating both.
         timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
         result = run_video_generation_stage(
-            image_path,
-            prompt,
+            target.image_path,
+            target.prompt_used,
             model=video_model,
-            output_dir=run_dir,
+            output_dir=target.output_dir,
             output_filename=f"video_{timestamp}.mp4",
             **({"seconds": video_seconds} if video_seconds is not None else {}),
             **video_kwargs,
@@ -1023,8 +1141,9 @@ def _run_video_generation_only(
             f"(requested {result.seconds_requested}s, provider reports {result.seconds_actual}s)"
         )
 
-        log = _read_log(run_dir)
-        log.setdefault("videos", []).append(
+        _record_video_gen_result(
+            target,
+            "videos",
             {
                 "video_generation_model": video_model,
                 "video_path": str(result.video_path),
@@ -1035,10 +1154,9 @@ def _run_video_generation_only(
                 # comparing several --video-prompt overrides against the
                 # same image stays traceable -- which prompt produced
                 # which file -- instead of only the latest being visible.
-                "prompt_used": prompt,
-            }
+                "prompt_used": target.prompt_used,
+            },
         )
-        _write_log(run_dir, log)
 
     print("\nDone.")
 
@@ -1221,6 +1339,13 @@ def _generate_beats_with_choices(
                         "index": i,
                         "beat": dataclasses.asdict(beat),
                         "image_path": str(previz_result.image_path),
+                        # The actual prompt sent to the image model for the
+                        # accepted attempt -- video generation (the
+                        # --video-gen-from follow-up to docs/decisions/0024)
+                        # needs this alongside the image itself, the same
+                        # way the old single-image flow paired
+                        # previz_image_path with previz_prompt_used.
+                        "prompt_used": previz_result.prompt_used,
                         "attempts": attempts,
                     }
                 )
