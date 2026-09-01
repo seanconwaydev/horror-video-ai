@@ -1,6 +1,13 @@
 """Interactive CLI entry point for the v1 pipeline: collects a scene
 (time, place, description), runs it through research -> fact-check ->
-previz (docs/decisions/0006). Run with `uv run historical-video-ai`.
+scene planning -> previz (docs/decisions/0006, 0023). Run with
+`uv run historical-video-ai`.
+
+Scene planning (docs/decisions/0023) produces a reviewed plan --
+characters, locations, and beats -- but isn't yet wired into previz's
+actual generation calls (that's docs/decisions/0024); previz still
+generates its one image from fact_check_result alone, same as before this
+stage existed.
 
 Refuses rather than fabricates in two cases: fact-check flagging the
 scene's premise as historically impossible (docs/decisions/0008,
@@ -58,10 +65,20 @@ from historical_video_ai.stages.moderation import (
 )
 from historical_video_ai.stages.previz import (
     PrevizResult,
+    build_character_sheet_prompt,
+    build_location_reference_prompt,
+    run_beat_image_stage,
     run_previz_review_stage,
     run_previz_stage,
+    run_reference_image_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
+from historical_video_ai.stages.scene_planning import (
+    Beat,
+    Location,
+    ScenePlan,
+    run_scene_planning_stage,
+)
 from historical_video_ai.stages.video_generation import run_video_generation_stage
 
 # 90x160 (Sora's exact 9:16 target ratio, tiny for speed) rather than a
@@ -109,10 +126,55 @@ def _mock_image(**kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
 
 
+def _mock_image_edit(**kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
+
+
 def _mock_review_completion(**kwargs: object) -> SimpleNamespace:
     """No network call, no API key -- always accepts, so --mock exercises
     the previz-review loop's mechanics without cost or credentials."""
     content = json.dumps({"accepted": True, "concern": None})
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+
+def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
+    """No network call, no API key -- returns a minimal valid ScenePlan, so
+    --mock exercises the scene-planning stage's mechanics (docs/decisions
+    /0023) without cost or credentials."""
+    content = json.dumps(
+        {
+            "characters": [
+                {
+                    "id": "mock-character",
+                    "face_build": "[MOCK]",
+                    "hair": "[MOCK]",
+                    "wardrobe_signature": "[MOCK]",
+                    "wardrobe_flexible": "[MOCK]",
+                    "distinguishing_detail": "[MOCK]",
+                }
+            ],
+            "locations": [
+                {
+                    "id": "mock-location",
+                    "architecture": "[MOCK]",
+                    "fixed_props": "[MOCK]",
+                    "ambient_light": "[MOCK]",
+                }
+            ],
+            "beats": [
+                {
+                    "location_id": "mock-location",
+                    "subject": "[MOCK]",
+                    "action": "[MOCK]",
+                    "camera": "[MOCK]",
+                    "lighting": "[MOCK]",
+                    "style": "[MOCK]",
+                    "audio": "[MOCK]",
+                    "duration_seconds": "4",
+                }
+            ],
+        }
+    )
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
@@ -147,6 +209,24 @@ def _mock_moderation_risk_review(**kwargs: object) -> SimpleNamespace:
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
 # tunable via a flag, to keep behavior predictable rather than open-ended.
 _MAX_PREVIZ_ATTEMPTS = 3
+
+# Real, checked per-image costs (docs/decisions/0024) -- never a guessed
+# number. Keyed by the exact pinned model string, so a config change that
+# swaps the previz model automatically falls back to "cost unknown" rather
+# than silently reporting a stale price for a different model.
+_KNOWN_IMAGE_MODEL_COSTS_USD = {
+    "gemini/gemini-2.5-flash-image": 0.039,
+}
+
+
+def _estimate_image_cost(model: str, count: int) -> str:
+    """A short cost-visibility string for `count` images from `model` --
+    "$X.XX total" if the model's per-image cost is known, otherwise an
+    honest "cost unknown" rather than a fabricated number."""
+    cost = _KNOWN_IMAGE_MODEL_COSTS_USD.get(model)
+    if cost is None:
+        return f"{count} image(s) at an unknown per-image cost for {model}"
+    return f"{count} image(s) at ~${cost:.3f} each (~${cost * count:.2f} total)"
 
 
 def _confirm(prompt: str, *, auto_yes: bool = False) -> bool:
@@ -254,6 +334,78 @@ def _resolve_flags(
         # "a" (accept): keep the claim exactly as research produced it.
 
     return dataclasses.replace(fact_sheet, claims=[c for c in resolved_claims if c is not None])
+
+
+def _print_item_fields(item: object) -> None:
+    for f in dataclasses.fields(item):
+        print(f"  {f.name}: {getattr(item, f.name)}")
+
+
+def _edit_item_fields(item: object) -> object:
+    """Prompt for a new value per field (blank keeps the current one) and
+    return the updated item -- the shared editing mechanism behind both
+    _review_item's (a)ccept/(e)dit loop and the beat-generation loop's
+    (e)dit choice (docs/decisions/0023, 0024). Generic over any frozen
+    dataclass with string fields."""
+    updates = {}
+    for f in dataclasses.fields(item):
+        current = getattr(item, f.name)
+        new_value = input(f"  {f.name} [{current}]: ").strip()
+        if new_value:
+            updates[f.name] = new_value
+    return dataclasses.replace(item, **updates)
+
+
+def _review_item(item: object, *, item_desc: str, auto_yes: bool = False) -> object:
+    """Print one scene-plan item (Character/Location/Beat) and let a human
+    accept it as-is or edit it field-by-field -- docs/decisions/0023's
+    per-item review loop. Editing replaces the item directly; unlike
+    _resolve_premise_conflict's corrected description, an edit here is
+    never re-verified through another LLM pass, since these are creative
+    fields (a character's hairstyle, a location's lighting), not factual
+    claims to check.
+
+    Generic over any frozen dataclass with string fields -- Character,
+    Location, and Beat all qualify, so one function serves all three
+    review passes in `_review_scene_plan`.
+    """
+    print(f"\n{item_desc}:")
+    _print_item_fields(item)
+
+    if auto_yes:
+        print("(a)ccept or (e)dit? [a/e]: a (--yes)")
+        return item
+
+    action = ""
+    while action not in ("a", "e"):
+        action = input("(a)ccept or (e)dit? [a/e]: ").strip().lower()
+    if action == "a":
+        return item
+    return _edit_item_fields(item)
+
+
+def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
+    """Per-item accept-or-edit review of a full ScenePlan --
+    docs/decisions/0023. Reviewed in a fixed, strictly linear order --
+    characters, then locations, then beats -- with no going back to reopen
+    an earlier list once later ones are under review. Deliberate v1
+    simplification, not an oversight: beats are reviewed against an
+    already-finalized set of characters/locations, matching the natural
+    dependency order, rather than building a free-form editor.
+    """
+    print("\n--- scene plan review (docs/decisions/0023) ---")
+    reviewed_characters = [
+        _review_item(c, item_desc=f"Character '{c.id}'", auto_yes=auto_yes) for c in plan.characters
+    ]
+    reviewed_locations = [
+        _review_item(loc, item_desc=f"Location '{loc.id}'", auto_yes=auto_yes)
+        for loc in plan.locations
+    ]
+    reviewed_beats = [
+        _review_item(b, item_desc=f"Beat at '{b.location_id}': {b.action}", auto_yes=auto_yes)
+        for b in plan.beats
+    ]
+    return ScenePlan(characters=reviewed_characters, locations=reviewed_locations, beats=reviewed_beats)
 
 
 def _record_research_claims(
@@ -406,23 +558,28 @@ def _resolve_premise_conflict(
     return new_fact_sheet, new_fact_check_result
 
 
-def _generate_previz_with_review(
+def _generate_image_with_review(
+    generate_fn: Callable[[], PrevizResult],
     fact_check_result: FactCheckResult,
     *,
-    previz_model: str,
     review_model: str,
-    image_kwargs: dict,
     review_kwargs: dict,
     out_dir: Path,
+    archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
-    """Generate previz's image, then have an independent pass review the
+    """Generate an image via `generate_fn` (a zero-arg callable producing
+    one PrevizResult -- a closure over run_previz_stage for the original
+    single-scene flow, or over run_beat_image_stage for a scene-plan beat,
+    docs/decisions/0023/0024), then have an independent pass review the
     actual image against the scene (docs/decisions/0009). On rejection,
     regenerates blind (no prompt rewriting), capped at _MAX_PREVIZ_ATTEMPTS.
+    Shared by both generation paths -- only how the image itself gets
+    made differs between them.
 
     Returns (accepted PrevizResult, attempt log), or (None, attempt log)
     if every attempt was rejected. A rejected attempt's image is archived
-    as previz_attempt_<n>_rejected.png rather than overwritten.
+    as `<archive_prefix>_<n>_rejected.png` rather than overwritten.
 
     `on_image_generated`, if given, is called with each attempt's
     PrevizResult right after the image is written -- *before* review runs,
@@ -431,16 +588,7 @@ def _generate_previz_with_review(
     """
     attempts: list[dict] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
-        print(f"\n--- previz (model: {previz_model}, attempt {attempt}/{_MAX_PREVIZ_ATTEMPTS}) ---")
-        previz_result = run_previz_stage(
-            fact_check_result,
-            model=previz_model,
-            output_dir=out_dir,
-            on_transient_retry=lambda n, exc: print(
-                f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
-            ),
-            **image_kwargs,
-        )
+        previz_result = generate_fn()
         print(f"Image saved to {previz_result.image_path}")
         if on_image_generated is not None:
             on_image_generated(previz_result)
@@ -456,7 +604,7 @@ def _generate_previz_with_review(
             return previz_result, attempts
 
         print(f"Rejected: {review.concern}")
-        archived_path = out_dir / f"previz_attempt_{attempt}_rejected.png"
+        archived_path = out_dir / f"{archive_prefix}_{attempt}_rejected.png"
         previz_result.image_path.rename(archived_path)
         attempts.append(
             {
@@ -471,6 +619,45 @@ def _generate_previz_with_review(
 
     print(f"\nGiving up after {_MAX_PREVIZ_ATTEMPTS} rejected attempts.")
     return None, attempts
+
+
+def _generate_previz_with_review(
+    fact_check_result: FactCheckResult,
+    *,
+    previz_model: str,
+    review_model: str,
+    image_kwargs: dict,
+    review_kwargs: dict,
+    out_dir: Path,
+    on_image_generated: Callable[[PrevizResult], None] | None = None,
+) -> tuple[PrevizResult | None, list[dict]]:
+    """The original single-scene previz+review flow (docs/decisions/0009) --
+    now a thin wrapper around _generate_image_with_review. See that
+    function's docstring for the shared retry/review behavior."""
+    attempt_n = 0
+
+    def _generate() -> PrevizResult:
+        nonlocal attempt_n
+        attempt_n += 1
+        print(f"\n--- previz (model: {previz_model}, attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---")
+        return run_previz_stage(
+            fact_check_result,
+            model=previz_model,
+            output_dir=out_dir,
+            on_transient_retry=lambda n, exc: print(
+                f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+            ),
+            **image_kwargs,
+        )
+
+    return _generate_image_with_review(
+        _generate,
+        fact_check_result,
+        review_model=review_model,
+        review_kwargs=review_kwargs,
+        out_dir=out_dir,
+        on_image_generated=on_image_generated,
+    )
 
 
 def _slugify(text: str, max_length: int = 40) -> str:
@@ -856,6 +1043,197 @@ def _run_video_generation_only(
     print("\nDone.")
 
 
+def _generate_scene_references(
+    scene_plan: ScenePlan,
+    *,
+    previz_model: str,
+    image_kwargs: dict,
+    out_dir: Path,
+    auto_yes: bool = False,
+) -> tuple[dict[str, Path], dict[str, Path]]:
+    """Generate one canonical reference image per Character and per
+    Location in scene_plan (docs/decisions/0024). Each gets its own
+    accept/regenerate confirm before moving on -- a bad reference is far
+    cheaper to catch here than after generating several beats off it.
+
+    Returns (character_refs, location_refs), each a dict keyed by id.
+    """
+    character_refs: dict[str, Path] = {}
+    for i, character in enumerate(scene_plan.characters, start=1):
+        prompt = build_character_sheet_prompt(character)
+        while True:
+            print(
+                f"\n--- character reference '{character.id}' "
+                f"({i}/{len(scene_plan.characters)}) ---"
+            )
+            result = run_reference_image_stage(
+                prompt,
+                model=previz_model,
+                output_dir=out_dir / f"character_{character.id}",
+                on_transient_retry=lambda n, exc: print(
+                    f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+                ),
+                **image_kwargs,
+            )
+            print(f"Reference saved to {result.image_path}")
+            if _confirm("Accept this reference?", auto_yes=auto_yes):
+                character_refs[character.id] = result.image_path
+                break
+            print("Regenerating...")
+
+    location_refs: dict[str, Path] = {}
+    for i, location in enumerate(scene_plan.locations, start=1):
+        prompt = build_location_reference_prompt(location)
+        while True:
+            print(f"\n--- location reference '{location.id}' ({i}/{len(scene_plan.locations)}) ---")
+            result = run_reference_image_stage(
+                prompt,
+                model=previz_model,
+                output_dir=out_dir / f"location_{location.id}",
+                on_transient_retry=lambda n, exc: print(
+                    f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+                ),
+                **image_kwargs,
+            )
+            print(f"Reference saved to {result.image_path}")
+            if _confirm("Accept this reference?", auto_yes=auto_yes):
+                location_refs[location.id] = result.image_path
+                break
+            print("Regenerating...")
+
+    return character_refs, location_refs
+
+
+def _generate_beats_with_choices(
+    scene_plan: ScenePlan,
+    fact_check_result: FactCheckResult,
+    *,
+    character_refs: dict[str, Path],
+    location_refs: dict[str, Path],
+    previz_model: str,
+    review_model: str,
+    image_kwargs: dict,
+    review_kwargs: dict,
+    out_dir: Path,
+    auto_yes: bool = False,
+) -> list[dict]:
+    """Generate each beat's image (docs/decisions/0024). Every attempt
+    still goes through previz_review's own automatic reject-and-regenerate
+    loop unchanged (docs/decisions/0009, via _generate_image_with_review).
+    On top of that, once an attempt is accepted by review, a human gets
+    three choices, not an automatic proceed: (a)ccept, (r)eroll (same beat
+    text, another blind attempt -- for "unlucky roll"), or (e)dit (update
+    the beat's text first, reusing 0023's per-item edit mechanism, then
+    retry -- for "this needs an actual change," not just another random
+    draw).
+
+    Assumes a single main character, the common case in every real scene
+    built so far: with zero characters, no character reference is used;
+    with more than one, the first is used for every beat. A known v1
+    simplification (Beat has no character_id field to disambiguate), not
+    a silent bug -- worth revisiting if a real scene needs more than one
+    named character across its beats.
+
+    Returns a list of per-beat result dicts (index, beat, image path or
+    None if every review attempt was rejected, attempt log) for
+    run_log.json.
+    """
+    character = scene_plan.characters[0] if scene_plan.characters else None
+    character_ref = character_refs.get(character.id) if character else None
+    locations_by_id = {loc.id: loc for loc in scene_plan.locations}
+
+    beat_results = []
+    for i, beat in enumerate(scene_plan.beats, start=1):
+        location = locations_by_id.get(beat.location_id)
+        location_ref = location_refs.get(beat.location_id)
+        beat_out_dir = out_dir / f"beat_{i}"
+
+        while True:
+            print(f"\n=== beat {i}/{len(scene_plan.beats)}: {beat.action} ===")
+            attempt_n = 0
+
+            # Default-argument bindings, not closures over the loop
+            # variables directly: `_generate` is redefined fresh each
+            # while-loop iteration specifically so an (e)dited `beat`
+            # takes effect on the next attempt -- these defaults capture
+            # each variable's *current* value at definition time, which is
+            # exactly what's wanted, but spelling it as a bare closure
+            # over loop variables is a real footgun ruff correctly flags
+            # (B023) even though this particular control flow is safe.
+            def _generate(
+                beat: Beat = beat,
+                location: Location | None = location,
+                location_ref: Path | None = location_ref,
+                beat_out_dir: Path = beat_out_dir,
+            ) -> PrevizResult:
+                nonlocal attempt_n
+                attempt_n += 1
+                print(
+                    f"--- beat image (model: {previz_model}, "
+                    f"attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---"
+                )
+                return run_beat_image_stage(
+                    beat,
+                    character=character,
+                    location=location,
+                    character_reference=character_ref,
+                    location_reference=location_ref,
+                    model=previz_model,
+                    output_dir=beat_out_dir,
+                    on_transient_retry=lambda n, exc: print(
+                        f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+                    ),
+                    **image_kwargs,
+                )
+
+            previz_result, attempts = _generate_image_with_review(
+                _generate,
+                fact_check_result,
+                review_model=review_model,
+                review_kwargs=review_kwargs,
+                out_dir=beat_out_dir,
+                archive_prefix=f"beat{i}_attempt",
+            )
+
+            if previz_result is None:
+                beat_results.append(
+                    {
+                        "index": i,
+                        "beat": dataclasses.asdict(beat),
+                        "image_path": None,
+                        "attempts": attempts,
+                    }
+                )
+                break  # every automatic attempt was rejected; give up on this beat
+
+            if auto_yes:
+                choice = "a"
+            else:
+                choice = ""
+                while choice not in ("a", "r", "e"):
+                    choice = input(
+                        "(a)ccept / (r)eroll / (e)dit this beat? [a/r/e]: "
+                    ).strip().lower()
+
+            if choice == "a":
+                beat_results.append(
+                    {
+                        "index": i,
+                        "beat": dataclasses.asdict(beat),
+                        "image_path": str(previz_result.image_path),
+                        "attempts": attempts,
+                    }
+                )
+                break
+            if choice == "r":
+                continue
+            # choice == "e"
+            print(f"\nBeat {i}:")
+            beat = _edit_item_fields(beat)
+
+    return beat_results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the research -> fact-check -> previz pipeline for one scene."
@@ -955,8 +1333,18 @@ def main() -> None:
         return
 
     completion_kwargs = {"completion_fn": _mock_completion} if args.mock else {}
+    # run_reference_image_stage never conditions on other references (it's
+    # plain text-to-image), so it only ever takes image_fn -- edit_fn is
+    # for run_beat_image_stage specifically, which does condition on
+    # character/location references.
     image_kwargs = {"image_fn": _mock_image} if args.mock else {}
+    beat_image_kwargs = (
+        {"image_fn": _mock_image, "edit_fn": _mock_image_edit} if args.mock else {}
+    )
     review_kwargs = {"completion_fn": _mock_review_completion} if args.mock else {}
+    scene_planning_kwargs = (
+        {"completion_fn": _mock_scene_planning_completion} if args.mock else {}
+    )
 
     research_model = args.experiment_model or get_stage_model("research")
     fact_check_model = args.experiment_model or get_stage_model("fact_check")
@@ -1083,53 +1471,85 @@ def main() -> None:
     log["research_claims"] = [dataclasses.asdict(c) for c in resolved_fact_sheet.claims]
     _write_log(out_dir, log)
 
-    if not _confirm("\nProceed to previz with this fact-check result?", auto_yes=args.yes):
+    if not _confirm("\nProceed to scene planning with this fact-check result?", auto_yes=args.yes):
         print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
+
+    # Scene planning (docs/decisions/0023): characters, locations, and
+    # beats, planned and reviewed before any image generation. Not yet
+    # wired into previz's actual generation calls -- that's
+    # docs/decisions/0024. previz below still runs from fact_check_result
+    # alone, same as before this stage existed.
+    scene_planning_model = get_stage_model("scene_planning")
+    log["scene_planning_model"] = scene_planning_model
+    print(f"\n--- scene planning (model: {scene_planning_model}) ---")
+    scene_plan = run_scene_planning_stage(
+        fact_check_result, model=scene_planning_model, **scene_planning_kwargs
+    )
+    log["scene_plan"] = dataclasses.asdict(scene_plan)
+    _write_log(out_dir, log)
+
+    scene_plan = _review_scene_plan(scene_plan, auto_yes=args.yes)
+    log["scene_plan"] = dataclasses.asdict(scene_plan)
+    _write_log(out_dir, log)
 
     previz_model = get_stage_model("previz")
     review_model = get_stage_model("previz_review")
     log["previz_model"] = previz_model
     log["previz_review_model"] = review_model
 
-    def _record_previz_image(result: PrevizResult) -> None:
-        # Persisted as soon as the image exists -- not after the whole
-        # generate+review loop returns -- so a crash inside review (e.g. a
-        # missing API key) still leaves run_log.json pointing at a real,
-        # already-generated image instead of silently losing it. See
-        # _generate_previz_with_review's on_image_generated docstring.
-        log["previz_image_path"] = str(result.image_path)
-        log["previz_prompt_used"] = result.prompt_used
-        _write_log(out_dir, log)
-
-    previz_result, previz_attempts = _generate_previz_with_review(
-        fact_check_result,
-        previz_model=previz_model,
-        review_model=review_model,
-        image_kwargs=image_kwargs,
-        review_kwargs=review_kwargs,
-        out_dir=out_dir,
-        on_image_generated=_record_previz_image,
+    # Cost visibility (docs/decisions/0024) -- a real, checked range, not a
+    # guess: minimum is one image per reference plus one per beat; maximum
+    # accounts for every beat needing all _MAX_PREVIZ_ATTEMPTS review
+    # attempts. Rerolls/edits from the human choices below aren't counted
+    # here since they're open-ended by nature -- this is the floor and the
+    # automatic-review ceiling, not an absolute cap.
+    num_references = len(scene_plan.characters) + len(scene_plan.locations)
+    num_beats = len(scene_plan.beats)
+    min_images = num_references + num_beats
+    max_images = num_references + num_beats * _MAX_PREVIZ_ATTEMPTS
+    print(
+        f"\nThis scene plan needs {num_references} reference image(s) + {num_beats} beat "
+        f"image(s) = {min_images} previz image(s) minimum "
+        f"({_estimate_image_cost(previz_model, min_images)}), up to {max_images} if every "
+        f"beat needs all {_MAX_PREVIZ_ATTEMPTS} automatic review attempts "
+        f"({_estimate_image_cost(previz_model, max_images)})."
     )
-    log["previz_attempts"] = previz_attempts
-    if previz_result is None:
-        # Every attempt was explicitly rejected and its image renamed to
-        # previz_attempt_<n>_rejected.png (see _generate_previz_with_review)
-        # -- clear the path _record_previz_image left from the last
-        # attempt, since it no longer points at a real file, and this
-        # branch's whole meaning is "no accepted image exists."
-        log.pop("previz_image_path", None)
-        log.pop("previz_prompt_used", None)
-        log["stopped_reason"] = "previz_review_rejected_max_attempts"
+    if not _confirm("Proceed with reference and beat image generation?", auto_yes=args.yes):
+        log["stopped_reason"] = "declined_before_image_generation"
         _write_log(out_dir, log)
-        print(f"\nNo image produced. Run artifacts saved in {out_dir}")
+        print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
-    # previz_image_path/previz_prompt_used are already in log and on disk,
-    # written by _record_previz_image the moment the accepted image was
-    # generated -- this just flushes previz_attempts alongside them.
+
+    character_refs, location_refs = _generate_scene_references(
+        scene_plan,
+        previz_model=previz_model,
+        image_kwargs=image_kwargs,
+        out_dir=out_dir,
+        auto_yes=args.yes,
+    )
+    log["character_references"] = {k: str(v) for k, v in character_refs.items()}
+    log["location_references"] = {k: str(v) for k, v in location_refs.items()}
     _write_log(out_dir, log)
 
-    print(f"\nDone. Run artifacts saved in {out_dir}")
+    beat_results = _generate_beats_with_choices(
+        scene_plan,
+        fact_check_result,
+        character_refs=character_refs,
+        location_refs=location_refs,
+        previz_model=previz_model,
+        review_model=review_model,
+        image_kwargs=beat_image_kwargs,
+        review_kwargs=review_kwargs,
+        out_dir=out_dir,
+        auto_yes=args.yes,
+    )
+    log["previz_beats"] = beat_results
+    _write_log(out_dir, log)
+
+    accepted = sum(1 for b in beat_results if b["image_path"] is not None)
+    print(f"\nDone: {accepted}/{len(beat_results)} beat(s) produced an accepted image.")
+    print(f"Run artifacts saved in {out_dir}")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,16 @@ research:
 fact_check:
   model: "gemini/gemini-3.6-flash"
 
+# scene_planning: inserted between fact-check and previz, not yet wired
+# into image generation -- see docs/decisions/0023-scene-planning-stage.md.
+# Turns a verified fact sheet into a full plan (characters, locations,
+# beats) before any image generation happens. DeepSeek picked to unblock
+# building the stage, not a rigorously compared decision, same status as
+# every other stage's initial model choice in this project.
+
+scene_planning:
+  model: "deepseek/deepseek-v4-flash"
+
 previz:
   model: "gemini/gemini-2.5-flash-image"
 

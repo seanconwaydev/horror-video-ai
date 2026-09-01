@@ -25,6 +25,7 @@ from historical_video_ai.config import get_stage_model
 from historical_video_ai.image_utils import build_image_content_block
 from historical_video_ai.json_utils import parse_json_response
 from historical_video_ai.stages.fact_check import FactCheckResult
+from historical_video_ai.stages.scene_planning import Beat, Character, Location
 from historical_video_ai.stages.video_generation import _TARGET_VIDEO_SIZE_STR
 
 # Errors worth retrying automatically -- transient in nature (server
@@ -112,25 +113,124 @@ def _build_prompt(fact_check_result: FactCheckResult) -> str:
     )
 
 
+def _call_with_transient_retry(
+    fn: Callable,
+    *,
+    sleep_fn: Callable[[float], None],
+    on_transient_retry: Callable[[int, Exception], None] | None,
+    **kwargs: object,
+) -> object:
+    """Shared retry loop for both run_previz_stage and
+    run_reference_image_stage -- identical transient-error handling
+    (docs/decisions/0016), regardless of which underlying call (plain
+    generation or image-conditioned edit) is being made."""
+    for attempt in range(1, _MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return fn(**kwargs)
+        except _TRANSIENT_IMAGE_ERRORS as exc:
+            if attempt == _MAX_TRANSIENT_RETRIES:
+                raise
+            if on_transient_retry is not None:
+                on_transient_retry(attempt, exc)
+            sleep_fn(_TRANSIENT_RETRY_DELAY_SECONDS)
+    raise AssertionError("unreachable")  # loop always returns or raises
+
+
+def _extract_and_save_image(response: object, output_dir: Path, filename: str) -> Path:
+    """Shared response-parsing/saving logic for both image-generation
+    functions in this module."""
+    try:
+        item = response.data[0]
+    except (AttributeError, IndexError, TypeError) as exc:
+        raise PrevizError(f"Image response had no image data: {exc}") from exc
+
+    item_b64 = item.get("b64_json") if isinstance(item, dict) else None
+    b64 = getattr(item, "b64_json", None) or item_b64
+    if not b64:
+        raise PrevizError(
+            "Image response did not include b64_json image data -- this stage "
+            "does not yet handle a URL-only response shape."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_path = output_dir / filename
+    image_path.write_bytes(base64.b64decode(b64))
+    return image_path
+
+
+def _generate_image_response(
+    prompt: str,
+    *,
+    reference_paths: list[Path],
+    model: str,
+    image_fn: Callable,
+    edit_fn: Callable,
+    sleep_fn: Callable[[float], None],
+    on_transient_retry: Callable[[int, Exception], None] | None,
+) -> object:
+    """Shared branch between plain text-to-image and image-conditioned
+    edit, used by both run_previz_stage and run_beat_image_stage. Reads
+    reference images as raw bytes, not `Path` objects -- see
+    run_previz_stage's docstring for why (litellm's Gemini image_edit
+    PathLike bug)."""
+    if reference_paths:
+        image_bytes = [p.read_bytes() for p in reference_paths]
+        return _call_with_transient_retry(
+            edit_fn,
+            sleep_fn=sleep_fn,
+            on_transient_retry=on_transient_retry,
+            model=model,
+            image=image_bytes if len(image_bytes) > 1 else image_bytes[0],
+            prompt=prompt,
+            size=_PREVIZ_SIZE_HINT,
+        )
+    return _call_with_transient_retry(
+        image_fn,
+        sleep_fn=sleep_fn,
+        on_transient_retry=on_transient_retry,
+        model=model,
+        prompt=prompt,
+        size=_PREVIZ_SIZE_HINT,
+    )
+
+
 def run_previz_stage(
     fact_check_result: FactCheckResult,
     *,
     model: str | None = None,
     image_fn: Callable = litellm.image_generation,
+    edit_fn: Callable = litellm.image_edit,
+    character_reference: Path | None = None,
+    location_reference: Path | None = None,
     output_dir: Path = Path("outputs"),
     sleep_fn: Callable[[float], None] = time.sleep,
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizResult:
     """Generate one still image from a fact-checked scene.
 
-    `model` defaults to the pinned "previz" model; `image_fn`/`sleep_fn`
-    are injection points for tests (avoid a real API call / real waiting).
+    `model` defaults to the pinned "previz" model; `image_fn`/`edit_fn`/
+    `sleep_fn` are injection points for tests (avoid a real API call /
+    real waiting).
+
+    `character_reference`/`location_reference` (docs/decisions/0024), if
+    given, condition the generation on those reference image(s) via
+    `edit_fn` instead of a plain `image_fn` text-to-image call -- see
+    `run_reference_image_stage` for generating the references themselves.
+    Reference images are read as raw bytes, not passed as `Path` objects:
+    litellm's Gemini `image_edit` provider advertises `os.PathLike` as an
+    accepted `image` type, but its `_read_all_bytes` only actually handles
+    `bytes`/`BytesIO`/`BufferedReader` and raises `ValueError` on a bare
+    `Path` -- confirmed directly against litellm 1.98.0's source.
+    TODO(WORKAROUND): file a litellm issue for this and link it here; none
+    of the existing open issues checked matched this exactly.
 
     Retries the image call up to _MAX_TRANSIENT_RETRIES times on errors
     judged transient (_TRANSIENT_IMAGE_ERRORS, docs/decisions/0016) --
-    added after real, repeated Gemini 503s. Non-transient errors (content
-    rejection, bad request, auth) fail immediately. `on_transient_retry`,
-    if given, is called with (attempt number, exception) before each retry.
+    added after real, repeated Gemini 503s, observed on both plain
+    generation and image-conditioned edit calls. Non-transient errors
+    (content rejection, bad request, auth) fail immediately.
+    `on_transient_retry`, if given, is called with (attempt number,
+    exception) before each retry.
 
     Raises PrevizError if `fact_check_result` still carries an unresolved
     premise conflict (docs/decisions/0008 -- refuses rather than fabricate)
@@ -145,36 +245,144 @@ def run_previz_stage(
 
     resolved_model = model or get_stage_model("previz")
     prompt = _build_prompt(fact_check_result)
+    response = _generate_image_response(
+        prompt,
+        reference_paths=[p for p in (character_reference, location_reference) if p is not None],
+        model=resolved_model,
+        image_fn=image_fn,
+        edit_fn=edit_fn,
+        sleep_fn=sleep_fn,
+        on_transient_retry=on_transient_retry,
+    )
+    image_path = _extract_and_save_image(response, output_dir, "previz.png")
+    return PrevizResult(image_path=image_path, prompt_used=prompt)
 
-    response = None
-    for attempt in range(1, _MAX_TRANSIENT_RETRIES + 1):
-        try:
-            response = image_fn(model=resolved_model, prompt=prompt, size=_PREVIZ_SIZE_HINT)
-            break
-        except _TRANSIENT_IMAGE_ERRORS as exc:
-            if attempt == _MAX_TRANSIENT_RETRIES:
-                raise
-            if on_transient_retry is not None:
-                on_transient_retry(attempt, exc)
-            sleep_fn(_TRANSIENT_RETRY_DELAY_SECONDS)
 
-    try:
-        item = response.data[0]
-    except (AttributeError, IndexError, TypeError) as exc:
-        raise PrevizError(f"Previz response had no image data: {exc}") from exc
+def run_reference_image_stage(
+    prompt: str,
+    *,
+    model: str | None = None,
+    image_fn: Callable = litellm.image_generation,
+    output_dir: Path = Path("outputs"),
+    sleep_fn: Callable[[float], None] = time.sleep,
+    on_transient_retry: Callable[[int, Exception], None] | None = None,
+) -> PrevizResult:
+    """Generate a character-sheet or location-reference image
+    (docs/decisions/0024) -- plain text-to-image, no `FactCheckResult`,
+    since a reference image isn't tied to one specific historical scene
+    the way a beat's final image is. Same transient-retry behavior as
+    `run_previz_stage`; `model` defaults to the same pinned "previz" model
+    (a reference image and a beat's final image use the same image model,
+    just a different call shape).
+    """
+    resolved_model = model or get_stage_model("previz")
+    response = _call_with_transient_retry(
+        image_fn,
+        sleep_fn=sleep_fn,
+        on_transient_retry=on_transient_retry,
+        model=resolved_model,
+        prompt=prompt,
+        size=_PREVIZ_SIZE_HINT,
+    )
+    image_path = _extract_and_save_image(response, output_dir, "reference.png")
+    return PrevizResult(image_path=image_path, prompt_used=prompt)
 
-    item_b64 = item.get("b64_json") if isinstance(item, dict) else None
-    b64 = getattr(item, "b64_json", None) or item_b64
-    if not b64:
-        raise PrevizError(
-            "Previz response did not include b64_json image data -- this stage "
-            "does not yet handle a URL-only response shape."
+
+def build_character_sheet_prompt(character: Character) -> str:
+    """Build a neutral, non-narrative reference-sheet prompt for a
+    Character (docs/decisions/0023, 0024) -- deliberately not a story
+    moment, per the playbook's finding that a dedicated neutral reference
+    anchors identity better than reusing a busy narrative beat."""
+    return (
+        f"CHARACTER: {character.face_build}, {character.hair}.\n"
+        f"WARDROBE (signature): {character.wardrobe_signature}.\n"
+        f"WARDROBE (flexible): {character.wardrobe_flexible}.\n"
+        f"DISTINGUISHING DETAIL: {character.distinguishing_detail}.\n\n"
+        "SUBJECT: The character described above, alone.\n"
+        "ACTION: Standing in a simple, neutral, relaxed pose, facing "
+        "slightly off-camera (three-quarter angle), calm neutral "
+        "expression -- this is a character reference sheet, not a story "
+        "moment.\n"
+        "SETTING: A plain, softly out-of-focus neutral backdrop -- no "
+        "specific location, nothing narrative.\n"
+        "CAMERA: Medium-full shot, eye-level, centered.\n"
+        "LIGHTING: Soft, even, shadowless studio-quality light.\n"
+        "STYLE: Photorealistic, no on-screen text, no logos, no watermark."
+    )
+
+
+def build_location_reference_prompt(location: Location) -> str:
+    """Build a no-character establishing-shot prompt for a Location
+    (docs/decisions/0023, 0024) -- the canonical reference every beat set
+    there conditions on, per the playbook's location-consistency finding."""
+    return (
+        f"SETTING: {location.architecture}. Fixed props: {location.fixed_props}.\n"
+        "CAMERA: Wide establishing shot, eye-level, no main subject in the "
+        "foreground -- this is a location reference, not a character shot.\n"
+        f"LIGHTING: {location.ambient_light}.\n"
+        "STYLE: Photorealistic cinematic film still, documentary-realistic "
+        "color grade, no on-screen text, no logos."
+    )
+
+
+def _build_beat_prompt(beat: Beat, *, character: Character | None, location: Location | None) -> str:
+    """Build one beat's image prompt directly from its 7-part fields
+    (docs/decisions/0023) -- deliberately not routed through _build_prompt,
+    whose "historically accurate scene, Time: X, Place: Y" template is
+    scoped to the original single-scene flow, not a planned multi-beat
+    shot list."""
+    parts = []
+    if character is not None:
+        parts.append(
+            f"CHARACTER: {character.face_build}, {character.hair}.\n"
+            f"WARDROBE (signature): {character.wardrobe_signature}.\n"
+            f"WARDROBE (flexible): {character.wardrobe_flexible}.\n"
+            f"DISTINGUISHING DETAIL: {character.distinguishing_detail}."
         )
+    parts.append(f"SUBJECT: {beat.subject}")
+    parts.append(f"ACTION: {beat.action}")
+    if location is not None:
+        parts.append(f"SETTING: {location.architecture}. Fixed props: {location.fixed_props}.")
+    parts.append(f"CAMERA: {beat.camera}")
+    parts.append(f"LIGHTING: {beat.lighting}")
+    parts.append(f"STYLE: {beat.style}")
+    return "\n".join(parts)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    image_path = output_dir / "previz.png"
-    image_path.write_bytes(base64.b64decode(b64))
 
+def run_beat_image_stage(
+    beat: Beat,
+    *,
+    character: Character | None = None,
+    location: Location | None = None,
+    character_reference: Path | None = None,
+    location_reference: Path | None = None,
+    model: str | None = None,
+    image_fn: Callable = litellm.image_generation,
+    edit_fn: Callable = litellm.image_edit,
+    output_dir: Path = Path("outputs"),
+    sleep_fn: Callable[[float], None] = time.sleep,
+    on_transient_retry: Callable[[int, Exception], None] | None = None,
+) -> PrevizResult:
+    """Generate one beat's image from a ScenePlan (docs/decisions/0023) --
+    the beat-driven counterpart to run_previz_stage, which stays scoped to
+    the original single-scene (time/place/description) flow. `character`/
+    `location` supply the text description woven into the prompt (see
+    `_build_beat_prompt`); `character_reference`/`location_reference`
+    (docs/decisions/0024) additionally condition the generation on those
+    images, same mechanism and same retry behavior as `run_previz_stage`.
+    """
+    resolved_model = model or get_stage_model("previz")
+    prompt = _build_beat_prompt(beat, character=character, location=location)
+    response = _generate_image_response(
+        prompt,
+        reference_paths=[p for p in (character_reference, location_reference) if p is not None],
+        model=resolved_model,
+        image_fn=image_fn,
+        edit_fn=edit_fn,
+        sleep_fn=sleep_fn,
+        on_transient_retry=on_transient_retry,
+    )
+    image_path = _extract_and_save_image(response, output_dir, "previz.png")
     return PrevizResult(image_path=image_path, prompt_used=prompt)
 
 
