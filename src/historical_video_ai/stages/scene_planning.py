@@ -133,8 +133,33 @@ explicitly state in `action` or `camera` that the screen face is NOT \
 visible to camera -- we see its back or edge instead. Image models \
 default to rendering a screen's face toward the viewer regardless of the \
 described geometry unless told the opposite outright.
-- `style` should include "photorealistic, no on-screen text/UI/logos" \
-unless the scene specifically calls for something else.
+- `style` is for per-beat cinematography notes only (lens choice, depth of \
+field, film grain, color grade) -- always include "no on-screen text/UI/\
+logos". The overall realism level (photorealistic, semi-realistic, or \
+stylized) is set once for the whole run elsewhere and always overrides \
+whatever `style` says here, so do not make realism claims in this field.
+- Keep the camera on one consistent side of the "line of action" across \
+consecutive beats at the same location (the 180-degree rule) -- if a \
+character is moving left-to-right or two characters face each other \
+across a space, don't flip which side of that line the camera is on \
+between beats without a deliberate reason, or the sense of spatial \
+geography breaks for the viewer.
+- Give each beat a clear anticipation beat when it helps: a brief, \
+readable lead-in to the main action (a breath, a shift of weight, a \
+glance) rather than starting the beat already mid-action with no setup -- \
+this gives a viewer, and the eventual video-generation step, a clearer \
+sense of what's about to happen.
+- Add a concrete secondary action when it reinforces what's happening -- \
+a small supporting detail beyond the main pose (hair or fabric caught by \
+wind, a hand tightening on a strap, steam rising) rather than a flat, \
+static figure with nothing else happening in frame. Keep it subtle for a \
+photorealistic scene and can be more pronounced for a stylized one.
+- Every beat should communicate ONE clear, legible focal action or \
+emotion a viewer can read at a glance (the animation principle of \
+"staging" -- clarity beats complexity) -- avoid a generic, ambiguous pose \
+that could mean anything. If a beat's `action` doesn't make clear what \
+the character wants or feels in that moment, it needs more specific \
+detail, not more general description.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:

@@ -288,7 +288,48 @@ def run_reference_image_stage(
     return PrevizResult(image_path=image_path, prompt_used=prompt)
 
 
-def build_character_sheet_prompt(character: Character) -> str:
+# docs/decisions/0033: the single authoritative source for realism level,
+# replacing three previously-independent, driftable sources (this
+# module's own two hardcoded "STYLE: Photorealistic..." lines, plus every
+# beat's own separately LLM-generated `style` text). Real terminology,
+# not invented -- see docs/playbook/failure-taxonomy.md's style-consistency
+# entry. Explicit negative constraints on each, since a bare positive
+# adjective ("photorealistic") wasn't enough to prevent drift toward an
+# unrequested style in real runs.
+_STYLE_INSTRUCTIONS = {
+    "photorealistic": (
+        "Photorealistic -- an actual photograph of a real person/place, "
+        "documentary-realistic color grade. Explicitly NOT 3D-rendered, "
+        "NOT CGI, NOT a game character model, NOT anime, NOT a cartoon or "
+        "stylized illustration."
+    ),
+    "semi-realistic": (
+        "Semi-realistic 3D animation in the Pixar/Disney tradition -- "
+        "believable human proportions and anatomy, expressive but not "
+        "exaggerated, subsurface-scattering skin, soft realistic lighting. "
+        "Explicitly NOT photorealistic/live-action, and NOT flat-shaded "
+        "cartoon or anime -- a controlled balance between realism and "
+        "stylization."
+    ),
+    "stylized": (
+        "Deliberately stylized/cartoon illustration -- flat or graphic "
+        "cel-shaded rendering; exaggerated proportions and expressions are "
+        "welcome. Explicitly NOT photorealistic and not attempting "
+        "real-world material/lighting fidelity."
+    ),
+}
+
+
+def _style_instruction(style: str) -> str:
+    try:
+        return _STYLE_INSTRUCTIONS[style]
+    except KeyError:
+        raise PrevizError(
+            f"Unknown style {style!r} -- must be one of {sorted(_STYLE_INSTRUCTIONS)}"
+        ) from None
+
+
+def build_character_sheet_prompt(character: Character, *, style: str = "photorealistic") -> str:
     """Build a neutral, non-narrative reference-sheet prompt for a
     Character (docs/decisions/0023, 0024) -- deliberately not a story
     moment, per the playbook's finding that a dedicated neutral reference
@@ -307,11 +348,12 @@ def build_character_sheet_prompt(character: Character) -> str:
         "specific location, nothing narrative.\n"
         "CAMERA: Medium-full shot, eye-level, centered.\n"
         "LIGHTING: Soft, even, shadowless studio-quality light.\n"
-        "STYLE: Photorealistic, no on-screen text, no logos, no watermark."
+        f"STYLE: {_style_instruction(style)} No on-screen text, no logos, "
+        "no watermark."
     )
 
 
-def build_location_reference_prompt(location: Location) -> str:
+def build_location_reference_prompt(location: Location, *, style: str = "photorealistic") -> str:
     """Build a no-character establishing-shot prompt for a Location
     (docs/decisions/0023, 0024) -- the canonical reference every beat set
     there conditions on, per the playbook's location-consistency finding."""
@@ -320,17 +362,31 @@ def build_location_reference_prompt(location: Location) -> str:
         "CAMERA: Wide establishing shot, eye-level, no main subject in the "
         "foreground -- this is a location reference, not a character shot.\n"
         f"LIGHTING: {location.ambient_light}.\n"
-        "STYLE: Photorealistic cinematic film still, documentary-realistic "
-        "color grade, no on-screen text, no logos."
+        f"STYLE: {_style_instruction(style)} No on-screen text, no logos."
     )
 
 
-def _build_beat_prompt(beat: Beat, *, character: Character | None, location: Location | None) -> str:
+def _build_beat_prompt(
+    beat: Beat,
+    *,
+    character: Character | None,
+    location: Location | None,
+    style: str = "photorealistic",
+) -> str:
     """Build one beat's image prompt directly from its 7-part fields
     (docs/decisions/0023) -- deliberately not routed through _build_prompt,
     whose "historically accurate scene, Time: X, Place: Y" template is
     scoped to the original single-scene flow, not a planned multi-beat
-    shot list."""
+    shot list.
+
+    `beat.style` (the scene-planning LLM's own per-beat text -- lens,
+    grain, framing notes) is kept, since that's legitimate beat-to-beat
+    cinematographic variety, not the realism level. `style`
+    (docs/decisions/0033) is appended after it as an explicit override so
+    the realism level stays the single authoritative source across every
+    beat and reference in a run, rather than competing with whatever
+    beat.style happened to say on a given call.
+    """
     parts = []
     if character is not None:
         parts.append(
@@ -346,6 +402,10 @@ def _build_beat_prompt(beat: Beat, *, character: Character | None, location: Loc
     parts.append(f"CAMERA: {beat.camera}")
     parts.append(f"LIGHTING: {beat.lighting}")
     parts.append(f"STYLE: {beat.style}")
+    parts.append(
+        f"OVERRIDING STYLE REQUIREMENT (takes priority over anything above): "
+        f"{_style_instruction(style)}"
+    )
     return "\n".join(parts)
 
 
@@ -356,6 +416,7 @@ def run_beat_image_stage(
     location: Location | None = None,
     character_reference: Path | None = None,
     location_reference: Path | None = None,
+    style: str = "photorealistic",
     model: str | None = None,
     image_fn: Callable = litellm.image_generation,
     edit_fn: Callable = litellm.image_edit,
@@ -370,9 +431,11 @@ def run_beat_image_stage(
     `_build_beat_prompt`); `character_reference`/`location_reference`
     (docs/decisions/0024) additionally condition the generation on those
     images, same mechanism and same retry behavior as `run_previz_stage`.
+    `style` (docs/decisions/0033) is the run's single authoritative
+    realism-level source -- see `_build_beat_prompt`.
     """
     resolved_model = model or get_stage_model("previz")
-    prompt = _build_beat_prompt(beat, character=character, location=location)
+    prompt = _build_beat_prompt(beat, character=character, location=location, style=style)
     response = _generate_image_response(
         prompt,
         reference_paths=[p for p in (character_reference, location_reference) if p is not None],

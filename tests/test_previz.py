@@ -411,6 +411,34 @@ def test_build_location_reference_prompt_includes_all_location_fields():
     assert "location reference, not a character shot" in prompt
 
 
+def test_build_character_sheet_prompt_defaults_to_photorealistic():
+    # docs/decisions/0033: single authoritative style source.
+    prompt = build_character_sheet_prompt(_character())
+    assert "Photorealistic" in prompt
+    assert "NOT 3D-rendered" in prompt
+
+
+def test_build_character_sheet_prompt_honors_stylized_style():
+    prompt = build_character_sheet_prompt(_character(), style="stylized")
+    assert "stylized/cartoon" in prompt
+    assert "Explicitly NOT photorealistic" in prompt
+
+
+def test_build_character_sheet_prompt_honors_semi_realistic_style():
+    prompt = build_character_sheet_prompt(_character(), style="semi-realistic")
+    assert "Pixar/Disney" in prompt
+
+
+def test_build_location_reference_prompt_honors_style():
+    prompt = build_location_reference_prompt(_location(), style="stylized")
+    assert "stylized/cartoon" in prompt
+
+
+def test_build_character_sheet_prompt_raises_on_unknown_style():
+    with pytest.raises(PrevizError, match="Unknown style"):
+        build_character_sheet_prompt(_character(), style="watercolor")
+
+
 def test_run_beat_image_stage_writes_image_and_prompt_includes_beat_fields(tmp_path):
     result = run_beat_image_stage(
         _beat(),
@@ -425,6 +453,23 @@ def test_run_beat_image_stage_writes_image_and_prompt_includes_beat_fields(tmp_p
     assert "checks her phone, puzzled" in result.prompt_used
     assert "stone-paved Pompeii street" in result.prompt_used
     assert "light brown wavy" in result.prompt_used
+
+
+def test_run_beat_image_stage_uses_style_as_overriding_requirement(tmp_path):
+    # docs/decisions/0033: beat.style is kept (cinematography notes), but
+    # the run's authoritative style always appears too, as an override.
+    result = run_beat_image_stage(
+        _beat(),
+        character=_character(),
+        location=_location(),
+        style="stylized",
+        image_fn=_fake_image_fn(_TINY_PNG_B64),
+        output_dir=tmp_path,
+    )
+
+    assert "photorealistic" in result.prompt_used  # beat.style's own text, unchanged
+    assert "OVERRIDING STYLE REQUIREMENT" in result.prompt_used
+    assert "stylized/cartoon" in result.prompt_used
 
 
 def test_run_beat_image_stage_omits_character_block_when_none_given(tmp_path):

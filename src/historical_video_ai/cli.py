@@ -1287,18 +1287,21 @@ def _generate_scene_references(
     previz_model: str,
     image_kwargs: dict,
     out_dir: Path,
+    style: str = "photorealistic",
     auto_yes: bool = False,
 ) -> tuple[dict[str, Path], dict[str, Path]]:
     """Generate one canonical reference image per Character and per
     Location in scene_plan (docs/decisions/0024). Each gets its own
     accept/regenerate confirm before moving on -- a bad reference is far
     cheaper to catch here than after generating several beats off it.
+    `style` (docs/decisions/0033) is the run's single authoritative
+    realism-level source.
 
     Returns (character_refs, location_refs), each a dict keyed by id.
     """
     character_refs: dict[str, Path] = {}
     for i, character in enumerate(scene_plan.characters, start=1):
-        prompt = build_character_sheet_prompt(character)
+        prompt = build_character_sheet_prompt(character, style=style)
         while True:
             print(
                 f"\n--- character reference '{character.id}' "
@@ -1321,7 +1324,7 @@ def _generate_scene_references(
 
     location_refs: dict[str, Path] = {}
     for i, location in enumerate(scene_plan.locations, start=1):
-        prompt = build_location_reference_prompt(location)
+        prompt = build_location_reference_prompt(location, style=style)
         while True:
             print(f"\n--- location reference '{location.id}' ({i}/{len(scene_plan.locations)}) ---")
             result = run_reference_image_stage(
@@ -1353,9 +1356,12 @@ def _generate_beats_with_choices(
     image_kwargs: dict,
     review_kwargs: dict,
     out_dir: Path,
+    style: str = "photorealistic",
     auto_yes: bool = False,
 ) -> list[dict]:
-    """Generate each beat's image (docs/decisions/0024). Every attempt
+    """Generate each beat's image (docs/decisions/0024). `style`
+    (docs/decisions/0033) is the run's single authoritative realism-level
+    source. Every attempt
     still goes through previz_review's own automatic reject-and-regenerate
     loop (docs/decisions/0009, via _generate_image_with_review), but now
     with an on-rejection hook (docs/decisions/0029): after *any*
@@ -1472,6 +1478,7 @@ def _generate_beats_with_choices(
                     location=location,
                     character_reference=character_ref,
                     location_reference=location_ref,
+                    style=style,
                     model=previz_model,
                     output_dir=beat_out_dir,
                     on_transient_retry=lambda n, exc: print(
@@ -1605,6 +1612,20 @@ def main() -> None:
             "hand-written, video-specific prompt be tested against an "
             "already-approved previz image without paying for a fresh "
             "research/fact-check/previz pass just to change the wording."
+        ),
+    )
+    parser.add_argument(
+        "--style",
+        choices=["photorealistic", "semi-realistic", "stylized"],
+        default="photorealistic",
+        help=(
+            "Target realism level for every reference and beat image in "
+            "this run -- the single authoritative style source, replacing "
+            "three previously-independent, driftable ones (docs/decisions/"
+            "0033). 'semi-realistic' means Pixar/Disney-style 3D "
+            "animation, not photoreal and not flat cartoon. First step "
+            "toward a fuller style-bible (docs/playbook/failure-taxonomy.md) "
+            "-- not the final version of this control."
         ),
     )
     parser.add_argument(
@@ -1861,6 +1882,7 @@ def main() -> None:
         previz_model=previz_model,
         image_kwargs=image_kwargs,
         out_dir=out_dir,
+        style=args.style,
         auto_yes=args.yes,
     )
     log["character_references"] = {k: str(v) for k, v in character_refs.items()}
@@ -1877,6 +1899,7 @@ def main() -> None:
         image_kwargs=beat_image_kwargs,
         review_kwargs=review_kwargs,
         out_dir=out_dir,
+        style=args.style,
         auto_yes=args.yes,
     )
     log["previz_beats"] = beat_results
