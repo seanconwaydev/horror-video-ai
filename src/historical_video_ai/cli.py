@@ -488,47 +488,67 @@ def _resolve_premise_conflict(
     completion_kwargs: dict,
     on_research_completed: Callable[[FactSheet], None] | None = None,
     auto_yes: bool = False,
-) -> tuple[FactSheet, FactCheckResult] | None:
+) -> tuple[FactSheet, FactCheckResult, str | None] | None:
     """If fact-check flagged the scene's own premise as historically
     impossible (docs/decisions/0008), push back instead of silently
     proceeding -- previz would refuse anyway, but that's a last-resort
-    safety net, not a substitute for asking. Offers the suggested
-    alternative, or lets the human supply their own, then re-verifies with
-    one fresh research + fact-check pass (correcting the premise re-runs
-    research rather than reusing claims shaped by the old, impossible one).
+    safety net, not a substitute for asking. Offers three resolutions:
+    use the suggested alternative, supply a corrected description
+    (re-verified with one fresh research + fact-check pass), or keep the
+    premise as intentional fiction (docs/decisions/0025) -- acknowledges
+    the conflict without altering the description, clearing
+    `premise_conflict` since previz's own check exists to require
+    knowing acknowledgment, not to forbid fiction outright.
 
-    Returns the resolved (fact_sheet, fact_check_result) pair, or None if
-    the human stopped. Only re-verifies once -- a still-conflicted
-    corrected description is treated as a stop, not a retry loop.
+    Returns (fact_sheet, fact_check_result, resolution_type), or None if
+    the human stopped. `resolution_type` is None when there was no
+    conflict to resolve in the first place, `"kept_as_intentional_fiction"`
+    or `"corrected"` otherwise -- see docs/decisions/0025. Only
+    re-verifies once for a corrected description -- a still-conflicted
+    correction is treated as a stop, not a retry loop.
     """
     conflict = fact_check_result.premise_conflict
     if conflict is None:
-        return fact_sheet, fact_check_result
+        return fact_sheet, fact_check_result, None
 
     print(f"\nThis scene's premise appears to be historically impossible: {conflict.explanation}")
-
-    new_description: str | None = None
     if conflict.suggested_alternative:
         print(f"Closest historically plausible version: {conflict.suggested_alternative}")
-        if _confirm("Use this instead?", auto_yes=auto_yes):
-            new_description = conflict.suggested_alternative
     else:
         print("No reasonably close, historically plausible version of this scene was found.")
 
-    if new_description is None:
-        if auto_yes:
-            # Nothing sensible to auto-supply for a free-text corrected
-            # description -- stop cleanly rather than guess one.
-            print(
-                "Stopping -- --yes can't supply a corrected description for an "
-                "unresolved premise conflict with no suggested alternative."
-            )
-            return None
-        if _confirm("Provide your own corrected description instead?"):
-            new_description = _prompt_if_missing(None, "Corrected description")
-        else:
-            print("Stopping -- the scene's premise was never resolved.")
-            return None
+    if auto_yes:
+        # --yes has no sound basis to guess between "keep as intentional
+        # fiction" and "use the corrected version" -- they produce
+        # meaningfully different videos, unlike an "uncertain" fact-check
+        # flag. Stop cleanly, same precedent as every other case --yes
+        # refuses to guess at (0017, 0019).
+        print("\n--yes won't auto-resolve a premise conflict -- rerun without --yes to choose.")
+        return None
+
+    valid_actions = {"k", "o", "s"} | ({"u"} if conflict.suggested_alternative else set())
+    prompt = "(k)eep as intentional fiction"
+    if conflict.suggested_alternative:
+        prompt = f"(u)se the suggested alternative / {prompt}"
+    prompt += " / (o)wn corrected description / (s)top"
+
+    action = ""
+    while action not in valid_actions:
+        action = input(f"{prompt}: ").strip().lower()
+
+    if action == "k":
+        print("Keeping this premise as intentional fiction -- proceeding as written.")
+        return (
+            fact_sheet,
+            dataclasses.replace(fact_check_result, premise_conflict=None),
+            "kept_as_intentional_fiction",
+        )
+    if action == "s":
+        print("Stopping -- the scene's premise was never resolved.")
+        return None
+    new_description = (
+        conflict.suggested_alternative if action == "u" else _prompt_if_missing(None, "Corrected description")
+    )
 
     print(f"\nRe-verifying with the corrected description: {new_description!r}")
     result = _run_research_and_fact_check(
@@ -555,7 +575,7 @@ def _resolve_premise_conflict(
         )
         return None
 
-    return new_fact_sheet, new_fact_check_result
+    return new_fact_sheet, new_fact_check_result, "corrected"
 
 
 def _generate_image_with_review(
@@ -1577,10 +1597,11 @@ def main() -> None:
         _write_log(out_dir, log)
         print(f"Stopped. Run artifacts saved in {out_dir}")
         return
-    fact_sheet, fact_check_result = resolved
+    fact_sheet, fact_check_result, resolution_type = resolved
 
     if original_premise_conflict is not None:
         log["premise_conflict_resolved_with_description"] = fact_sheet.description
+        log["premise_conflict_resolution"] = resolution_type
     log["description"] = fact_sheet.description
     log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
     log["fact_check_flags"] = [dataclasses.asdict(f) for f in fact_check_result.flags]

@@ -474,12 +474,12 @@ def test_resolve_premise_conflict_returns_unchanged_when_no_conflict():
         fact_sheet, fact_check_result, **_resolve_premise_conflict_kwargs(None)
     )
 
-    assert result == (fact_sheet, fact_check_result)
+    assert result == (fact_sheet, fact_check_result, None)
 
 
 def test_resolve_premise_conflict_accepts_suggested_alternative_and_reverifies(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result("A close, true version of the scene.")
-    responses = iter(["y", "y"])  # use suggested alternative; proceed to fact-check on reverify
+    responses = iter(["u", "y"])  # use suggested alternative; proceed to fact-check on reverify
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
     result = _resolve_premise_conflict(
@@ -489,14 +489,15 @@ def test_resolve_premise_conflict_accepts_suggested_alternative_and_reverifies(m
     )
 
     assert result is not None
-    new_fact_sheet, new_fact_check_result = result
+    new_fact_sheet, new_fact_check_result, resolution_type = result
     assert new_fact_sheet.description == "A close, true version of the scene."
     assert new_fact_check_result.premise_conflict is None
+    assert resolution_type == "corrected"
 
 
 def test_resolve_premise_conflict_declines_alternative_and_provides_own(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
-    responses = iter(["n", "y", "my own corrected description", "y"])
+    responses = iter(["o", "my own corrected description", "y"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
     result = _resolve_premise_conflict(
@@ -506,13 +507,14 @@ def test_resolve_premise_conflict_declines_alternative_and_provides_own(monkeypa
     )
 
     assert result is not None
-    new_fact_sheet, _ = result
+    new_fact_sheet, _, resolution_type = result
     assert new_fact_sheet.description == "my own corrected description"
+    assert resolution_type == "corrected"
 
 
 def test_resolve_premise_conflict_no_alternative_provides_own(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result(None)
-    responses = iter(["y", "my own corrected description", "y"])
+    responses = iter(["o", "my own corrected description", "y"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
     result = _resolve_premise_conflict(
@@ -522,14 +524,13 @@ def test_resolve_premise_conflict_no_alternative_provides_own(monkeypatch):
     )
 
     assert result is not None
-    new_fact_sheet, _ = result
+    new_fact_sheet, _, _ = result
     assert new_fact_sheet.description == "my own corrected description"
 
 
-def test_resolve_premise_conflict_declining_everything_stops(monkeypatch):
+def test_resolve_premise_conflict_stop_declines_everything(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
-    responses = iter(["n", "n"])  # decline alternative, decline providing own
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    monkeypatch.setattr("builtins.input", lambda _: "s")
 
     result = _resolve_premise_conflict(
         fact_check_result.fact_sheet,
@@ -540,9 +541,47 @@ def test_resolve_premise_conflict_declining_everything_stops(monkeypatch):
     assert result is None
 
 
+def test_resolve_premise_conflict_keep_as_intentional_fiction(monkeypatch):
+    # docs/decisions/0025: acknowledges the conflict and proceeds with the
+    # description exactly as written, clearing premise_conflict.
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+    monkeypatch.setattr("builtins.input", lambda _: "k")
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        **_resolve_premise_conflict_kwargs(None),
+    )
+
+    assert result is not None
+    new_fact_sheet, new_fact_check_result, resolution_type = result
+    assert new_fact_sheet.description == fact_check_result.fact_sheet.description
+    assert new_fact_check_result.premise_conflict is None
+    assert resolution_type == "kept_as_intentional_fiction"
+
+
+def test_resolve_premise_conflict_auto_yes_never_auto_resolves(monkeypatch):
+    # --yes has no sound basis to guess between "keep as fiction" and "use
+    # the corrected version" -- must stop, not silently pick one.
+    def _explode(_prompt):
+        raise AssertionError("input() should not be called under auto_yes")
+
+    monkeypatch.setattr("builtins.input", _explode)
+    fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
+
+    result = _resolve_premise_conflict(
+        fact_check_result.fact_sheet,
+        fact_check_result,
+        auto_yes=True,
+        **_resolve_premise_conflict_kwargs(None),
+    )
+
+    assert result is None
+
+
 def test_resolve_premise_conflict_stops_if_reverify_still_conflicted(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
-    responses = iter(["y", "y"])  # use alternative; proceed to fact-check on reverify
+    responses = iter(["u", "y"])  # use alternative; proceed to fact-check on reverify
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     still_conflicted_payload = {
         "flags": [],
@@ -1248,7 +1287,7 @@ def test_generate_previz_with_review_on_image_generated_survives_a_review_crash(
 
 def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatch):
     fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
-    responses = iter(["y", "n"])  # use alternative; decline "proceed to fact-check" on reverify
+    responses = iter(["u", "n"])  # use alternative; decline "proceed to fact-check" on reverify
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
     result = _resolve_premise_conflict(
