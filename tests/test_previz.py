@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from types import SimpleNamespace
 
@@ -582,6 +583,53 @@ def test_run_previz_review_stage_sends_image_as_base64(tmp_path):
     content = captured["messages"][0]["content"]
     image_part = next(part for part in content if part["type"] == "image_url")
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_run_previz_review_stage_includes_acknowledged_fiction_when_set(tmp_path):
+    # docs/decisions/0026: an explicit allowlist for a human-acknowledged
+    # intentional fictional element, so the reviewer doesn't re-flag it.
+    image_path = _write_tiny_png(tmp_path)
+    fact_check_result = dataclasses.replace(
+        _fact_check_result(),
+        acknowledged_fiction="A smartphone with a time-travel app did not exist in 79 AD.",
+    )
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path, fact_check_result, model="anthropic/claude-sonnet-5", completion_fn=_completion
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "already been explicitly acknowledged as" in prompt_text
+    assert "A smartphone with a time-travel app did not exist in 79 AD." in prompt_text
+
+
+def test_run_previz_review_stage_omits_acknowledged_fiction_block_when_not_set(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "already been explicitly acknowledged as" not in prompt_text
 
 
 def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):

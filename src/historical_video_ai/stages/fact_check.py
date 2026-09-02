@@ -72,11 +72,20 @@ class FactCheckResult:
     cut it, or soften the language) and decides how to handle a premise
     conflict (see cli.py's _resolve_premise_conflict and
     docs/decisions/0008-refuse-impossible-premises.md), not the model.
+
+    `acknowledged_fiction`, if set, is the explanation of a premise
+    conflict a human explicitly chose to keep as intentional fiction
+    rather than correct (docs/decisions/0025) -- carried forward so
+    previz_review knows not to re-flag that specific, already-acknowledged
+    thing as a new problem (docs/decisions/0026), unlike `premise_conflict`
+    itself, which is cleared once acknowledged so run_previz_stage's own
+    hard-refuse check is satisfied.
     """
 
     fact_sheet: FactSheet
     flags: list[ClaimFlag] = field(default_factory=list)
     premise_conflict: PremiseConflict | None = None
+    acknowledged_fiction: str | None = None
 
 
 _PROMPT_TEMPLATE = """\
