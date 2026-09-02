@@ -645,24 +645,37 @@ def _generate_image_with_review(
     out_dir: Path,
     archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
+    on_rejected: Callable[[str, int], str] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a zero-arg callable producing
     one PrevizResult -- a closure over run_previz_stage for the original
     single-scene flow, or over run_beat_image_stage for a scene-plan beat,
     docs/decisions/0023/0024), then have an independent pass review the
     actual image against the scene (docs/decisions/0009). On rejection,
-    regenerates blind (no prompt rewriting), capped at _MAX_PREVIZ_ATTEMPTS.
+    regenerates blind (no prompt rewriting) unless `on_rejected` says to
+    stop, capped at _MAX_PREVIZ_ATTEMPTS regardless.
     Shared by both generation paths -- only how the image itself gets
     made differs between them.
 
     Returns (accepted PrevizResult, attempt log), or (None, attempt log)
-    if every attempt was rejected. A rejected attempt's image is archived
-    as `<archive_prefix>_<n>_rejected.png` rather than overwritten.
+    if every attempt was rejected or `on_rejected` stopped early. A
+    rejected attempt's image is archived as `<archive_prefix>_<n>_rejected.png`
+    rather than overwritten.
 
     `on_image_generated`, if given, is called with each attempt's
     PrevizResult right after the image is written -- *before* review runs,
     which can itself fail. Without this, a review-stage crash left a real,
     already-paid-for image on disk with no record of it in the log.
+
+    `on_rejected`, if given, is called with (concern, attempt) after
+    *every* rejection, including the final automatic attempt -- blind
+    regeneration only helps for genuine bad-luck rejections; a concern
+    baked into the prompt itself (e.g. an anachronistic detail on a
+    Character, reused verbatim on every attempt) fails identically every
+    time, so a human needs a way to intervene before more money gets spent
+    on attempts guaranteed to fail. Returning "stop" ends the retry loop
+    immediately (same outcome as exhausting every attempt); anything else
+    keeps regenerating blind.
     """
     attempts: list[dict] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
@@ -692,10 +705,12 @@ def _generate_image_with_review(
                 "image_path": str(archived_path),
             }
         )
+        if on_rejected is not None and on_rejected(review.concern, attempt) == "stop":
+            break
         if attempt < _MAX_PREVIZ_ATTEMPTS:
             print("Regenerating...")
 
-    print(f"\nGiving up after {_MAX_PREVIZ_ATTEMPTS} rejected attempts.")
+    print(f"\nGiving up after {len(attempts)} rejected attempt(s).")
     return None, attempts
 
 
@@ -1325,13 +1340,25 @@ def _generate_beats_with_choices(
 ) -> list[dict]:
     """Generate each beat's image (docs/decisions/0024). Every attempt
     still goes through previz_review's own automatic reject-and-regenerate
-    loop unchanged (docs/decisions/0009, via _generate_image_with_review).
-    On top of that, once an attempt is accepted by review, a human gets
-    three choices, not an automatic proceed: (a)ccept, (r)eroll (same beat
-    text, another blind attempt -- for "unlucky roll"), or (e)dit (update
-    the beat's text first, reusing 0023's per-item edit mechanism, then
-    retry -- for "this needs an actual change," not just another random
-    draw).
+    loop (docs/decisions/0009, via _generate_image_with_review), but now
+    with an on-rejection hook (docs/decisions/0029): after *any*
+    rejection, not just after all attempts are exhausted, a human can edit
+    the beat's text and retry fresh, or give up on this beat now --
+    otherwise Enter keeps the existing blind-retry behavior. This matters
+    because some rejections are attributable to something baked into the
+    prompt itself (e.g. an anachronistic detail on the shared Character),
+    which fails identically on every blind attempt -- see the real run
+    that motivated this. Under `auto_yes` there's no human to ask, so the
+    hook instead applies a cheap heuristic: an identical rejection concern
+    twice in a row gives up rather than spending the last attempt on a
+    near-certain repeat (0029 -- a real judgment call on "is this doomed"
+    needs a model in the loop, which is future work, not this).
+
+    Once an attempt is accepted by review, a human gets three further
+    choices, not an automatic proceed: (a)ccept, (r)eroll (same beat text,
+    another blind attempt -- for "unlucky roll"), or (e)dit (update the
+    beat's text first, reusing 0023's per-item edit mechanism, then retry
+    -- for "this needs an actual change," not just another random draw).
 
     Assumes a single main character, the common case in every real scene
     built so far: with zero characters, no character reference is used;
@@ -1357,6 +1384,50 @@ def _generate_beats_with_choices(
         while True:
             print(f"\n=== beat {i}/{len(scene_plan.beats)}: {beat.action} ===")
             attempt_n = 0
+            beat_was_edited = False
+            last_concern: str | None = None
+
+            def _on_rejected(concern: str, attempt: int, i: int = i) -> str:
+                # Fires on every rejection, including the last automatic
+                # one -- gives a human the chance to break out of a
+                # guaranteed-to-keep-failing blind retry (e.g. an
+                # anachronistic detail baked into the beat or shared
+                # Character text) instead of burning the remaining
+                # attempts on it. Enter/blank preserves today's behavior
+                # exactly: keep regenerating blind.
+                nonlocal beat, beat_was_edited, last_concern
+                if auto_yes:
+                    # No human to ask, but an identical rejection reason
+                    # twice in a row is still a strong, cheap (no model
+                    # call) signal that the cause is baked into the
+                    # prompt rather than bad luck -- give up rather than
+                    # spend the remaining attempt on a guaranteed repeat.
+                    # This is a naive proxy, not real judgment of whether
+                    # a rejection is structural: it only catches a
+                    # near-verbatim repeat, and a differently-worded
+                    # critique of the same root cause slips past it.
+                    # Genuinely deciding "is this doomed" -- and deciding
+                    # whether to edit vs. give up vs. keep rolling -- is
+                    # exactly the kind of per-stage judgment call that
+                    # eventually needs a real model in the loop alongside
+                    # full human review and --yes, not just this heuristic.
+                    is_repeat = last_concern is not None and concern == last_concern
+                    last_concern = concern
+                    return "stop" if is_repeat else "continue"
+                choice = None
+                while choice not in ("", "e", "g"):
+                    choice = input(
+                        "(Enter) keep auto-retrying / (e)dit this beat and retry / "
+                        "(g)ive up on this beat: "
+                    ).strip().lower()
+                if choice == "e":
+                    print(f"\nBeat {i}:")
+                    beat = _edit_item_fields(beat)
+                    beat_was_edited = True
+                    return "stop"
+                if choice == "g":
+                    return "stop"
+                return "continue"
 
             # Default-argument bindings, not closures over the loop
             # variables directly: `_generate` is redefined fresh each
@@ -1399,9 +1470,12 @@ def _generate_beats_with_choices(
                 review_kwargs=review_kwargs,
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
+                on_rejected=_on_rejected,
             )
 
             if previz_result is None:
+                if beat_was_edited:
+                    continue  # human edited the beat -- restart a fresh attempt cycle
                 beat_results.append(
                     {
                         "index": i,
@@ -1410,7 +1484,7 @@ def _generate_beats_with_choices(
                         "attempts": attempts,
                     }
                 )
-                break  # every automatic attempt was rejected; give up on this beat
+                break  # every automatic attempt was rejected, or the human gave up on this beat
 
             if auto_yes:
                 choice = "a"
@@ -1511,6 +1585,19 @@ def main() -> None:
             "hand-written, video-specific prompt be tested against an "
             "already-approved previz image without paying for a fresh "
             "research/fact-check/previz pass just to change the wording."
+        ),
+    )
+    parser.add_argument(
+        "--max-beats",
+        type=int,
+        help=(
+            "Cap the scene-planning stage at this many beats -- passed to "
+            "the model as a soft target and enforced afterward by "
+            "truncation, so the cost-control guarantee doesn't depend on "
+            "the model honoring the instruction. Useful while iterating "
+            "on image/video quality, to keep a run's image-generation "
+            "spend small (e.g. 3-5 instead of a full 10+ beat scene). "
+            "Unset means no cap, the model's own judgment decides."
         ),
     )
     parser.add_argument(
@@ -1709,7 +1796,10 @@ def main() -> None:
     log["scene_planning_model"] = scene_planning_model
     print(f"\n--- scene planning (model: {scene_planning_model}) ---")
     scene_plan = run_scene_planning_stage(
-        fact_check_result, model=scene_planning_model, **scene_planning_kwargs
+        fact_check_result,
+        model=scene_planning_model,
+        max_beats=args.max_beats,
+        **scene_planning_kwargs,
     )
     log["scene_plan"] = dataclasses.asdict(scene_plan)
     _write_log(out_dir, log)

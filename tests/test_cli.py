@@ -906,7 +906,13 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     assert results[0]["beat"]["action"] == "smiles warmly"
 
 
-def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected(tmp_path):
+def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected(
+    tmp_path, monkeypatch
+):
+    # Blank input at the on-rejection prompt means "keep auto-retrying" --
+    # this exercises the same all-3-attempts-rejected path as before that
+    # hook existed, just with the human declining to intervene each time.
+    monkeypatch.setattr("builtins.input", lambda _: "")
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
     kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")] * 3)}
@@ -916,6 +922,101 @@ def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected
     )
 
     assert results[0]["image_path"] is None
+    assert len(results[0]["attempts"]) == 3
+
+
+def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_retrying(
+    tmp_path, monkeypatch
+):
+    # Only one rejected attempt should happen -- (g)ive up at the very
+    # first on-rejection prompt must stop the retry loop immediately
+    # rather than burning the remaining automatic attempts.
+    responses = iter(["g"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is None
+    assert len(results[0]["attempts"]) == 1
+
+
+def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry(
+    tmp_path, monkeypatch
+):
+    # docs/decisions/0028-era work follow-up: a rejection caused by
+    # something baked into the beat's own text (not bad luck) needs an
+    # edit-and-retry path, not just three guaranteed-to-fail blind
+    # attempts. (e)dit at the on-rejection prompt, then blank through
+    # every Beat field (keep as-is for this test), should restart a fresh
+    # attempt cycle that can then be accepted normally.
+    responses = iter(["e", "", "", "", "", "", "", "", "", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(False, "Wrong."), (True, None)])
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is not None
+    # The restarted attempt cycle is a fresh _generate_image_with_review
+    # call -- only its own attempt log is recorded, not the discarded
+    # first cycle's single rejected attempt.
+    assert len(results[0]["attempts"]) == 1
+    assert results[0]["attempts"][0]["accepted"] is True
+
+
+def test_generate_beats_with_choices_stops_early_under_auto_yes_on_repeated_concern(tmp_path):
+    # docs/decisions/0029: under auto_yes there's no human to ask, so an
+    # identical rejection concern twice in a row is treated as doomed and
+    # stops the retry loop early instead of spending the third attempt on
+    # a near-certain repeat.
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(False, "Same reason."), (False, "Same reason.")])
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        **kwargs,
+    )
+
+    assert results[0]["image_path"] is None
+    assert len(results[0]["attempts"]) == 2
+
+
+def test_generate_beats_with_choices_keeps_retrying_under_auto_yes_when_concern_differs(tmp_path):
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion(
+            [(False, "First reason."), (False, "Second, different reason."), (True, None)]
+        )
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        **kwargs,
+    )
+
+    assert results[0]["image_path"] is not None
     assert len(results[0]["attempts"]) == 3
 
 
