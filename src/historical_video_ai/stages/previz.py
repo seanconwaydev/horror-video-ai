@@ -388,26 +388,33 @@ def run_beat_image_stage(
 
 _REVIEW_PROMPT_TEMPLATE = """\
 You are independently reviewing a generated image against a historically \
-accurate scene description. Your job is to find reasons the IMAGE could be \
-WRONG -- specifically, does it depict anything that could not have existed \
-or happened at this time and place? This includes anachronistic objects or \
-technology, and an outright fictional or fantastical element shown as if \
-it's literally, physically present in the scene -- even if the text \
-description was appropriately hedged ("resembles", "believed to be"), a \
-generated image can still render that thing as unambiguously real, which \
-is exactly the failure mode you're checking for.
+accurate scene description. Your job has two parts:
+
+1. Does the image depict anything that could not have existed or happened \
+at this time and place -- anachronistic objects or technology, or an \
+outright fictional/fantastical element shown as if it's literally, \
+physically present? Even if the text description was appropriately hedged \
+("resembles", "believed to be"), a generated image can still render that \
+thing as unambiguously real, which is exactly the failure mode you're \
+checking for here.
+2. Does the image actually match what was planned -- the right character \
+in the right role doing the right thing, not some other person performing \
+an action that was never described (e.g. the wrong character shown \
+running a shop, serving food, or holding an object that belongs to \
+someone else in the scene)?
 
 Scene -- Time: {time} | Place: {place} | What happens: {description}
 
 Claims the image should be consistent with:
 {claims_block}
-{acknowledged_fiction_block}
+{acknowledged_fiction_block}{planned_details_block}
 Look at the image and respond with ONLY a JSON object (no prose, no \
 markdown fences) matching this exact shape:
 
 {{
-  "accepted": <true if the image is historically plausible given the scene and claims
-    above, false if it depicts something that could not have existed or happened>,
+  "accepted": <true if the image is historically plausible AND matches what was
+    planned, false if it depicts something that could not have existed or
+    happened, or fails to match what was planned>,
   "concern": "<if accepted is false, specifically what's wrong with the image; null
     if accepted is true>"
 }}
@@ -434,12 +441,22 @@ def run_previz_review_stage(
     image_path: Path,
     fact_check_result: FactCheckResult,
     *,
+    character: Character | None = None,
+    beat: Beat | None = None,
     model: str | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> PrevizReview:
     """Independently review a previz-generated image against the scene it
     was supposed to depict -- an adversarial check on the actual image, not
     just the text prompt (docs/decisions/0009).
+
+    `character`/`beat`, if given (docs/decisions/0032), list their already
+    scene-plan-approved details (wardrobe, distinguishing detail, the
+    beat's own action) as settled and not to be re-flagged as
+    anachronisms -- a re-derived-from-scratch historical-plausibility
+    judgment is the wrong check for something a human already reviewed and
+    approved at scene-plan-review time (docs/decisions/0023). Only the
+    single-scene flow (which predates scene-planning) omits these.
 
     `model` defaults to the pinned "previz_review" model -- deliberately
     vision-capable and a different provider than previz's own image model,
@@ -464,12 +481,40 @@ def run_previz_review_stage(
             "flag this specific thing as a problem, only flag genuinely "
             f"new or different issues:\n{fact_check_result.acknowledged_fiction}\n"
         )
+    # docs/decisions/0032: a further, distinct allowlist -- these details
+    # were approved at scene-plan-review time (0023), not derived from the
+    # original premise-conflict text, so they need naming here separately.
+    planned_details_block = ""
+    if character is not None or beat is not None:
+        planned_lines = []
+        if character is not None:
+            planned_lines.append(
+                f"- This character's appearance was already deliberately planned "
+                f"and human-reviewed, including anything that looks anachronistic "
+                f"in isolation -- do NOT flag it: wardrobe is "
+                f"{character.wardrobe_signature} ({character.wardrobe_flexible}); "
+                f"{character.distinguishing_detail}"
+            )
+        if beat is not None:
+            planned_lines.append(
+                f"- This beat's action was already deliberately planned -- do NOT "
+                f"flag it as wrong on its own terms: {beat.subject} {beat.action}"
+            )
+        planned_details_block = (
+            "\nThe following specific details were already deliberately planned "
+            "and human-reviewed as part of this scene -- do NOT flag them as "
+            "anachronisms or problems on their own, no matter how implausible "
+            "they'd look in isolation; only flag if the image fails to actually "
+            "depict them faithfully, or introduces a DIFFERENT, new problem not "
+            "covered here:\n" + "\n".join(planned_lines) + "\n"
+        )
     prompt = _REVIEW_PROMPT_TEMPLATE.format(
         time=fact_sheet.time,
         place=fact_sheet.place,
         description=fact_sheet.description,
         claims_block=detail_lines or "(no claims)",
         acknowledged_fiction_block=acknowledged_fiction_block,
+        planned_details_block=planned_details_block,
     )
 
     response = completion_fn(

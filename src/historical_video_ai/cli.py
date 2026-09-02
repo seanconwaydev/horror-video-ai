@@ -1484,7 +1484,10 @@ def _generate_beats_with_choices(
                 _generate,
                 fact_check_result,
                 review_model=review_model,
-                review_kwargs=review_kwargs,
+                # docs/decisions/0032: character/beat are already
+                # scene-plan-approved -- previz_review shouldn't re-derive
+                # their plausibility from scratch on every attempt.
+                review_kwargs={**review_kwargs, "character": character, "beat": beat},
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
                 on_rejected=_on_rejected,

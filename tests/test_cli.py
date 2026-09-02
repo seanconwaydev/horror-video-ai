@@ -928,6 +928,44 @@ def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected
     assert len(results[0]["attempts"]) == 3
 
 
+def test_generate_beats_with_choices_passes_character_and_beat_to_review(tmp_path):
+    # docs/decisions/0032: the review call must know which character/beat
+    # it's reviewing so it can trust their already-approved details instead
+    # of re-deriving plausibility from scratch.
+    captured = {}
+
+    def _review_completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps({"accepted": True, "concern": None}))
+                )
+            ]
+        )
+
+    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+    char_ref = _write_reference_png(tmp_path, "char_ref.png")
+    loc_ref = _write_reference_png(tmp_path, "loc_ref.png")
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _review_completion}
+
+    _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={"influencer": char_ref},
+        location_refs={"street": loc_ref},
+        auto_yes=True,
+        **kwargs,
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "already deliberately planned and human-reviewed" in prompt_text
+    assert "white crop top, gray leggings" in prompt_text
+
+
 def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_retrying(
     tmp_path, monkeypatch
 ):
