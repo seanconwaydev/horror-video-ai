@@ -20,6 +20,7 @@ from historical_video_ai.cli import (
     _prompt_if_missing,
     _resolve_flags,
     _resolve_premise_conflict,
+    _review_scene_plan,
     _run_dir,
     _run_research_and_fact_check,
     _run_video_generation_only,
@@ -733,6 +734,63 @@ def _beat(location_id="street", action="checks her phone") -> Beat:
         audio="street ambience",
         duration_seconds="3",
     )
+
+
+def test_review_scene_plan_accepts_everything_under_auto_yes():
+    plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+
+    reviewed = _review_scene_plan(plan, auto_yes=True)
+
+    assert reviewed == plan
+
+
+def test_review_scene_plan_recatches_a_beat_edited_to_an_unknown_location(monkeypatch):
+    # docs/decisions/0028: editing a beat's location_id to something that
+    # doesn't match any reviewed location must not silently drop all
+    # location grounding -- it should re-prompt for that beat specifically.
+    # Each failed round re-enters _review_item from the top (a)ccept/(e)dit
+    # choice, so recovering means editing *again* with a valid id, not
+    # just re-accepting the still-broken beat.
+    plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    responses = iter(
+        ["a"]  # location: accept
+        + ["e", "nonexistent-typo", "", "", "", "", "", "", ""]  # beat round 1: bad location_id
+        + ["e", "street", "", "", "", "", "", "", ""]  # beat round 2: fixed
+    )
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    reviewed = _review_scene_plan(plan, auto_yes=False)
+
+    assert reviewed.beats[0].location_id == "street"
+
+
+def test_review_scene_plan_recatches_duplicate_location_ids_after_edit(monkeypatch):
+    # docs/decisions/0028: editing a second location's id to collide with
+    # the first must not silently corrupt character_refs/location_refs.
+    plan = ScenePlan(
+        characters=[],
+        locations=[_location(), Location(id="other", architecture="x", fixed_props="y", ambient_light="z")],
+        beats=[_beat()],
+    )
+    # Location 1: accept. Location 2: edit id to collide with location 1,
+    # blank the rest -- caught, re-reviewed: accept location 1, then edit
+    # location 2's id back to something unique.
+    responses = iter(
+        [
+            "a",  # location 1: accept
+            "e", "street", "", "", "",  # location 2: edit id to collide ("street")
+            "a",  # re-review location 1: accept
+            "e", "other-fixed", "", "", "",  # re-review location 2: fix id
+            "a",  # beat: accept
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    reviewed = _review_scene_plan(plan, auto_yes=False)
+
+    ids = [loc.id for loc in reviewed.locations]
+    assert len(ids) == len(set(ids))
+    assert "other-fixed" in ids
 
 
 def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):

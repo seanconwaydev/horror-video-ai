@@ -137,6 +137,36 @@ def _require_str_fields(item: dict, fields_: list[str], *, item_desc: str) -> No
             raise ScenePlanningError(f"{item_desc} is missing or has an empty '{f}'")
 
 
+def check_unique_ids(items: list, *, label: str) -> None:
+    """Raise ScenePlanningError if any two `items` (Character or Location
+    objects, or anything with an `.id`) share an id -- reused by
+    `_parse_scene_plan` (the LLM's raw output) and by cli.py's
+    `_review_scene_plan` (after a human edit could just as easily
+    introduce a collision the LLM didn't). A silent collision would make
+    `character_refs`/`location_refs` -- plain dicts keyed by id -- drop
+    one item's reference image in favor of another's without any warning.
+    """
+    ids = [item.id for item in items]
+    if len(ids) != len(set(ids)):
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        raise ScenePlanningError(f"Duplicate {label} id(s): {dupes}")
+
+
+def check_beat_location_references(beats: list, locations: list) -> None:
+    """Raise ScenePlanningError if any beat's location_id doesn't match a
+    defined location -- reused by `_parse_scene_plan` (the LLM's raw
+    output) and by cli.py's `_review_scene_plan` (after a human edit to
+    either a beat's location_id or a location's id could just as easily
+    break the reference the LLM originally got right)."""
+    location_ids = {loc.id for loc in locations}
+    for beat in beats:
+        if beat.location_id not in location_ids:
+            raise ScenePlanningError(
+                f"A beat references location_id {beat.location_id!r}, which doesn't match "
+                f"any defined location ({sorted(location_ids)})"
+            )
+
+
 def _parse_scene_plan(raw_content: str) -> ScenePlan:
     data = parse_json_response(raw_content, ScenePlanningError, "Scene-planning response")
 
@@ -151,6 +181,7 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
             item_desc="A character",
         )
         characters.append(Character(**{f: item[f] for f in Character.__dataclass_fields__}))
+    check_unique_ids(characters, label="character")
 
     locations = []
     for item in data.get("locations", []):
@@ -158,8 +189,8 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
             item, ["id", "architecture", "fixed_props", "ambient_light"], item_desc="A location"
         )
         locations.append(Location(**{f: item[f] for f in Location.__dataclass_fields__}))
+    check_unique_ids(locations, label="location")
 
-    location_ids = {loc.id for loc in locations}
     beats = []
     for item in data.get("beats", []):
         _require_str_fields(
@@ -167,12 +198,8 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
             ["location_id", "subject", "action", "camera", "lighting", "style", "audio", "duration_seconds"],
             item_desc="A beat",
         )
-        if item["location_id"] not in location_ids:
-            raise ScenePlanningError(
-                f"A beat references location_id {item['location_id']!r}, which doesn't match "
-                f"any defined location ({sorted(location_ids)})"
-            )
         beats.append(Beat(**{f: item[f] for f in Beat.__dataclass_fields__}))
+    check_beat_location_references(beats, locations)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")

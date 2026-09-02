@@ -122,6 +122,30 @@ def test_run_scene_planning_stage_raises_when_beat_references_unknown_location()
         )
 
 
+def test_run_scene_planning_stage_raises_on_duplicate_character_ids():
+    payload = _valid_payload()
+    second_character = dict(payload["characters"][0])
+    payload["characters"].append(second_character)  # same id as the first
+    with pytest.raises(ScenePlanningError, match="Duplicate character id"):
+        run_scene_planning_stage(
+            _fact_check_result(),
+            model="deepseek/deepseek-v4-flash",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
+def test_run_scene_planning_stage_raises_on_duplicate_location_ids():
+    payload = _valid_payload()
+    second_location = dict(payload["locations"][0])
+    payload["locations"].append(second_location)  # same id as the first
+    with pytest.raises(ScenePlanningError, match="Duplicate location id"):
+        run_scene_planning_stage(
+            _fact_check_result(),
+            model="deepseek/deepseek-v4-flash",
+            completion_fn=_fake_completion(json.dumps(payload)),
+        )
+
+
 def test_run_scene_planning_stage_raises_when_character_missing_field():
     payload = _valid_payload()
     del payload["characters"][0]["hair"]
