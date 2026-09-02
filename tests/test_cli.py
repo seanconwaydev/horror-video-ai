@@ -155,6 +155,31 @@ def test_load_fixture_defaults_premise_conflict_to_none_when_absent(tmp_path):
     assert result.premise_conflict is None
 
 
+def test_load_fixture_reconstructs_acknowledged_fiction(tmp_path):
+    # docs/decisions/0027: a fixture saved after a scene was kept as
+    # intentional fiction must round-trip that decision back out, not
+    # just the (by-then-null) premise_conflict.
+    path = _write_fixture(
+        tmp_path,
+        premise_conflict=None,
+        acknowledged_fiction="A smartphone did not exist in 79 AD.",
+    )
+
+    result = _load_fixture(path)
+
+    assert result.premise_conflict is None
+    assert result.acknowledged_fiction == "A smartphone did not exist in 79 AD."
+
+
+def test_load_fixture_defaults_acknowledged_fiction_to_none_when_absent(tmp_path):
+    # A fixture saved before 0027 won't have this key at all.
+    path = _write_fixture(tmp_path)
+
+    result = _load_fixture(path)
+
+    assert result.acknowledged_fiction is None
+
+
 def test_load_fixture_raises_when_flag_claim_text_does_not_match(tmp_path):
     path = _write_fixture(
         tmp_path,

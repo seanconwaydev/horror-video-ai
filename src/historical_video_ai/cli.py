@@ -811,8 +811,18 @@ def _load_fixture(path: Path) -> FactCheckResult:
     premise_conflict = (
         PremiseConflict(**raw_premise_conflict) if raw_premise_conflict is not None else None
     )
+    # docs/decisions/0027: read back alongside premise_conflict -- a
+    # fixture saved before this ADR won't have this key, so .get() rather
+    # than a required field, same graceful-absence handling as
+    # premise_conflict itself.
+    acknowledged_fiction = data.get("acknowledged_fiction")
 
-    return FactCheckResult(fact_sheet=fact_sheet, flags=flags, premise_conflict=premise_conflict)
+    return FactCheckResult(
+        fact_sheet=fact_sheet,
+        flags=flags,
+        premise_conflict=premise_conflict,
+        acknowledged_fiction=acknowledged_fiction,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1609,6 +1619,17 @@ def main() -> None:
     if original_premise_conflict is not None:
         log["premise_conflict_resolved_with_description"] = fact_sheet.description
         log["premise_conflict_resolution"] = resolution_type
+    # docs/decisions/0027: re-written from the *resolved* state, not left
+    # as the stale pre-resolution snapshot from before _resolve_premise_
+    # conflict ran -- otherwise a --fixture replay of this exact run would
+    # reconstruct a still-open conflict and immediately re-trip previz's
+    # hard-refuse check, regardless of how this run actually resolved it.
+    log["premise_conflict"] = (
+        dataclasses.asdict(fact_check_result.premise_conflict)
+        if fact_check_result.premise_conflict
+        else None
+    )
+    log["acknowledged_fiction"] = fact_check_result.acknowledged_fiction
     log["description"] = fact_sheet.description
     log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
     log["fact_check_flags"] = [dataclasses.asdict(f) for f in fact_check_result.flags]
