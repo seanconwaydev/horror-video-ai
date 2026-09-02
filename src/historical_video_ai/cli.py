@@ -77,6 +77,9 @@ from historical_video_ai.stages.scene_planning import (
     Beat,
     Location,
     ScenePlan,
+    ScenePlanningError,
+    check_beat_location_references,
+    check_unique_ids,
     run_scene_planning_stage,
 )
 from historical_video_ai.stages.video_generation import run_video_generation_stage
@@ -384,6 +387,34 @@ def _review_item(item: object, *, item_desc: str, auto_yes: bool = False) -> obj
     return _edit_item_fields(item)
 
 
+def _review_list_with_unique_ids(items: list, *, item_label: str, auto_yes: bool) -> list:
+    """Review each item (Character or Location) via _review_item, then
+    re-check the whole reviewed list for a duplicate id -- an edit can
+    introduce a collision the LLM's original output didn't have just as
+    easily as the LLM itself can (docs/decisions/0028). If one turns up
+    interactively, re-review the whole list rather than crash a review
+    session the human otherwise just finished; under auto_yes no edit
+    could have happened, so a failure here means the LLM's own output was
+    already broken and _parse_scene_plan should have already caught it --
+    raising here is a safety net, not the expected path.
+    """
+    while True:
+        reviewed = [
+            _review_item(item, item_desc=f"{item_label} '{item.id}'", auto_yes=auto_yes)
+            for item in items
+        ]
+        try:
+            check_unique_ids(reviewed, label=item_label.lower())
+        except ScenePlanningError as exc:
+            print(f"\n{exc}")
+            if auto_yes:
+                raise
+            print("Reviewing these again -- fix the colliding id(s).")
+            items = reviewed
+            continue
+        return reviewed
+
+
 def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
     """Per-item accept-or-edit review of a full ScenePlan --
     docs/decisions/0023. Reviewed in a fixed, strictly linear order --
@@ -392,19 +423,39 @@ def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
     simplification, not an oversight: beats are reviewed against an
     already-finalized set of characters/locations, matching the natural
     dependency order, rather than building a free-form editor.
+
+    Re-validates after edits, not just the LLM's original output
+    (docs/decisions/0028): an edited beat's location_id, or an edited
+    location's own id, can silently stop matching anything, which would
+    otherwise drop all location grounding for that beat with no warning
+    at all.
     """
     print("\n--- scene plan review (docs/decisions/0023) ---")
-    reviewed_characters = [
-        _review_item(c, item_desc=f"Character '{c.id}'", auto_yes=auto_yes) for c in plan.characters
-    ]
-    reviewed_locations = [
-        _review_item(loc, item_desc=f"Location '{loc.id}'", auto_yes=auto_yes)
-        for loc in plan.locations
-    ]
-    reviewed_beats = [
-        _review_item(b, item_desc=f"Beat at '{b.location_id}': {b.action}", auto_yes=auto_yes)
-        for b in plan.beats
-    ]
+    reviewed_characters = _review_list_with_unique_ids(
+        plan.characters, item_label="Character", auto_yes=auto_yes
+    )
+    reviewed_locations = _review_list_with_unique_ids(
+        plan.locations, item_label="Location", auto_yes=auto_yes
+    )
+
+    reviewed_beats = []
+    for b in plan.beats:
+        while True:
+            reviewed_beat = _review_item(
+                b, item_desc=f"Beat at '{b.location_id}': {b.action}", auto_yes=auto_yes
+            )
+            try:
+                check_beat_location_references([reviewed_beat], reviewed_locations)
+            except ScenePlanningError as exc:
+                print(f"\n{exc}")
+                if auto_yes:
+                    raise
+                print("Reviewing this beat again -- fix location_id.")
+                b = reviewed_beat
+                continue
+            reviewed_beats.append(reviewed_beat)
+            break
+
     return ScenePlan(characters=reviewed_characters, locations=reviewed_locations, beats=reviewed_beats)
 
 
