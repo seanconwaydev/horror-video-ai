@@ -632,6 +632,55 @@ def test_run_previz_review_stage_omits_acknowledged_fiction_block_when_not_set(t
     assert "already been explicitly acknowledged as" not in prompt_text
 
 
+def test_run_previz_review_stage_includes_planned_details_when_character_and_beat_given(tmp_path):
+    # docs/decisions/0032: a scene-plan-approved character/beat detail must
+    # not be re-flagged as an anachronism on its own terms.
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        character=_character(),
+        beat=_beat(),
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_completion,
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "already deliberately planned and human-reviewed" in prompt_text
+    assert "white crop top, gray leggings" in prompt_text
+    assert "checks her phone, puzzled" in prompt_text
+
+
+def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "already deliberately planned and human-reviewed" not in prompt_text
+
+
 def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):
     image_path = _write_tiny_png(tmp_path)
     captured = {}
