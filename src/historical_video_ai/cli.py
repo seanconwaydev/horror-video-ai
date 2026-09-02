@@ -540,7 +540,14 @@ def _resolve_premise_conflict(
         print("Keeping this premise as intentional fiction -- proceeding as written.")
         return (
             fact_sheet,
-            dataclasses.replace(fact_check_result, premise_conflict=None),
+            dataclasses.replace(
+                fact_check_result,
+                premise_conflict=None,
+                # docs/decisions/0026: carried forward, not discarded, so
+                # previz_review knows this specific thing is already
+                # acknowledged rather than re-flagging it on every beat.
+                acknowledged_fiction=conflict.explanation,
+            ),
             "kept_as_intentional_fiction",
         )
     if action == "s":

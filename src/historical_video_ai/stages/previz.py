@@ -401,7 +401,7 @@ Scene -- Time: {time} | Place: {place} | What happens: {description}
 
 Claims the image should be consistent with:
 {claims_block}
-
+{acknowledged_fiction_block}
 Look at the image and respond with ONLY a JSON object (no prose, no \
 markdown fences) matching this exact shape:
 
@@ -453,11 +453,23 @@ def run_previz_review_stage(
     resolved_model = model or get_stage_model("previz_review")
     fact_sheet = fact_check_result.fact_sheet
     detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
+    # docs/decisions/0026: an explicit allowlist, not left to inference --
+    # LLM judges are documented to have high refusal rates on exceptions
+    # to a stated policy unless told about them directly.
+    acknowledged_fiction_block = ""
+    if fact_check_result.acknowledged_fiction:
+        acknowledged_fiction_block = (
+            "\nThe following has already been explicitly acknowledged as "
+            "intentional, deliberate fiction by a human reviewer -- do NOT "
+            "flag this specific thing as a problem, only flag genuinely "
+            f"new or different issues:\n{fact_check_result.acknowledged_fiction}\n"
+        )
     prompt = _REVIEW_PROMPT_TEMPLATE.format(
         time=fact_sheet.time,
         place=fact_sheet.place,
         description=fact_sheet.description,
         claims_block=detail_lines or "(no claims)",
+        acknowledged_fiction_block=acknowledged_fiction_block,
     )
 
     response = completion_fn(
