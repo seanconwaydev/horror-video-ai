@@ -13,7 +13,9 @@ Fast overview of the system. For detail, see the linked docs below rather than t
 
 ## Vision
 
-A pipeline that turns a historical topic into a finished, YouTube-ready video, with different models handling different stages (research, narrative, visual prompting, generation), and a human review gate before every step that costs real money. The goal isn't just "software that produces a video" — it's software that produces something worth watching, with a floor of quality that holds even on video one, and that improves over time the way a creator's channel improves with experience.
+A pipeline that turns a scene idea into a finished, YouTube-ready video, with different models handling different stages (research, narrative, visual prompting, generation), and a human review gate before every step that costs real money. The goal isn't just "software that produces a video" — it's software that produces something worth watching, with a floor of quality that holds even on video one, and that improves over time the way a creator's channel improves with experience.
+
+**The goal is videos worth watching, not historical accuracy for its own sake** — see [decisions/0031](./decisions/0031-goal-is-quality-video-not-historical-accuracy.md). Historical settings are what the pipeline has been built and tested against so far, and research/fact-check stay genuinely useful for the parts of a scene meant to be real, but which genres are actually worth specializing in is meant to be discovered empirically across many kinds of scenes, not assumed from the pipeline's own name or its historical-genre-heavy implementation history.
 
 Two constraints shape everything else: YouTube's monetization policy makes mass-produced, templated AI video ineligible for monetization (see the research doc linked above for what this actually says), and full ad monetization has audience thresholds (subscribers, watch hours or Shorts views) that no amount of pipeline quality can shortcut. The pipeline can get the content right; it can't skip the runway.
 
