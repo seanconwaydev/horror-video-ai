@@ -810,6 +810,27 @@ def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
     assert location_refs["street"] == tmp_path / "location_street" / "reference.png"
 
 
+def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path, monkeypatch):
+    # docs/decisions/0033
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    captured_prompts = []
+
+    def _capturing_image_fn(**kwargs):
+        captured_prompts.append(kwargs["prompt"])
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    _generate_scene_references(
+        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        previz_model="gemini/gemini-2.5-flash-image",
+        image_kwargs={"image_fn": _capturing_image_fn},
+        out_dir=tmp_path,
+        style="stylized",
+    )
+
+    assert len(captured_prompts) == 2
+    assert all("stylized/cartoon" in p for p in captured_prompts)
+
+
 def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypatch):
     # First reference offered is rejected ("n"), the regenerated one accepted.
     responses = iter(["n", "y"])
@@ -964,6 +985,31 @@ def test_generate_beats_with_choices_passes_character_and_beat_to_review(tmp_pat
     )
     assert "already deliberately planned and human-reviewed" in prompt_text
     assert "white crop top, gray leggings" in prompt_text
+
+
+def test_generate_beats_with_choices_passes_style_through(tmp_path):
+    # docs/decisions/0033
+    captured_prompts = []
+
+    def _capturing_image_fn(**kwargs):
+        captured_prompts.append(kwargs["prompt"])
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
+
+    _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        style="semi-realistic",
+        auto_yes=True,
+        **kwargs,
+    )
+
+    assert len(captured_prompts) == 1
+    assert "Pixar/Disney" in captured_prompts[0]
 
 
 def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_retrying(
