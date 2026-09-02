@@ -93,7 +93,7 @@ Verified claims about this place (use these to ground locations and \
 beats in real detail; some may describe other eras and must not be \
 depicted unless they hold at {time} specifically):
 {claims_block}
-
+{max_beats_line}
 Planning rules:
 - A LOCATION is one physical space the action happens in -- if the scene \
 visits multiple distinct spaces (e.g. a street, then a building's \
@@ -106,6 +106,20 @@ reference a `location_id` matching one of the Locations you define.
 shot to facing the camera -- a character can face away from camera, be \
 seen in profile, or be shot from behind, whenever that's the more natural \
 choice for what's happening in that beat.
+- Also vary the character's body position and what they're physically \
+doing across beats -- avoid repeating the same standing position, \
+orientation, and pose in consecutive beats at the same location. Give \
+each beat a distinct, concrete physical action (reaching, turning, \
+stepping, sitting, gesturing) unless stillness is specifically the point \
+of that beat. A slightly different look for the character between beats \
+(hair catching light differently, a minor pose-driven wardrobe shift) is \
+fine and expected -- prioritize dynamic, believable movement over rigid \
+visual sameness.
+- For a character who doesn't belong to the historical setting (a \
+modern-day visitor, time traveler, narrator), describe \
+`wardrobe_signature`/`wardrobe_flexible` with specific, concrete, \
+contemporary clothing items -- not vague terms like "casual clothes" -- \
+so the result actually reads as modern, not historical.
 - `style` should include "photorealistic, no on-screen text/UI/logos" \
 unless the scene specifically calls for something else.
 
@@ -211,6 +225,7 @@ def run_scene_planning_stage(
     fact_check_result: FactCheckResult,
     *,
     model: str | None = None,
+    max_beats: int | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> ScenePlan:
     """Build a full `ScenePlan` (characters, locations, beats) from a
@@ -219,19 +234,35 @@ def run_scene_planning_stage(
     `model` defaults to the pinned "scene_planning" model. `completion_fn`
     is an injection point for tests.
 
+    `max_beats`, if given, is passed to the model as a soft target *and*
+    enforced afterward by truncating the parsed beat list -- a cost-control
+    flag (useful while iterating on image/video quality) needs a real
+    guarantee, not just hope that the model honored the instruction.
+
     Raises ScenePlanningError if the response isn't valid JSON, is missing
     required fields, or a beat references an undefined location.
     """
     resolved_model = model or get_stage_model("scene_planning")
     fact_sheet = fact_check_result.fact_sheet
     claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
+    max_beats_line = (
+        f"\nKeep this scene tight: produce at most {max_beats} beat(s) total, not more.\n"
+        if max_beats is not None
+        else ""
+    )
     prompt = _PROMPT_TEMPLATE.format(
         time=fact_sheet.time,
         place=fact_sheet.place,
         description=fact_sheet.description,
         claims_block=claims_block,
+        max_beats_line=max_beats_line,
     )
 
     response = completion_fn(model=resolved_model, messages=[{"role": "user", "content": prompt}])
     raw_content = response.choices[0].message.content
-    return _parse_scene_plan(raw_content)
+    plan = _parse_scene_plan(raw_content)
+    if max_beats is not None and len(plan.beats) > max_beats:
+        plan = ScenePlan(
+            characters=plan.characters, locations=plan.locations, beats=plan.beats[:max_beats]
+        )
+    return plan

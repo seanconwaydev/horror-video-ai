@@ -194,6 +194,67 @@ def test_run_scene_planning_stage_resolves_model_from_config_when_not_passed():
     assert captured["model"] == get_stage_model("scene_planning")
 
 
+def test_run_scene_planning_stage_truncates_to_max_beats():
+    payload = _valid_payload()
+    second_beat = dict(payload["beats"][0])
+    second_beat["action"] = "a second thing happens"
+    payload["beats"].append(second_beat)
+
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        max_beats=1,
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert len(plan.beats) == 1
+    assert plan.beats[0].action == "checks her phone"
+
+
+def test_run_scene_planning_stage_leaves_beats_alone_when_under_max_beats():
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        max_beats=5,
+        completion_fn=_fake_completion(json.dumps(_valid_payload())),
+    )
+
+    assert len(plan.beats) == 1
+
+
+def test_run_scene_planning_stage_includes_max_beats_in_prompt_when_given():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), model="deepseek/deepseek-v4-flash", max_beats=4, completion_fn=_completion
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "at most 4 beat(s)" in prompt
+
+
+def test_run_scene_planning_stage_omits_max_beats_line_when_not_given():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+    )
+
+    assert "at most" not in captured["messages"][0]["content"]
+
+
 def test_run_scene_planning_stage_includes_claims_in_prompt():
     captured = {}
 
