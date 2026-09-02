@@ -597,7 +597,24 @@ def _resolve_premise_conflict(
                 # docs/decisions/0026: carried forward, not discarded, so
                 # previz_review knows this specific thing is already
                 # acknowledged rather than re-flagging it on every beat.
-                acknowledged_fiction=conflict.explanation,
+                # docs/decisions/0030: broadened beyond the literal
+                # explanation text -- a real run showed fact-check's
+                # premise_conflict narrows in on one specific anachronism
+                # (a time-travel smartphone) while leaving its obvious
+                # knock-on consequences (a modern visitor's modern
+                # clothing) unacknowledged, so previz_review flagged the
+                # outfit as a *separate*, uncovered anachronism the
+                # instant a beat's framing actually showed it. Per 0026's
+                # own principle -- an explicit allowlist beats asking the
+                # reviewer to infer more -- the fix broadens what's
+                # explicitly acknowledged, not the reviewer's inference.
+                acknowledged_fiction=(
+                    f"{conflict.explanation}\n\nThis acknowledgment also covers any other "
+                    "detail that is a natural, expected consequence of this same "
+                    "acknowledged fictional premise -- not just the specific anachronism "
+                    "named above -- so don't flag those knock-on details as a separate, "
+                    "new anachronism."
+                ),
             ),
             "kept_as_intentional_fiction",
         )
