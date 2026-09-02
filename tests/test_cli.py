@@ -571,7 +571,9 @@ def test_resolve_premise_conflict_keep_as_intentional_fiction(monkeypatch):
     # docs/decisions/0025: acknowledges the conflict and proceeds with the
     # description exactly as written, clearing premise_conflict. The
     # explanation is carried forward as acknowledged_fiction, not
-    # discarded (docs/decisions/0026), so previz_review can be told about it.
+    # discarded (docs/decisions/0026), so previz_review can be told about
+    # it -- broadened (docs/decisions/0030) to also cover natural knock-on
+    # consequences of the acknowledged premise, not just its literal text.
     fact_check_result = _premise_conflict_fact_check_result("A suggested version.")
     monkeypatch.setattr("builtins.input", lambda _: "k")
 
@@ -585,7 +587,8 @@ def test_resolve_premise_conflict_keep_as_intentional_fiction(monkeypatch):
     new_fact_sheet, new_fact_check_result, resolution_type = result
     assert new_fact_sheet.description == fact_check_result.fact_sheet.description
     assert new_fact_check_result.premise_conflict is None
-    assert new_fact_check_result.acknowledged_fiction == fact_check_result.premise_conflict.explanation
+    assert fact_check_result.premise_conflict.explanation in new_fact_check_result.acknowledged_fiction
+    assert "knock-on" in new_fact_check_result.acknowledged_fiction
     assert resolution_type == "kept_as_intentional_fiction"
 
 
