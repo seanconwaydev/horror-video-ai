@@ -222,6 +222,67 @@ def test_run_scene_planning_stage_leaves_beats_alone_when_under_max_beats():
     assert len(plan.beats) == 1
 
 
+def test_run_scene_planning_stage_drops_unused_character_beyond_first_for_max_references():
+    # cli.py only ever conditions generation on characters[0] (Beat has no
+    # character_id) -- always safe to drop the rest.
+    payload = _valid_payload()
+    second_character = dict(payload["characters"][0])
+    second_character["id"] = "second"
+    payload["characters"].append(second_character)
+
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        max_references=2,
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert len(plan.characters) == 1
+    assert plan.characters[0].id == "influencer"
+    assert len(plan.locations) == 1
+
+
+def test_run_scene_planning_stage_drops_unused_location_for_max_references():
+    payload = _valid_payload()
+    unused_location = dict(payload["locations"][0])
+    unused_location["id"] = "unused_place"
+    payload["locations"].append(unused_location)
+    # payload's one beat only references "street" -- "unused_place" is dead weight.
+
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        max_references=2,
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert len(plan.locations) == 1
+    assert plan.locations[0].id == "street"
+
+
+def test_run_scene_planning_stage_leaves_used_references_over_budget_when_unsafe_to_drop():
+    # Both locations are genuinely referenced by a beat -- dropping either
+    # would orphan that beat, so max_references is left unmet rather than
+    # corrupting the plan (docs/decisions/0027/0028's same principle).
+    payload = _valid_payload()
+    second_location = dict(payload["locations"][0])
+    second_location["id"] = "interior"
+    payload["locations"].append(second_location)
+    second_beat = dict(payload["beats"][0])
+    second_beat["location_id"] = "interior"
+    payload["beats"].append(second_beat)
+
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        max_references=2,
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert len(plan.characters) == 1
+    assert len(plan.locations) == 2  # left over-budget, both are in use
+
+
 def test_run_scene_planning_stage_includes_max_beats_in_prompt_when_given():
     captured = {}
 

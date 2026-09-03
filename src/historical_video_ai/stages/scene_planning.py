@@ -259,6 +259,38 @@ def check_beat_location_references(beats: list, locations: list) -> None:
             )
 
 
+def _truncate_references_safely(plan: ScenePlan, max_references: int) -> ScenePlan:
+    """Drop characters/locations to fit `max_references` total, but only
+    ones it's provably safe to drop -- never orphans a beat. Best-effort,
+    not a hard guarantee like `max_beats`'s truncation: if every remaining
+    reference is actually in use, this stops short of the target rather
+    than silently breaking a beat's location_id (the same class of bug
+    docs/decisions/0027/0028 fixed elsewhere).
+
+    Safe to drop, in order: every character past the first (cli.py's
+    `_generate_beats_with_choices` only ever conditions on
+    `characters[0]` -- a documented v1 simplification, Beat has no
+    character_id -- so the rest are already unused by construction), then
+    any location no beat's `location_id` actually references.
+    """
+    characters = list(plan.characters)
+    locations = list(plan.locations)
+
+    while len(characters) + len(locations) > max_references and len(characters) > 1:
+        characters.pop()
+
+    used_location_ids = {b.location_id for b in plan.beats}
+    i = len(locations) - 1
+    while len(characters) + len(locations) > max_references and i >= 0:
+        if locations[i].id not in used_location_ids:
+            locations.pop(i)
+        i -= 1
+
+    if len(characters) + len(locations) == len(plan.characters) + len(plan.locations):
+        return plan  # nothing was safe to drop
+    return ScenePlan(characters=characters, locations=locations, beats=plan.beats)
+
+
 def _parse_scene_plan(raw_content: str) -> ScenePlan:
     data = parse_json_response(raw_content, ScenePlanningError, "Scene-planning response")
 
@@ -304,6 +336,7 @@ def run_scene_planning_stage(
     *,
     model: str | None = None,
     max_beats: int | None = None,
+    max_references: int | None = None,
     requires_grounding: bool = True,
     completion_fn: Callable = litellm.completion,
 ) -> ScenePlan:
@@ -317,6 +350,11 @@ def run_scene_planning_stage(
     enforced afterward by truncating the parsed beat list -- a cost-control
     flag (useful while iterating on image/video quality) needs a real
     guarantee, not just hope that the model honored the instruction.
+
+    `max_references` (characters + locations combined -- these, not
+    beats, are what a scene can't generate a single image without) gets
+    the same soft-target prompt treatment, but its enforcement is
+    best-effort, not guaranteed -- see `_truncate_references_safely`.
 
     `requires_grounding` (docs/decisions/0034) selects which preamble is
     used -- historical-accuracy framing is actively wrong for a scene that
@@ -334,6 +372,12 @@ def run_scene_planning_stage(
         if max_beats is not None
         else ""
     )
+    if max_references is not None:
+        max_beats_line += (
+            f"\nAlso keep the cast and setting minimal: at most {max_references} "
+            "character(s) and location(s) combined -- prefer one character and "
+            "one location unless the scene genuinely needs more.\n"
+        )
     if requires_grounding:
         claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
         preamble = _GROUNDED_PREAMBLE.format(
@@ -359,4 +403,6 @@ def run_scene_planning_stage(
         plan = ScenePlan(
             characters=plan.characters, locations=plan.locations, beats=plan.beats[:max_beats]
         )
+    if max_references is not None and len(plan.characters) + len(plan.locations) > max_references:
+        plan = _truncate_references_safely(plan, max_references)
     return plan
