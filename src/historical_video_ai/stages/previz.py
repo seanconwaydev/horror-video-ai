@@ -139,6 +139,23 @@ def _call_with_transient_retry(
 def _extract_and_save_image(response: object, output_dir: Path, filename: str) -> Path:
     """Shared response-parsing/saving logic for both image-generation
     functions in this module."""
+    data = getattr(response, "data", None)
+    if data is not None and len(data) == 0:
+        # A present-but-empty `data` list, distinct from a malformed
+        # response object entirely (AttributeError/TypeError below) --
+        # observed in a real run for a religious-imagery-adjacent prompt
+        # (a "Buddha face" collage element), no error detail beyond the
+        # empty list, no litellm-surfaced block reason to inspect further.
+        # Not confirmed as content moderation specifically, but a
+        # provider silently refusing is the most likely explanation for
+        # an otherwise-valid-looking call returning nothing at all.
+        raise PrevizError(
+            "Image response had no image data -- the request returned "
+            "successfully but with zero images. Most likely cause: the "
+            "provider silently refused the prompt (e.g. a content-"
+            "moderation block) without surfacing a specific reason. "
+            "Try rephrasing the prompt before assuming this is a bug."
+        )
     try:
         item = response.data[0]
     except (AttributeError, IndexError, TypeError) as exc:
