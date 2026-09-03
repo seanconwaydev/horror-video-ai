@@ -695,6 +695,7 @@ def _generate_image_with_review(
     keeps regenerating blind.
     """
     attempts: list[dict] = []
+    previous_concerns: list[str] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
         previz_result = generate_fn()
         print(f"Image saved to {previz_result.image_path}")
@@ -703,7 +704,17 @@ def _generate_image_with_review(
 
         print(f"--- previz review (model: {review_model}) ---")
         review = run_previz_review_stage(
-            previz_result.image_path, fact_check_result, model=review_model, **review_kwargs
+            previz_result.image_path,
+            fact_check_result,
+            model=review_model,
+            # Carries forward every prior rejection reason on this same
+            # beat so a retry review isn't an independent judgment with no
+            # memory of what it already flagged -- observed in a real run
+            # to matter: the reviewer caught a missing fisheye distortion
+            # once, then accepted a second attempt that still didn't have
+            # it, because nothing forced it to specifically re-check that.
+            previous_concerns=previous_concerns or None,
+            **review_kwargs,
         )
 
         if review.accepted:
@@ -722,6 +733,7 @@ def _generate_image_with_review(
                 "image_path": str(archived_path),
             }
         )
+        previous_concerns.append(review.concern)
         if on_rejected is not None and on_rejected(review.concern, attempt) == "stop":
             break
         if attempt < _MAX_PREVIZ_ATTEMPTS:

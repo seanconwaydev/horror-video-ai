@@ -487,7 +487,7 @@ Scene -- Time: {time} | Place: {place} | What happens: {description}
 
 Claims the image should be consistent with:
 {claims_block}
-{acknowledged_fiction_block}{planned_details_block}
+{acknowledged_fiction_block}{planned_details_block}{previous_concerns_block}
 Look at the image and respond with ONLY a JSON object (no prose, no \
 markdown fences) matching this exact shape:
 
@@ -517,7 +517,7 @@ character shown running a shop, serving food, or holding an object that \
 belongs to someone else in the scene)?
 
 Scene -- Setting: {time}, {place} | What happens: {description}
-{planned_details_block}
+{planned_details_block}{previous_concerns_block}
 Look at the image and respond with ONLY a JSON object (no prose, no \
 markdown fences) matching this exact shape:
 
@@ -553,6 +553,7 @@ def run_previz_review_stage(
     character: Character | None = None,
     beat: Beat | None = None,
     requires_grounding: bool = True,
+    previous_concerns: list[str] | None = None,
     model: str | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> PrevizReview:
@@ -572,6 +573,17 @@ def run_previz_review_stage(
     anachronism-detection check entirely -- wrong, not just unnecessary,
     for a scene that was never claiming to be real -- and only checks
     plan-fidelity (0032).
+
+    `previous_concerns`, if given, lists the rejection reason(s) from
+    earlier automatic-retry attempts on this same beat -- observed in a
+    real run to matter: each call here is otherwise an independent
+    judgment with no memory of a prior attempt, so a retry with the exact
+    same flaw (e.g. a described extreme fisheye distortion never actually
+    rendering) could get waved through on the second try even though it's
+    unchanged, because nothing forced the reviewer to specifically re-check
+    the thing it flagged before. Passing prior concerns forward makes the
+    review explicitly re-verify each one rather than re-deriving a fresh,
+    potentially inconsistent judgment every attempt.
 
     `model` defaults to the pinned "previz_review" model -- deliberately
     vision-capable and a different provider than previz's own image model,
@@ -611,6 +623,16 @@ def run_previz_review_stage(
             "depict them faithfully, or introduces a DIFFERENT, new problem not "
             "covered here:\n" + "\n".join(planned_lines) + "\n"
         )
+    previous_concerns_block = ""
+    if previous_concerns:
+        concern_lines = "\n".join(f"- {c}" for c in previous_concerns)
+        previous_concerns_block = (
+            "\nThis is a retry: an earlier attempt at this same image was "
+            "rejected for the reason(s) below. Specifically check whether "
+            "each one has actually been resolved in THIS image -- don't just "
+            "judge the image acceptable in general. If the same issue is "
+            f"still present, reject again for it:\n{concern_lines}\n"
+        )
     if requires_grounding:
         detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
         # docs/decisions/0026: an explicit allowlist, not left to inference --
@@ -631,6 +653,7 @@ def run_previz_review_stage(
             claims_block=detail_lines or "(no claims)",
             acknowledged_fiction_block=acknowledged_fiction_block,
             planned_details_block=planned_details_block,
+            previous_concerns_block=previous_concerns_block,
         )
     else:
         prompt = _UNGROUNDED_REVIEW_PROMPT_TEMPLATE.format(
@@ -638,6 +661,7 @@ def run_previz_review_stage(
             place=fact_sheet.place,
             description=fact_sheet.description,
             planned_details_block=planned_details_block,
+            previous_concerns_block=previous_concerns_block,
         )
 
     response = completion_fn(

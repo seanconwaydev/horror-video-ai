@@ -744,6 +744,84 @@ def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_
     assert "already deliberately planned and human-reviewed" not in prompt_text
 
 
+def test_run_previz_review_stage_includes_previous_concerns_when_given(tmp_path):
+    # A retry review with no memory of a prior rejection could wave through
+    # the same unresolved flaw on the next attempt -- observed for real
+    # (fisheye distortion flagged missing once, then a second attempt with
+    # the same flaw was accepted). Prior concerns must reach the prompt so
+    # the reviewer is told to specifically re-check them.
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        previous_concerns=["Shot lacks the described extreme fisheye-from-below perspective."],
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_completion,
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "This is a retry" in prompt_text
+    assert "Shot lacks the described extreme fisheye-from-below perspective." in prompt_text
+
+
+def test_run_previz_review_stage_omits_previous_concerns_block_when_not_given(tmp_path):
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "This is a retry" not in prompt_text
+
+
+def test_run_previz_review_stage_includes_previous_concerns_when_ungrounded(tmp_path):
+    # The ungrounded template (docs/decisions/0034) has its own separate
+    # {previous_concerns_block} substitution -- must format correctly too.
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        requires_grounding=False,
+        previous_concerns=["The vinyl record element is missing from the frame."],
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_completion,
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "This is a retry" in prompt_text
+    assert "The vinyl record element is missing from the frame." in prompt_text
+
+
 def test_run_previz_review_stage_drops_anachronism_check_when_ungrounded(tmp_path):
     # docs/decisions/0034
     image_path = _write_tiny_png(tmp_path)

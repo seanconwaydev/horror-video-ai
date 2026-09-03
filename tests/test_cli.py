@@ -690,6 +690,34 @@ def test_generate_previz_with_review_retries_then_accepts(tmp_path):
     assert [a["accepted"] for a in attempts] == [False, True]
 
 
+def test_generate_previz_with_review_passes_prior_concern_into_retry_review(tmp_path):
+    # A retry review with no memory of the previous rejection could accept
+    # a second attempt with the same unresolved flaw -- observed for real
+    # (fisheye distortion flagged missing once, then waved through on
+    # attempt 2). The retry loop must forward each rejection's concern
+    # into the next review call's prompt.
+    verdicts = [(False, "Shot lacks the described extreme fisheye perspective."), (True, None)]
+    responses = iter(verdicts)
+    captured_prompts = []
+
+    def _completion(**kwargs):
+        text = next(
+            part["text"] for part in kwargs["messages"][0]["content"] if part["type"] == "text"
+        )
+        captured_prompts.append(text)
+        accepted, concern = next(responses)
+        content = json.dumps({"accepted": accepted, "concern": concern})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    _generate_previz_with_review(
+        _fact_check_result_for_previz(),
+        **_generate_previz_with_review_kwargs(_completion, tmp_path),
+    )
+
+    assert "This is a retry" not in captured_prompts[0]
+    assert "Shot lacks the described extreme fisheye perspective." in captured_prompts[1]
+
+
 def test_generate_previz_with_review_gives_up_after_max_attempts(tmp_path):
     verdicts = [(False, "Wrong.")] * 3
 
