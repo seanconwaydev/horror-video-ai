@@ -154,6 +154,24 @@ def test_run_previz_stage_raises_when_no_image_data(tmp_path):
         )
 
 
+def test_run_previz_stage_hints_at_moderation_for_empty_data_list(tmp_path):
+    # A present-but-empty `data` list (a successful call, zero images) is
+    # distinct from a malformed response object -- worth a specific,
+    # actionable hint rather than a bare "no image data" message, since a
+    # real run hit this for a religious-imagery-adjacent prompt with no
+    # other error detail available.
+    def _empty_image_fn(**kwargs):
+        return SimpleNamespace(data=[])
+
+    with pytest.raises(PrevizError, match="silently refused"):
+        run_previz_stage(
+            _fact_check_result(),
+            model="gemini/gemini-2.5-flash-image",
+            image_fn=_empty_image_fn,
+            output_dir=tmp_path,
+        )
+
+
 def test_run_previz_stage_resolves_model_from_config_when_not_passed(tmp_path):
     captured = {}
 
