@@ -316,6 +316,55 @@ def test_run_scene_planning_stage_omits_max_beats_line_when_not_given():
     assert "at most" not in captured["messages"][0]["content"]
 
 
+def test_run_scene_planning_stage_includes_genre_and_tone_when_ungrounded():
+    # docs/decisions/0035
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="meme",
+        tone="comedic",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Genre: meme." in prompt
+    assert "Tone: comedic." in prompt
+
+
+def test_run_scene_planning_stage_omits_genre_when_grounded():
+    # "historical" is always the genre when grounded -- redundant with the
+    # preamble's own framing, so it's not echoed.
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=True,
+        genre="historical",
+        tone="sincere",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Genre:" not in prompt
+    assert "Tone: sincere." in prompt
+
+
 def test_run_scene_planning_stage_includes_claims_in_prompt():
     captured = {}
 

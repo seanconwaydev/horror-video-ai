@@ -1621,19 +1621,32 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--creative",
-        action="store_true",
+        "--genre",
+        default="historical",
         help=(
-            "This scene is not meant to be historically/factually "
-            "accurate -- skip research and fact-check entirely, and drop "
-            "the historical-grounding framing from scene-planning and "
-            "previz_review's prompts (docs/decisions/0034). For a meme, "
-            "an abstract idea, or anything else that was never claiming "
-            "to be real; a scaffolded-down historical mode isn't "
-            "sufficient there since the anachronism-detection framing "
-            "itself is actively wrong for such a scene, not just extra "
-            "overhead. Scene planning's plan-fidelity check (does the "
-            "image match what was planned) still applies either way."
+            "What kind of scene this is -- e.g. 'historical', 'meme', "
+            "'vlog', 'kids-content', 'abstract'. Free text, not a fixed "
+            "list: fed into scene-planning's prompt to inform staging and "
+            "convention choices (docs/decisions/0035). Only 'historical' "
+            "(the default) requires real-world grounding -- every other "
+            "value skips research and fact-check entirely and drops the "
+            "historical-accuracy framing from scene-planning and "
+            "previz_review's prompts, since that framing is actively "
+            "wrong (not just unhelpful overhead) for a scene that was "
+            "never claiming to be real. Scene planning's plan-fidelity "
+            "check (does the image match what was planned) still applies "
+            "regardless of genre."
+        ),
+    )
+    parser.add_argument(
+        "--tone",
+        default=None,
+        help=(
+            "The scene's tone -- e.g. 'comedic', 'ironic', 'sincere', "
+            "'dramatic', 'wholesome'. Free text, fed into scene-planning's "
+            "prompt to inform staging, expression, and wardrobe choices. "
+            "Unset means the model infers tone from the description alone, "
+            "same as before this flag existed."
         ),
     )
     parser.add_argument(
@@ -1744,6 +1757,12 @@ def main() -> None:
         out_dir = _run_dir(_slugify(description))
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
+        # A fixture is always a replay of a previously completed *real*
+        # research + fact-check run -- --genre didn't exist when it was
+        # captured, and there's nothing to un-ground.
+        requires_grounding = True
+        log["genre"] = "historical"
+        log["tone"] = args.tone
 
         if has_fact_check:
             fact_check_result = _load_fixture(args.fixture)
@@ -1782,15 +1801,21 @@ def main() -> None:
         )
         out_dir = _run_dir(_slugify(description))
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
-        log["requires_grounding"] = not args.creative
+        # docs/decisions/0035: genre, not a binary flag, is what determines
+        # this -- "historical" (the default) is the only value that needs
+        # real-world grounding; every other genre skips it.
+        requires_grounding = args.genre.strip().lower() == "historical"
+        log["genre"] = args.genre
+        log["tone"] = args.tone
+        log["requires_grounding"] = requires_grounding
 
-        if args.creative:
-            # docs/decisions/0034: skip research + fact-check entirely --
-            # a scene that was never claiming to be real gets no value
+        if not requires_grounding:
+            # docs/decisions/0034/0035: skip research + fact-check entirely
+            # -- a scene that was never claiming to be real gets no value
             # from historical-accuracy machinery, and the machinery's own
             # framing (premise conflicts, "verified claims") is actively
             # wrong for it, not just unhelpful overhead.
-            print("\n--creative: skipping research and fact-check.")
+            print(f"\n--genre {args.genre!r}: skipping research and fact-check.")
             fact_sheet = FactSheet(time=time, place=place, description=description, claims=[])
             fact_check_result = FactCheckResult(fact_sheet=fact_sheet)
         else:
@@ -1888,7 +1913,9 @@ def main() -> None:
         model=scene_planning_model,
         max_beats=args.max_beats,
         max_references=args.max_references,
-        requires_grounding=not args.creative,
+        requires_grounding=requires_grounding,
+        genre=args.genre,
+        tone=args.tone,
         **scene_planning_kwargs,
     )
     log["scene_plan"] = dataclasses.asdict(scene_plan)
@@ -1949,7 +1976,7 @@ def main() -> None:
         review_kwargs=review_kwargs,
         out_dir=out_dir,
         style=args.style,
-        requires_grounding=not args.creative,
+        requires_grounding=requires_grounding,
         auto_yes=args.yes,
     )
     log["previz_beats"] = beat_results

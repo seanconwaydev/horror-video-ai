@@ -93,7 +93,7 @@ character(s) involved, the distinct locations the action moves through, \
 and the individual beats (shots) that tell the story.
 
 Scene -- Time: {time} | Place: {place} | What happens: {description}
-
+{genre_tone_line}
 Verified claims about this place (use these to ground locations and \
 beats in real detail; some may describe other eras and must not be \
 depicted unless they hold at {time} specifically):
@@ -111,6 +111,7 @@ locations the action moves through, and the individual beats (shots) \
 that tell the story.
 
 Scene -- Setting: {time}, {place} | What happens: {description}
+{genre_tone_line}
 {max_beats_line}
 """
 
@@ -200,6 +201,12 @@ between them when contact isn't specified precisely. When two characters \
 interact, give each a specific reaction to the other (a returned glance, \
 a mirrored gesture) so they read as one connected moment, not two \
 independently-posed figures that happen to share a frame.
+- If a Genre and/or Tone are given above, let them actually shape staging, \
+expression, and wardrobe choices -- a comedic/ironic tone reads through \
+confident, knowing expressions and poses (not just a funny premise \
+description); a wholesome tone reads through soft, open body language; a \
+dramatic tone reads through tension and restraint. Don't just repeat the \
+genre/tone back in prose -- show it in what the character is doing.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:
@@ -338,6 +345,8 @@ def run_scene_planning_stage(
     max_beats: int | None = None,
     max_references: int | None = None,
     requires_grounding: bool = True,
+    genre: str | None = None,
+    tone: str | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> ScenePlan:
     """Build a full `ScenePlan` (characters, locations, beats) from a
@@ -362,6 +371,13 @@ def run_scene_planning_stage(
     unnecessary overhead. When False, `fact_sheet.claims` is ignored (a
     stub FactCheckResult for an ungrounded run has none anyway).
 
+    `genre`/`tone` (docs/decisions/0035), if given, are woven into the
+    prompt and are meant to actually shape staging/expression/wardrobe
+    choices, not just be echoed back -- see the "Genre and/or Tone" \
+    planning rule. `genre` is only shown when `requires_grounding` is
+    False (it's always "historical" otherwise, redundant with the
+    preamble's own framing).
+
     Raises ScenePlanningError if the response isn't valid JSON, is missing
     required fields, or a beat references an undefined location.
     """
@@ -378,6 +394,12 @@ def run_scene_planning_stage(
             "character(s) and location(s) combined -- prefer one character and "
             "one location unless the scene genuinely needs more.\n"
         )
+    genre_tone_parts = []
+    if not requires_grounding and genre:
+        genre_tone_parts.append(f"Genre: {genre}.")
+    if tone:
+        genre_tone_parts.append(f"Tone: {tone}.")
+    genre_tone_line = " ".join(genre_tone_parts)
     if requires_grounding:
         claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
         preamble = _GROUNDED_PREAMBLE.format(
@@ -386,12 +408,14 @@ def run_scene_planning_stage(
             description=fact_sheet.description,
             claims_block=claims_block,
             max_beats_line=max_beats_line,
+            genre_tone_line=genre_tone_line,
         )
     else:
         preamble = _CREATIVE_PREAMBLE.format(
             time=fact_sheet.time,
             place=fact_sheet.place,
             description=fact_sheet.description,
+            genre_tone_line=genre_tone_line,
             max_beats_line=max_beats_line,
         )
     prompt = preamble + _PLANNING_RULES_AND_SHAPE
