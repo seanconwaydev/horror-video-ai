@@ -106,6 +106,15 @@ reference a `location_id` matching one of the Locations you define.
 shot to facing the camera -- a character can face away from camera, be \
 seen in profile, or be shot from behind, whenever that's the more natural \
 choice for what's happening in that beat.
+- When multiple beats share a `location_id`, give them real "coverage" \
+(the standard film-production term): shots from genuinely different \
+camera *positions* in that space, not just a different angle adjective on \
+roughly the same spot -- move the camera to a different part of the room \
+or street, and vary how close it is to the subject (a wider shot, then a \
+closer one, not two medium shots back to back). The same static shot \
+repeated can be a legitimate deliberate choice for a specific effect, but \
+must never be the unplanned default outcome of two beats sharing a \
+location.
 - Also vary the character's body position and what they're physically \
 doing across beats -- avoid repeating the same standing position, \
 orientation, and pose in consecutive beats at the same location. Give \
