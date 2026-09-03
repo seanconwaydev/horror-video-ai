@@ -190,7 +190,13 @@ emotion a viewer can read at a glance (the animation principle of \
 "staging" -- clarity beats complexity) -- avoid a generic, ambiguous pose \
 that could mean anything. If a beat's `action` doesn't make clear what \
 the character wants or feels in that moment, it needs more specific \
-detail, not more general description.
+detail, not more general description. This is the default for grounded, \
+narrative-driven genres -- it is NOT a universal rule. Meme, absurdist, \
+chaotic, or intentionally nonsensical genres should NOT default to a \
+single centered focal point or symmetrical clarity; that composition \
+instinct actively works against what makes those genres read as strange \
+(see the surrealism rule below). Let Genre decide which instinct applies, \
+rather than applying this one by default regardless of genre.
 - When a beat places a character near furniture or props (sitting at a \
 table, leaning on a counter), describe the specific point of contact \
 explicitly (e.g. "her feet rest flat on the floor in front of the low \
@@ -214,9 +220,11 @@ scale, unlikely juxtapositions of unrelated objects, asymmetric or \
 off-center composition, elements that don't logically belong together) \
 is what makes it read as genuinely strange, not one quirky detail placed \
 in an otherwise ordinary, symmetrical, centered shot. Err toward more \
-unexpected, not less -- "clear and legible" (the staging rule above) \
-still applies to *what the one strange thing is*, not to making the \
-whole scene tame.
+unexpected, not less. The staging rule's clarity-and-single-focal-point \
+default above does not apply here by default -- composition can, and \
+often should, be asymmetric, cluttered, or off-center. Only fall back to \
+one clean, legible focal point if the genre itself calls for a specific \
+single sight gag; don't apply it as an assumed baseline.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:
