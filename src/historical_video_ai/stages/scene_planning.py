@@ -207,6 +207,16 @@ confident, knowing expressions and poses (not just a funny premise \
 description); a wholesome tone reads through soft, open body language; a \
 dramatic tone reads through tension and restraint. Don't just repeat the \
 genre/tone back in prose -- show it in what the character is doing.
+- When Genre signals something surreal, absurd, or intentionally \
+nonsensical, commit to it fully rather than resolving it into something \
+safe, conventional, or centered -- real surrealist technique (impossible \
+scale, unlikely juxtapositions of unrelated objects, asymmetric or \
+off-center composition, elements that don't logically belong together) \
+is what makes it read as genuinely strange, not one quirky detail placed \
+in an otherwise ordinary, symmetrical, centered shot. Err toward more \
+unexpected, not less -- "clear and legible" (the staging rule above) \
+still applies to *what the one strange thing is*, not to making the \
+whole scene tame.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:
