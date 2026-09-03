@@ -81,7 +81,12 @@ class ScenePlan:
     beats: list[Beat] = field(default_factory=list)
 
 
-_PROMPT_TEMPLATE = """\
+# docs/decisions/0034: two preambles, not one -- historical grounding
+# framing ("verified claims", "must hold at this time") is actively wrong
+# for a scene that was never claiming to be real in the first place. The
+# shared planning rules below apply to both; only the framing and whether
+# claims get woven in differs.
+_GROUNDED_PREAMBLE = """\
 You are a shot-list planner for a short historical video scene. Break the \
 scene below into a full plan BEFORE any image gets generated: the \
 character(s) involved, the distinct locations the action moves through, \
@@ -94,6 +99,22 @@ beats in real detail; some may describe other eras and must not be \
 depicted unless they hold at {time} specifically):
 {claims_block}
 {max_beats_line}
+"""
+
+_CREATIVE_PREAMBLE = """\
+You are a shot-list planner for a short creative video scene. This scene \
+is not meant to be historically or factually accurate -- do not treat \
+anything in it as needing real-world grounding, and do not flag anything \
+as implausible on those terms. Break the scene below into a full plan \
+BEFORE any image gets generated: the character(s) involved, the distinct \
+locations the action moves through, and the individual beats (shots) \
+that tell the story.
+
+Scene -- Setting: {time}, {place} | What happens: {description}
+{max_beats_line}
+"""
+
+_PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
 - A LOCATION is one physical space the action happens in -- if the scene \
 visits multiple distinct spaces (e.g. a street, then a building's \
@@ -283,6 +304,7 @@ def run_scene_planning_stage(
     *,
     model: str | None = None,
     max_beats: int | None = None,
+    requires_grounding: bool = True,
     completion_fn: Callable = litellm.completion,
 ) -> ScenePlan:
     """Build a full `ScenePlan` (characters, locations, beats) from a
@@ -296,24 +318,39 @@ def run_scene_planning_stage(
     flag (useful while iterating on image/video quality) needs a real
     guarantee, not just hope that the model honored the instruction.
 
+    `requires_grounding` (docs/decisions/0034) selects which preamble is
+    used -- historical-accuracy framing is actively wrong for a scene that
+    was never claiming to be real (a meme/creative premise), not just
+    unnecessary overhead. When False, `fact_sheet.claims` is ignored (a
+    stub FactCheckResult for an ungrounded run has none anyway).
+
     Raises ScenePlanningError if the response isn't valid JSON, is missing
     required fields, or a beat references an undefined location.
     """
     resolved_model = model or get_stage_model("scene_planning")
     fact_sheet = fact_check_result.fact_sheet
-    claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
     max_beats_line = (
         f"\nKeep this scene tight: produce at most {max_beats} beat(s) total, not more.\n"
         if max_beats is not None
         else ""
     )
-    prompt = _PROMPT_TEMPLATE.format(
-        time=fact_sheet.time,
-        place=fact_sheet.place,
-        description=fact_sheet.description,
-        claims_block=claims_block,
-        max_beats_line=max_beats_line,
-    )
+    if requires_grounding:
+        claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
+        preamble = _GROUNDED_PREAMBLE.format(
+            time=fact_sheet.time,
+            place=fact_sheet.place,
+            description=fact_sheet.description,
+            claims_block=claims_block,
+            max_beats_line=max_beats_line,
+        )
+    else:
+        preamble = _CREATIVE_PREAMBLE.format(
+            time=fact_sheet.time,
+            place=fact_sheet.place,
+            description=fact_sheet.description,
+            max_beats_line=max_beats_line,
+        )
+    prompt = preamble + _PLANNING_RULES_AND_SHAPE
 
     response = completion_fn(model=resolved_model, messages=[{"role": "user", "content": prompt}])
     raw_content = response.choices[0].message.content

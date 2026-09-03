@@ -483,6 +483,35 @@ markdown fences) matching this exact shape:
 }}
 """
 
+# docs/decisions/0034: for a scene that was never claiming to be real, the
+# anachronism-detection framing above is actively wrong, not just extra
+# overhead -- "could not have existed" is the point of a creative/meme
+# scene, not a defect. Only the plan-fidelity check (0032) still applies.
+_UNGROUNDED_REVIEW_PROMPT_TEMPLATE = """\
+You are independently reviewing a generated image against a planned \
+creative scene. This scene is not meant to be historically or factually \
+accurate -- do NOT flag anything as implausible, anachronistic, or \
+"could not have existed" on those terms; that's the point, not a defect.
+
+Your only job: does the image actually match what was planned -- the \
+right character in the right role doing the right thing, not some other \
+person performing an action that was never described (e.g. the wrong \
+character shown running a shop, serving food, or holding an object that \
+belongs to someone else in the scene)?
+
+Scene -- Setting: {time}, {place} | What happens: {description}
+{planned_details_block}
+Look at the image and respond with ONLY a JSON object (no prose, no \
+markdown fences) matching this exact shape:
+
+{{
+  "accepted": <true if the image matches what was planned, false if it fails
+    to match what was planned>,
+  "concern": "<if accepted is false, specifically what's wrong with the image; null
+    if accepted is true>"
+}}
+"""
+
 
 def _parse_review(raw_content: str) -> PrevizReview:
     data = parse_json_response(raw_content, PrevizError, "Previz review response")
@@ -506,6 +535,7 @@ def run_previz_review_stage(
     *,
     character: Character | None = None,
     beat: Beat | None = None,
+    requires_grounding: bool = True,
     model: str | None = None,
     completion_fn: Callable = litellm.completion,
 ) -> PrevizReview:
@@ -521,6 +551,11 @@ def run_previz_review_stage(
     approved at scene-plan-review time (docs/decisions/0023). Only the
     single-scene flow (which predates scene-planning) omits these.
 
+    `requires_grounding` (docs/decisions/0034), when False, drops the
+    anachronism-detection check entirely -- wrong, not just unnecessary,
+    for a scene that was never claiming to be real -- and only checks
+    plan-fidelity (0032).
+
     `model` defaults to the pinned "previz_review" model -- deliberately
     vision-capable and a different provider than previz's own image model,
     same reasoning as fact_check vs. research. `completion_fn` is an
@@ -532,18 +567,6 @@ def run_previz_review_stage(
     """
     resolved_model = model or get_stage_model("previz_review")
     fact_sheet = fact_check_result.fact_sheet
-    detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
-    # docs/decisions/0026: an explicit allowlist, not left to inference --
-    # LLM judges are documented to have high refusal rates on exceptions
-    # to a stated policy unless told about them directly.
-    acknowledged_fiction_block = ""
-    if fact_check_result.acknowledged_fiction:
-        acknowledged_fiction_block = (
-            "\nThe following has already been explicitly acknowledged as "
-            "intentional, deliberate fiction by a human reviewer -- do NOT "
-            "flag this specific thing as a problem, only flag genuinely "
-            f"new or different issues:\n{fact_check_result.acknowledged_fiction}\n"
-        )
     # docs/decisions/0032: a further, distinct allowlist -- these details
     # were approved at scene-plan-review time (0023), not derived from the
     # original premise-conflict text, so they need naming here separately.
@@ -571,14 +594,34 @@ def run_previz_review_stage(
             "depict them faithfully, or introduces a DIFFERENT, new problem not "
             "covered here:\n" + "\n".join(planned_lines) + "\n"
         )
-    prompt = _REVIEW_PROMPT_TEMPLATE.format(
-        time=fact_sheet.time,
-        place=fact_sheet.place,
-        description=fact_sheet.description,
-        claims_block=detail_lines or "(no claims)",
-        acknowledged_fiction_block=acknowledged_fiction_block,
-        planned_details_block=planned_details_block,
-    )
+    if requires_grounding:
+        detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
+        # docs/decisions/0026: an explicit allowlist, not left to inference --
+        # LLM judges are documented to have high refusal rates on exceptions
+        # to a stated policy unless told about them directly.
+        acknowledged_fiction_block = ""
+        if fact_check_result.acknowledged_fiction:
+            acknowledged_fiction_block = (
+                "\nThe following has already been explicitly acknowledged as "
+                "intentional, deliberate fiction by a human reviewer -- do NOT "
+                "flag this specific thing as a problem, only flag genuinely "
+                f"new or different issues:\n{fact_check_result.acknowledged_fiction}\n"
+            )
+        prompt = _REVIEW_PROMPT_TEMPLATE.format(
+            time=fact_sheet.time,
+            place=fact_sheet.place,
+            description=fact_sheet.description,
+            claims_block=detail_lines or "(no claims)",
+            acknowledged_fiction_block=acknowledged_fiction_block,
+            planned_details_block=planned_details_block,
+        )
+    else:
+        prompt = _UNGROUNDED_REVIEW_PROMPT_TEMPLATE.format(
+            time=fact_sheet.time,
+            place=fact_sheet.place,
+            description=fact_sheet.description,
+            planned_details_block=planned_details_block,
+        )
 
     response = completion_fn(
         model=resolved_model,

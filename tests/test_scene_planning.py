@@ -271,3 +271,27 @@ def test_run_scene_planning_stage_includes_claims_in_prompt():
     prompt = captured["messages"][0]["content"]
     assert "Thermopolia served hot prepared food and wine." in prompt
     assert "79 AD, Pompeii" in prompt
+
+
+def test_run_scene_planning_stage_uses_creative_framing_when_ungrounded():
+    # docs/decisions/0034
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "not meant to be historically or factually accurate" in prompt
+    assert "historical video scene" not in prompt
+    assert "Verified claims" not in prompt
+    assert "Thermopolia served hot prepared food and wine." not in prompt
