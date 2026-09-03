@@ -169,6 +169,16 @@ emotion a viewer can read at a glance (the animation principle of \
 that could mean anything. If a beat's `action` doesn't make clear what \
 the character wants or feels in that moment, it needs more specific \
 detail, not more general description.
+- When a beat places a character near furniture or props (sitting at a \
+table, leaning on a counter), describe the specific point of contact \
+explicitly (e.g. "her feet rest flat on the floor in front of the low \
+stool," "her forearm rests on the counter's edge") rather than leaving \
+the spatial relationship implicit -- image models have a documented \
+tendency to merge a limb into nearby furniture with no clear boundary \
+between them when contact isn't specified precisely. When two characters \
+interact, give each a specific reaction to the other (a returned glance, \
+a mirrored gesture) so they read as one connected moment, not two \
+independently-posed figures that happen to share a frame.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:
