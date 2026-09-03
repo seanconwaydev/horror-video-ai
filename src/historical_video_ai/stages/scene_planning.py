@@ -115,6 +115,67 @@ Scene -- Setting: {time}, {place} | What happens: {description}
 {max_beats_line}
 """
 
+# docs/decisions/0036: composition_mode is an early-resolved, closed-set
+# routing signal -- generalizing the requires_grounding pattern (0034/0035)
+# to a second axis -- computed once from genre/tone before the rule text
+# is assembled, rather than left to the planning LLM's own inline
+# judgment of hedged prose the way PR #44's "unless genre signals X" rule
+# text did before this. Keyword-based on purpose: research
+# (docs/playbook/genre-conditioned-pipeline-design.md) recommends
+# starting with cheap, debuggable rule-based routing, reaching for a real
+# classification call only once real runs show this heuristic
+# misclassifying.
+_CHAOTIC_COMPOSITION_KEYWORDS = (
+    "surreal",
+    "absurd",
+    "nonsensical",
+    "chaotic",
+    "dreamlike",
+    "vaporwave",
+    "bizarre",
+    "weird",
+)
+
+
+def _resolve_composition_mode(genre: str | None, tone: str | None) -> str:
+    """Closed two-value signal selecting which composition rule group
+    applies below: "chaotic" (asymmetric/off-center composition is
+    appropriate) or "staged" (the default clarity/single-focal-point
+    convention applies)."""
+    combined = f"{genre or ''} {tone or ''}".lower()
+    if any(keyword in combined for keyword in _CHAOTIC_COMPOSITION_KEYWORDS):
+        return "chaotic"
+    return "staged"
+
+
+_STAGED_COMPOSITION_RULE = """\
+- Every beat should communicate ONE clear, legible focal action or \
+emotion a viewer can read at a glance (the animation principle of \
+"staging" -- clarity beats complexity) -- avoid a generic, ambiguous pose \
+that could mean anything. If a beat's `action` doesn't make clear what \
+the character wants or feels in that moment, it needs more specific \
+detail, not more general description.
+"""
+
+_CHAOTIC_COMPOSITION_RULE = """\
+- Commit fully to a strange, asymmetric, or chaotic composition rather \
+than resolving it into something safe, conventional, or centered -- real \
+surrealist technique (impossible scale, unlikely juxtapositions of \
+unrelated objects, asymmetric or off-center composition, elements that \
+don't logically belong together) is what makes it read as genuinely \
+strange, not one quirky detail placed in an otherwise ordinary, \
+symmetrical, centered shot. Err toward more unexpected, not less. Every \
+beat should still communicate one legible focal point -- what the one \
+strange thing is -- but the composition around it does not need to be \
+centered, symmetrical, or conventional.
+"""
+
+_COMPOSITION_RULES = {
+    "staged": _STAGED_COMPOSITION_RULE,
+    "chaotic": _CHAOTIC_COMPOSITION_RULE,
+}
+
+
 _PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
 - A LOCATION is one physical space the action happens in -- if the scene \
@@ -185,18 +246,7 @@ a small supporting detail beyond the main pose (hair or fabric caught by \
 wind, a hand tightening on a strap, steam rising) rather than a flat, \
 static figure with nothing else happening in frame. Keep it subtle for a \
 photorealistic scene and can be more pronounced for a stylized one.
-- Every beat should communicate ONE clear, legible focal action or \
-emotion a viewer can read at a glance (the animation principle of \
-"staging" -- clarity beats complexity) -- avoid a generic, ambiguous pose \
-that could mean anything. If a beat's `action` doesn't make clear what \
-the character wants or feels in that moment, it needs more specific \
-detail, not more general description. This is the default for grounded, \
-narrative-driven genres -- it is NOT a universal rule. Meme, absurdist, \
-chaotic, or intentionally nonsensical genres should NOT default to a \
-single centered focal point or symmetrical clarity; that composition \
-instinct actively works against what makes those genres read as strange \
-(see the surrealism rule below). Let Genre decide which instinct applies, \
-rather than applying this one by default regardless of genre.
+{composition_rule}\
 - When a beat places a character near furniture or props (sitting at a \
 table, leaning on a counter), describe the specific point of contact \
 explicitly (e.g. "her feet rest flat on the floor in front of the low \
@@ -213,18 +263,6 @@ confident, knowing expressions and poses (not just a funny premise \
 description); a wholesome tone reads through soft, open body language; a \
 dramatic tone reads through tension and restraint. Don't just repeat the \
 genre/tone back in prose -- show it in what the character is doing.
-- When Genre signals something surreal, absurd, or intentionally \
-nonsensical, commit to it fully rather than resolving it into something \
-safe, conventional, or centered -- real surrealist technique (impossible \
-scale, unlikely juxtapositions of unrelated objects, asymmetric or \
-off-center composition, elements that don't logically belong together) \
-is what makes it read as genuinely strange, not one quirky detail placed \
-in an otherwise ordinary, symmetrical, centered shot. Err toward more \
-unexpected, not less. The staging rule's clarity-and-single-focal-point \
-default above does not apply here by default -- composition can, and \
-often should, be asymmetric, cluttered, or off-center. Only fall back to \
-one clean, legible focal point if the genre itself calls for a specific \
-single sight gag; don't apply it as an assumed baseline.
 
 Respond with ONLY a JSON object (no prose, no markdown fences) matching \
 this exact shape:
@@ -396,6 +434,12 @@ def run_scene_planning_stage(
     False (it's always "historical" otherwise, redundant with the
     preamble's own framing).
 
+    `genre`/`tone` also resolve `composition_mode` (docs/decisions/0036)
+    -- a second early, closed-set routing signal, selecting between
+    `_STAGED_COMPOSITION_RULE` and `_CHAOTIC_COMPOSITION_RULE` -- rather
+    than the LLM inferring which composition instinct applies from one
+    rule's inline prose hedges.
+
     Raises ScenePlanningError if the response isn't valid JSON, is missing
     required fields, or a beat references an undefined location.
     """
@@ -436,7 +480,8 @@ def run_scene_planning_stage(
             genre_tone_line=genre_tone_line,
             max_beats_line=max_beats_line,
         )
-    prompt = preamble + _PLANNING_RULES_AND_SHAPE
+    composition_rule = _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]
+    prompt = preamble + _PLANNING_RULES_AND_SHAPE.format(composition_rule=composition_rule)
 
     response = completion_fn(model=resolved_model, messages=[{"role": "user", "content": prompt}])
     raw_content = response.choices[0].message.content
