@@ -8,6 +8,7 @@ from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
     ScenePlanningError,
+    _resolve_composition_mode,
     run_scene_planning_stage,
 )
 
@@ -405,3 +406,81 @@ def test_run_scene_planning_stage_uses_creative_framing_when_ungrounded():
     assert "historical video scene" not in prompt
     assert "Verified claims" not in prompt
     assert "Thermopolia served hot prepared food and wine." not in prompt
+
+
+# docs/decisions/0036: composition_mode is an early-resolved, closed-set
+# routing signal (a second axis alongside requires_grounding) selecting
+# which composition rule group scene_planning uses -- replaces the inline
+# "unless genre signals X" prose hedge PR #44 added to the staging rule.
+
+
+@pytest.mark.parametrize(
+    "genre,tone",
+    [
+        ("surreal photo collage", "deadpan"),
+        ("absurdist comedy", ""),
+        ("historical", "chaotic and unhinged"),  # keyword can come from tone alone
+        ("SURREAL meme", ""),  # case-insensitive
+        ("bizarre vaporwave dreamscape", None),
+    ],
+)
+def test_resolve_composition_mode_returns_chaotic_for_surreal_signals(genre, tone):
+    assert _resolve_composition_mode(genre, tone) == "chaotic"
+
+
+@pytest.mark.parametrize(
+    "genre,tone",
+    [
+        ("historical", "sincere"),
+        ("meme", None),  # "meme" alone doesn't imply chaotic composition
+        (None, None),
+        ("vlog", "upbeat"),
+    ],
+)
+def test_resolve_composition_mode_defaults_to_staged(genre, tone):
+    assert _resolve_composition_mode(genre, tone) == "staged"
+
+
+def test_run_scene_planning_stage_uses_chaotic_composition_rule_for_surreal_genre():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="surreal photo collage",
+        tone="deadpan",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Commit fully to a strange, asymmetric, or chaotic composition" in prompt
+    assert 'the animation principle of "staging"' not in prompt
+
+
+def test_run_scene_planning_stage_uses_staged_composition_rule_by_default():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=True,
+        genre="historical",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert 'the animation principle of "staging"' in prompt
+    assert "Commit fully to a strange, asymmetric, or chaotic composition" not in prompt
