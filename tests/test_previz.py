@@ -726,6 +726,33 @@ def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_
     assert "already deliberately planned and human-reviewed" not in prompt_text
 
 
+def test_run_previz_review_stage_drops_anachronism_check_when_ungrounded(tmp_path):
+    # docs/decisions/0034
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
+        )
+
+    run_previz_review_stage(
+        image_path,
+        _fact_check_result(),
+        requires_grounding=False,
+        model="anthropic/claude-sonnet-5",
+        completion_fn=_completion,
+    )
+
+    prompt_text = next(
+        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
+    )
+    assert "not meant to be historically or factually accurate" in prompt_text
+    assert "historically accurate scene description" not in prompt_text
+    assert "Claims the image should be consistent with" not in prompt_text
+
+
 def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):
     image_path = _write_tiny_png(tmp_path)
     captured = {}

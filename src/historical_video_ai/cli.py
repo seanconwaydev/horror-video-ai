@@ -1357,6 +1357,7 @@ def _generate_beats_with_choices(
     review_kwargs: dict,
     out_dir: Path,
     style: str = "photorealistic",
+    requires_grounding: bool = True,
     auto_yes: bool = False,
 ) -> list[dict]:
     """Generate each beat's image (docs/decisions/0024). `style`
@@ -1494,7 +1495,12 @@ def _generate_beats_with_choices(
                 # docs/decisions/0032: character/beat are already
                 # scene-plan-approved -- previz_review shouldn't re-derive
                 # their plausibility from scratch on every attempt.
-                review_kwargs={**review_kwargs, "character": character, "beat": beat},
+                review_kwargs={
+                    **review_kwargs,
+                    "character": character,
+                    "beat": beat,
+                    "requires_grounding": requires_grounding,
+                },
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
                 on_rejected=_on_rejected,
@@ -1612,6 +1618,22 @@ def main() -> None:
             "hand-written, video-specific prompt be tested against an "
             "already-approved previz image without paying for a fresh "
             "research/fact-check/previz pass just to change the wording."
+        ),
+    )
+    parser.add_argument(
+        "--creative",
+        action="store_true",
+        help=(
+            "This scene is not meant to be historically/factually "
+            "accurate -- skip research and fact-check entirely, and drop "
+            "the historical-grounding framing from scene-planning and "
+            "previz_review's prompts (docs/decisions/0034). For a meme, "
+            "an abstract idea, or anything else that was never claiming "
+            "to be real; a scaffolded-down historical mode isn't "
+            "sufficient there since the anachronism-detection framing "
+            "itself is actively wrong for such a scene, not just extra "
+            "overhead. Scene planning's plan-fidelity check (does the "
+            "image match what was planned) still applies either way."
         ),
     )
     parser.add_argument(
@@ -1746,24 +1768,35 @@ def main() -> None:
         )
         out_dir = _run_dir(_slugify(description))
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
+        log["requires_grounding"] = not args.creative
 
-        result = _run_research_and_fact_check(
-            time,
-            place,
-            description,
-            research_model=research_model,
-            fact_check_model=fact_check_model,
-            completion_kwargs=completion_kwargs,
-            auto_yes=args.yes,
-            on_research_completed=lambda fs: _record_research_claims(
-                fs, research_model=research_model, out_dir=out_dir, log=log
-            ),
-        )
-        if result is None:
-            _write_log(out_dir, log)
-            print(f"Stopped by user. Run artifacts saved in {out_dir}")
-            return
-        fact_sheet, fact_check_result = result
+        if args.creative:
+            # docs/decisions/0034: skip research + fact-check entirely --
+            # a scene that was never claiming to be real gets no value
+            # from historical-accuracy machinery, and the machinery's own
+            # framing (premise conflicts, "verified claims") is actively
+            # wrong for it, not just unhelpful overhead.
+            print("\n--creative: skipping research and fact-check.")
+            fact_sheet = FactSheet(time=time, place=place, description=description, claims=[])
+            fact_check_result = FactCheckResult(fact_sheet=fact_sheet)
+        else:
+            result = _run_research_and_fact_check(
+                time,
+                place,
+                description,
+                research_model=research_model,
+                fact_check_model=fact_check_model,
+                completion_kwargs=completion_kwargs,
+                auto_yes=args.yes,
+                on_research_completed=lambda fs: _record_research_claims(
+                    fs, research_model=research_model, out_dir=out_dir, log=log
+                ),
+            )
+            if result is None:
+                _write_log(out_dir, log)
+                print(f"Stopped by user. Run artifacts saved in {out_dir}")
+                return
+            fact_sheet, fact_check_result = result
 
     log["research_model"] = research_model
     log["fact_check_model"] = fact_check_model
@@ -1840,6 +1873,7 @@ def main() -> None:
         fact_check_result,
         model=scene_planning_model,
         max_beats=args.max_beats,
+        requires_grounding=not args.creative,
         **scene_planning_kwargs,
     )
     log["scene_plan"] = dataclasses.asdict(scene_plan)
@@ -1900,6 +1934,7 @@ def main() -> None:
         review_kwargs=review_kwargs,
         out_dir=out_dir,
         style=args.style,
+        requires_grounding=not args.creative,
         auto_yes=args.yes,
     )
     log["previz_beats"] = beat_results
