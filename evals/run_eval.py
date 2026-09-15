@@ -35,6 +35,7 @@ import yaml
 
 from historical_video_ai.config import load_environment
 from historical_video_ai.replicate_client import download_output, run_prediction
+from historical_video_ai.stages.moderation import run_moderation_policy_check
 
 EVALS_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVALS_DIR))
@@ -145,6 +146,15 @@ def main() -> None:
     parser.add_argument("--variants", default="current", help="comma-separated variant names")
     parser.add_argument("--reveal", help="print the A/B key for a finished run directory")
     parser.add_argument("--seed", type=int, help="fix the A/B shuffle, for reproducibility")
+    parser.add_argument(
+        "--moderate",
+        action="store_true",
+        help="run each generated image and its prompt through the free omni-moderation "
+        "classifier and record the flagged categories. Not YouTube's system -- a real "
+        "major-vendor classifier, used here as a measurable proxy for whether automated "
+        "moderation reacts differently to photorealistic versus stylized versions of the "
+        "same scene.",
+    )
     args = parser.parse_args()
 
     if args.reveal:
@@ -197,8 +207,16 @@ def main() -> None:
                 continue
             out = run_dir / f"{scene['id']}__{slot}.png"
             out.write_bytes(image_bytes)
-            print(f"  ok       {scene['id']} -> {out.name}")
-            manifest.append({"scene": scene["id"], "cell": label, "slot": slot, "outcome": "ok", "file": out.name})
+            row = {"scene": scene["id"], "cell": label, "slot": slot, "outcome": "ok", "file": out.name}
+            if args.moderate:
+                verdict = run_moderation_policy_check(prompt, out)
+                row["moderation_flagged"] = verdict.flagged
+                row["moderation_categories"] = verdict.flagged_categories
+                flags = ", ".join(verdict.flagged_categories) or "none"
+                print(f"  ok       {scene['id']} -> {out.name}  [moderation: {flags}]")
+            else:
+                print(f"  ok       {scene['id']} -> {out.name}")
+            manifest.append(row)
 
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (run_dir / "key.json").write_text(json.dumps(key, indent=2))
@@ -211,6 +229,13 @@ def main() -> None:
         rows = [m for m in manifest if m["cell"] == label]
         refused = sum(1 for m in rows if m["outcome"] == "refused")
         print(f"  {label:<40} {refused}/{len(rows)} refused")
+    if args.moderate:
+        print("\nModeration flags (proxy for automated-classifier sensitivity to realism):")
+        for row in manifest:
+            if "moderation_flagged" in row:
+                flags = ", ".join(row["moderation_categories"]) or "none"
+                print(f"  {row['scene']:<30} {flags}")
+
     print(f"\nScore blind in {run_dir / 'SCORING.md'}, then reveal with:")
     print(f"  uv run python evals/run_eval.py --reveal {run_dir}")
 
