@@ -1,0 +1,91 @@
+# Golden dataset for image prompt-construction experiments.
+#
+# Deliberately five DIFFERENT horror sub-types rather than five variations
+# on one, because the open question these answer is whether this pipeline
+# can do varied horror or only the domestic-interior haunting its prompt
+# rules were tuned against.
+#
+# `body` is everything EXCEPT the style instruction, in previz's own field
+# shape. The style block is supplied by the variant under test
+# (compare_image_models.py), because how style is expressed is itself the
+# thing being measured -- see docs/decisions/0033 and the STYLE-vs-OVERRIDE
+# conflict it was meant to prevent.
+#
+# Frozen on purpose: edit only to ADD scenes, so results stay comparable
+# across runs.
+
+scenes:
+- id: domestic_haunting
+  probes: the sub-type every existing prompt rule was tuned against
+  body: 'SUBJECT: a woman in her late 20s, shoulder-length dark hair, wearing a worn cardigan
+
+    ACTION: she stands at the foot of a staircase looking up, jaw tight, eyes wide with dread, one hand
+    gripping the banister
+
+    SETTING: the bottom of a narrow wooden staircase in an old house, patterned wallpaper, a hall table
+    with a dead lamp
+
+    CAMERA: low angle from the hallway floor, the stairs receding into darkness above her
+
+    LIGHTING: the only light is a streetlamp through a window behind her, throwing one hard-edged shadow
+    up the stairs'
+  style: Stylized horror comic panel -- heavy inked black shadows, bold confident linework, flat colour
+    fills, high contrast between lit and unlit areas.
+- id: outdoor_chase
+  probes: motion and open space, where the "occlude the threat behind furniture" rules break down
+  body: 'SUBJECT: a man in his 30s, athletic build, soaked jacket
+
+    ACTION: he runs directly toward camera between dark treetrunks, mouth open mid-gasp, panic on his
+    face, one arm thrown out for balance
+
+    SETTING: dense pine forest at night, wet undergrowth, mist between the trunks
+
+    CAMERA: low tracking shot from ahead of him, trees blurring past at the frame edges
+
+    LIGHTING: a single harsh light source somewhere behind him, rimming his shoulders, everything ahead
+    unlit'
+  style: Grainy 16mm horror photography -- halation around light sources, heavy film grain, crushed blacks,
+    slight motion blur, muted green-grey colour timing.
+- id: visible_entity
+  probes: whether a threat can be rendered centered and explicit, not only implied
+  body: 'SUBJECT: a tall humanoid figure with elongated limbs and no visible face
+
+    ACTION: it stands motionless in a doorway, filling the frame, head tilted slightly, reaching one long
+    hand toward the viewer
+
+    SETTING: a bedroom doorway seen from inside the room, plain walls, a chest of drawers at the edge
+    of frame
+
+    CAMERA: eye level, straight on, the figure centered and close
+
+    LIGHTING: backlit from the hallway so the figure reads as a silhouette with almost no interior detail'
+  style: Dark painterly illustration -- visible brushwork, soft edges dissolving into shadow, limited
+    palette of bone white and deep umber, no hard outlines.
+- id: implied_violence
+  probes: the PG-13/R ceiling -- a threatening act with no depicted injury
+  body: 'SUBJECT: a woman in her 40s, grey-streaked hair, in a nightgown
+
+    ACTION: she scrambles backward across a kitchen floor away from a raised kitchen knife held by an
+    unseen figure at the frame edge, terror on her face, one hand up to shield herself
+
+    SETTING: a farmhouse kitchen at night, overturned chair, cabinets, a spilled bowl
+
+    CAMERA: high angle looking down at her on the floor
+
+    LIGHTING: one bare bulb overhead throwing hard shadows, the attacker''s arm in silhouette'
+  style: High-contrast graphic poster art -- two or three flat colours only, bold silhouettes, screen-printed
+    texture, no rendering or gradients.
+- id: body_horror_mild
+  probes: the far end of the intended range -- unsettling anatomy, no gore
+  body: 'SUBJECT: a young man, close on his face and shoulders
+
+    ACTION: he stares at his own hand in front of his face, horror dawning, as the fingers stretch far
+    too long and bend the wrong way at extra joints
+
+    SETTING: a cramped bathroom, cracked mirror behind him, tiled wall
+
+    CAMERA: tight close-up, his face and the hand both in frame
+
+    LIGHTING: a flickering fluorescent strip above the mirror, cold and uneven'
+  style: Cel-shaded animation still -- clean flat colour blocking, hard-edged shadow shapes, thick uniform
+    outlines, saturated sickly palette.
