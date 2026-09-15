@@ -1,15 +1,34 @@
 """Prompt-construction variants under test.
 
-Each variant takes a scene body from scenes.yaml and returns the full
-prompt an image model would receive. Only the style block differs -- that
-is the variable being measured, and holding everything else identical is
-what makes the comparison mean anything.
+Each variant takes a scene's body and its committed style from
+scenes.yaml, and returns the full prompt an image model would receive.
+Only the style block differs -- that is the variable being measured, and
+holding everything else identical is what makes the comparison mean
+anything.
 
-`current` reproduces what the real pipeline sends today, including the
-contradiction: a photographic per-beat STYLE line followed by an override
-declaring the opposite. The override text is imported from previz itself
-rather than copied, so this variant can't silently drift away from what
-the pipeline actually does.
+`current` reproduces what the real pipeline sends today, contradiction
+included: a photographic per-beat STYLE line followed by an override
+declaring the opposite. The override text is imported from previz rather
+than copied, so this variant can't silently drift from what the pipeline
+actually does.
+
+`single_source` uses the scene's own committed style, stated once.
+
+Deliberately NOT one house style. Each scene in scenes.yaml carries a
+different committed style -- comic panel, 16mm photography, painterly,
+graphic poster, cel-shaded -- because the goal is stylistic range across
+outputs, not every short looking like a comic book. What is being tested
+is whether committing to ONE look per run beats hedging across many
+inside a single instruction, which is what the current `stylized` text
+does.
+
+Noted honestly: giving each scene a different committed style varies two
+things at once (commitment, and which style). That is the right trade
+here -- a single shared committed style would test commitment more
+cleanly while smuggling in exactly the house-style lock-in this project
+is trying to avoid. If the hedged variant reads as mush across all five
+while the committed one reads as decisive across all five, the finding is
+about commitment regardless of which styles were drawn.
 """
 
 from __future__ import annotations
@@ -19,29 +38,21 @@ from historical_video_ai.stages.previz import _STYLE_INSTRUCTIONS
 # Representative of what the scene-planning model really emits into a
 # beat's `style` field -- lifted from a real run's stored prompt
 # (outputs/run_20260915-202830.../run_log.json). Photographic, despite a
-# planning rule telling it not to make realism claims here.
+# planning rule telling it not to make realism claims in that field.
 _TYPICAL_BEAT_STYLE = (
     "35mm, deep focus, fine grain, cold blue-black grade with warm lamp "
     "highlights, no on-screen text/UI/logos"
 )
 
-# One committed direction, stated once. Deliberately the same shape as the
-# `photorealistic` instruction that the failure taxonomy's one
-# "verified fixed" run used -- a short, decisive description plus hard
-# negatives -- rather than the hedged `stylized` text.
-_COMMITTED_HORROR_COMIC = (
-    "Stylized horror comic panel -- heavy inked black shadows, bold "
-    "confident linework, a restrained desaturated palette with one colour "
-    "allowed to dominate, high contrast between lit and unlit areas. "
-    "Explicitly NOT photorealistic, NOT 3D-rendered, NOT cute, NOT "
-    "wholesome, NOT a soft or rounded children's cartoon. No on-screen "
-    "text, no logos, no watermark."
-)
+_NO_TEXT = "No on-screen text, no logos, no watermark."
 
 
-def current(body: str) -> str:
+def current(body: str, style: str) -> str:
     """What the pipeline sends today: two competing style claims, resolved
-    by an appended instruction declaring which one wins."""
+    by an appended instruction declaring which one wins. The scene's own
+    committed style is deliberately unused -- today's pipeline has no way
+    to express one."""
+    del style
     return (
         f"{body}\n"
         f"STYLE: {_TYPICAL_BEAT_STYLE}\n"
@@ -50,10 +61,10 @@ def current(body: str) -> str:
     )
 
 
-def single_source(body: str) -> str:
+def single_source(body: str, style: str) -> str:
     """One style instruction, stated once, committed. Nothing to override
     because nothing competes -- docs/decisions/0033's actual intent."""
-    return f"{body}\nSTYLE: {_COMMITTED_HORROR_COMIC}"
+    return f"{body}\nSTYLE: {style} {_NO_TEXT}"
 
 
 VARIANTS = {

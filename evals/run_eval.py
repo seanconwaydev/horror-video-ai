@@ -184,7 +184,7 @@ def main() -> None:
         for (model_key, variant_key), slot in zip(cells, slots, strict=True):
             label = f"{model_key}/{variant_key}"
             key.setdefault(scene["id"], {})[slot] = label
-            prompt = variants[variant_key](scene["body"])
+            prompt = variants[variant_key](scene["body"], scene["style"])
             try:
                 image_bytes = models[model_key]["generate"](models[model_key]["model"], prompt)
             except _Refused as exc:
