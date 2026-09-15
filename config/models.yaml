@@ -44,32 +44,35 @@ previz:
 previz_review:
   model: "anthropic/claude-sonnet-5"
 
-# video_generation: stage 9. Picked to unblock building the stage, not a
-# rigorously compared decision -- see docs/decisions/0010-video-generation-
-# model-and-standalone-stage.md. Uses the same OPENAI_API_KEY already
-# required for previz's image model; whether this OpenAI account actually
-# has Sora API access is unverified until a real run is tried. Veo (Google,
-# via Vertex AI) is a real candidate to compare against next, per that ADR.
+# video_generation: stage 9. Wan 2.2 (Alibaba's open-weight model) hosted
+# on Replicate -- see docs/decisions/0037 for why this moved off
+# openai/sora-2 (Sora's API was removed 2026-09-24, and its moderation was
+# a structurally bad fit for horror) and docs/decisions/0038 for the
+# implementation.
+#
+# NOT a LiteLLM string: the "replicate/" prefix marks the one stage that
+# bypasses litellm entirely (litellm has no Replicate video support), and
+# stages/video_generation.py strips it to get the bare "owner/name" model
+# slug Replicate's own API expects. Requires REPLICATE_API_TOKEN.
 
 video_generation:
-  model: "openai/sora-2"
+  model: "replicate/wan-video/wan-2.2-i2v-fast"
 
-# moderation_check / moderation_review: a pre-flight pair gating every real
-# video_generation call, not a pipeline.md-numbered stage of its own -- see
-# docs/decisions/0022-video-generation-moderation-preflight.md.
+# moderation_check: a free, advisory pre-flight on every video-generation
+# call -- OpenAI's own omni-moderation-latest endpoint via
+# litellm.moderation(), the only model it supports today.
 #
-# moderation_check (layer 1, free): OpenAI's own omni-moderation-latest
-# endpoint via litellm.moderation() -- the only model it supports today.
-# moderation_review (layer 2, paid): an independent vision-capable model
-# checking for pose/action patterns known to trip Sora's own moderation
-# even when no literal policy category is violated. Same model as
-# previz_review, same "not the same model checking its own work" reasoning.
+# It no longer blocks anything. Its original partner layer
+# (moderation_review, a paid vision call guessing at Sora's own
+# moderation behaviour) was deleted in docs/decisions/0038 along with
+# Sora itself: Wan has no vendor-baked safety alignment to predict, so
+# that layer could only ever produce false positives. What remains is
+# kept purely as a YouTube-policy signal for the human reviewing a run,
+# not as a gate -- horror content is expected to trip its violence
+# category routinely.
 
 moderation_check:
   model: "openai/omni-moderation-latest"
-
-moderation_review:
-  model: "anthropic/claude-sonnet-5"
 
 # Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
 # stay as placeholders so the full pipeline vision in docs/pipeline.md still

@@ -1,5 +1,4 @@
 import base64
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +7,6 @@ from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.moderation import (
     ModerationError,
     run_moderation_policy_check,
-    run_moderation_risk_review,
 )
 
 # A tiny valid 1x1 PNG, base64-encoded -- same fixture pattern as
@@ -140,122 +138,3 @@ def test_run_moderation_policy_check_strips_openai_prefix_before_calling_moderat
     )
 
     assert captured["model"] == "omni-moderation-latest"
-
-
-# --- Layer 2: run_moderation_risk_review ---
-
-
-def test_run_moderation_risk_review_clean(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    payload = {"flagged": False, "concern": None}
-
-    review = run_moderation_risk_review(
-        image_path,
-        model="anthropic/claude-sonnet-5",
-        completion_fn=_fake_completion(json.dumps(payload)),
-    )
-
-    assert review.flagged is False
-    assert review.concern is None
-
-
-def test_run_moderation_risk_review_flagged_with_concern(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    payload = {"flagged": True, "concern": "Reads as forced entry into a doorway."}
-
-    review = run_moderation_risk_review(
-        image_path,
-        model="anthropic/claude-sonnet-5",
-        completion_fn=_fake_completion(json.dumps(payload)),
-    )
-
-    assert review.flagged is True
-    assert review.concern == "Reads as forced entry into a doorway."
-
-
-def test_run_moderation_risk_review_parses_response_wrapped_in_markdown_fence(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    payload = {"flagged": False, "concern": None}
-
-    review = run_moderation_risk_review(
-        image_path,
-        model="anthropic/claude-sonnet-5",
-        completion_fn=_fake_completion(f"```json\n{json.dumps(payload)}\n```"),
-    )
-
-    assert review.flagged is False
-
-
-def test_run_moderation_risk_review_raises_when_flagged_without_concern(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    payload = {"flagged": True}
-
-    with pytest.raises(ModerationError, match="missing 'concern'"):
-        run_moderation_risk_review(
-            image_path,
-            model="anthropic/claude-sonnet-5",
-            completion_fn=_fake_completion(json.dumps(payload)),
-        )
-
-
-def test_run_moderation_risk_review_raises_for_invalid_json(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-
-    with pytest.raises(ModerationError, match="not valid JSON"):
-        run_moderation_risk_review(
-            image_path,
-            model="anthropic/claude-sonnet-5",
-            completion_fn=_fake_completion("not json"),
-        )
-
-
-def test_run_moderation_risk_review_raises_for_non_bool_flagged(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    payload = {"flagged": "yes"}
-
-    with pytest.raises(ModerationError, match="must be true or false"):
-        run_moderation_risk_review(
-            image_path,
-            model="anthropic/claude-sonnet-5",
-            completion_fn=_fake_completion(json.dumps(payload)),
-        )
-
-
-def test_run_moderation_risk_review_sends_image_as_base64(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps({"flagged": False, "concern": None}))
-                )
-            ]
-        )
-
-    run_moderation_risk_review(image_path, model="anthropic/claude-sonnet-5", completion_fn=_completion)
-
-    content = captured["messages"][0]["content"]
-    image_part = next(part for part in content if part["type"] == "image_url")
-    assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
-
-
-def test_run_moderation_risk_review_resolves_model_from_config_when_not_passed(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["model"] = kwargs["model"]
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps({"flagged": False, "concern": None}))
-                )
-            ]
-        )
-
-    run_moderation_risk_review(image_path, completion_fn=_completion)
-
-    assert captured["model"] == get_stage_model("moderation_review")

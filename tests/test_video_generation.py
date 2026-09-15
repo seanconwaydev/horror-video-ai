@@ -1,341 +1,268 @@
-import io
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-from PIL import Image
 
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.video_generation import (
+    MAX_VIDEO_SECONDS,
+    MIN_VIDEO_SECONDS,
     VideoGenerationError,
     run_video_generation_stage,
 )
 
+_OUTPUT_URL = "https://replicate.delivery/fake/out.mp4"
 
-def _write_fake_image(tmp_path, size=(720, 1280)) -> Path:
-    """A real (if trivial) PNG at `size` -- the stage genuinely opens and
-    resizes this with Pillow now, so a real image is needed, not arbitrary
-    bytes. Defaults to Sora's exact target size, so most tests exercise the
-    "already the right shape" case without a test having to reason about
-    the resize itself."""
+
+def _write_fake_image(tmp_path) -> Path:
+    """The stage only base64-encodes this file, so arbitrary bytes are
+    enough -- unlike the Sora-era stage, nothing opens or resizes it."""
     path = tmp_path / "previz.png"
-    Image.new("RGB", size, color="blue").save(path, format="PNG")
+    path.write_bytes(b"\x89PNG\r\n\x1a\n fake png bytes")
     return path
 
 
-def _immediate_job_fns(status="completed", error=None, content=b"fake video bytes"):
-    """video_fn returns a job already in a terminal state -- no polling needed."""
+def _prediction_fn(output=_OUTPUT_URL, record=None):
+    def _fn(model, input_payload, **kwargs):
+        if record is not None:
+            record.append({"model": model, "input": input_payload, "kwargs": kwargs})
+        return {"id": "pred-1", "status": "succeeded", "output": output, "error": None}
 
-    def _video_fn(**kwargs):
-        return SimpleNamespace(id="job-1", status=status, error=error)
+    return _fn
 
-    def _status_fn(**kwargs):
-        raise AssertionError("status_fn should not be called when the initial job is terminal")
 
-    def _content_fn(**kwargs):
+def _download_fn(content=b"fake video bytes", record=None):
+    def _fn(url, **kwargs):
+        if record is not None:
+            record.append(url)
         return content
 
-    return _video_fn, _status_fn, _content_fn
+    return _fn
 
 
-def test_run_video_generation_stage_writes_video_and_returns_result(tmp_path):
+def test_writes_video_and_returns_result(tmp_path):
     image_path = _write_fake_image(tmp_path)
-    video_fn, status_fn, content_fn = _immediate_job_fns()
 
     result = run_video_generation_stage(
         image_path,
-        "a prompt",
-        model="openai/sora-2",
-        video_fn=video_fn,
-        status_fn=status_fn,
-        content_fn=content_fn,
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
-        output_filename="video.mp4",
+        "a hallway, slow push in",
+        model="replicate/owner/model",
+        prediction_fn=_prediction_fn(),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
     )
 
-    assert result.video_path == tmp_path / "video.mp4"
     assert result.video_path.read_bytes() == b"fake video bytes"
-    assert result.prompt_used == "a prompt"
+    assert result.video_path.name == "video.mp4"
+    assert result.prompt_used == "a hallway, slow push in"
     assert result.source_image_path == image_path
 
 
-def test_run_video_generation_stage_passes_resized_image_and_prompt_through(tmp_path):
-    # Source is already 1280x2276 -- same 9:16-ish ratio Gemini produces,
-    # not the exact target size -- so this exercises an actual resize, not
-    # a no-op.
-    image_path = _write_fake_image(tmp_path, size=(1280, 2276))
-    captured = {}
-
-    def _video_fn(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(id="job-1", status="completed", error=None)
+def test_sends_image_as_data_uri_with_prompt_and_frame_settings(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
 
     run_video_generation_stage(
         image_path,
-        "a very specific prompt",
-        model="openai/sora-2",
-        video_fn=_video_fn,
-        status_fn=lambda **kw: None,
-        content_fn=lambda **kw: b"x",
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
+        "a shape at the top of the stairs",
+        model="replicate/owner/model",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
     )
 
-    assert captured["prompt"] == "a very specific prompt"
-    assert captured["model"] == "openai/sora-2"
-    # Resized to Sora's exact target size, not the raw file bytes -- see
-    # run_video_generation_stage's comment on why (Sora requires a
-    # pixel-exact match to the requested `size`).
-    assert captured["size"] == "720x1280"
-    with Image.open(io.BytesIO(captured["input_reference"])) as resized:
-        assert resized.size == (720, 1280)
-    assert captured["input_reference"] != image_path.read_bytes()
+    payload = calls[0]["input"]
+    assert payload["image"].startswith("data:image/png;base64,")
+    assert payload["prompt"] == "a shape at the top of the stairs"
+    assert payload["frames_per_second"] == 16
+    assert payload["resolution"] == "480p"
+    assert calls[0]["model"] == "owner/model"
 
 
-def test_run_video_generation_stage_raises_when_aspect_ratio_too_different(tmp_path):
-    # previz's old landscape default (3:2) -- wildly different from Sora's
-    # portrait 9:16 target. Regression test for docs/decisions/0011: this
-    # must refuse rather than silently produce a badly distorted video.
-    image_path = _write_fake_image(tmp_path, size=(1536, 1024))
-    video_fn, status_fn, content_fn = _immediate_job_fns()
-
-    with pytest.raises(VideoGenerationError, match="too different"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=video_fn,
-            status_fn=status_fn,
-            content_fn=content_fn,
-            sleep_fn=lambda _seconds: None,
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_rejects_undocumented_seconds_value(tmp_path):
-    # Regression test: a real off-enum value ("6") didn't cleanly reject
-    # at the API -- it corrupted the request in a way that surfaced as an
-    # unrelated `input_reference` error, not a clear "bad duration"
-    # message (docs/decisions/0020). Must be caught before any API call.
+def test_strips_replicate_prefix_before_calling_the_api(tmp_path):
     image_path = _write_fake_image(tmp_path)
-
-    def _explode(**kwargs):
-        raise AssertionError("video_fn should not be called for an invalid seconds value")
-
-    with pytest.raises(VideoGenerationError, match="isn't a supported value"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            seconds="6",
-            video_fn=_explode,
-            status_fn=_explode,
-            content_fn=_explode,
-            sleep_fn=lambda _seconds: None,
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_defaults_seconds_and_passes_it_through(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    captured = {}
-
-    def _video_fn(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(id="job-1", status="completed", error=None, seconds="4")
-
-    result = run_video_generation_stage(
-        image_path,
-        "a prompt",
-        model="openai/sora-2",
-        video_fn=_video_fn,
-        status_fn=lambda **kw: None,
-        content_fn=lambda **kw: b"x",
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
-    )
-
-    assert captured["seconds"] == "4"
-    assert result.seconds_requested == "4"
-    assert result.seconds_actual == "4"
-
-
-def test_run_video_generation_stage_passes_explicit_seconds_through(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    captured = {}
-
-    def _video_fn(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(id="job-1", status="completed", error=None, seconds="20")
-
-    result = run_video_generation_stage(
-        image_path,
-        "a prompt",
-        model="openai/sora-2",
-        seconds="20",
-        video_fn=_video_fn,
-        status_fn=lambda **kw: None,
-        content_fn=lambda **kw: b"x",
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
-    )
-
-    assert captured["seconds"] == "20"
-    assert result.seconds_requested == "20"
-    assert result.seconds_actual == "20"
-
-
-def test_run_video_generation_stage_seconds_actual_is_none_when_job_omits_it(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    video_fn, status_fn, content_fn = _immediate_job_fns()  # no `seconds` attr on the job
-
-    result = run_video_generation_stage(
-        image_path,
-        "a prompt",
-        model="openai/sora-2",
-        video_fn=video_fn,
-        status_fn=status_fn,
-        content_fn=content_fn,
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
-    )
-
-    assert result.seconds_actual is None
-
-
-def test_run_video_generation_stage_polls_until_completed(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    statuses = iter(["in_progress", "in_progress", "completed"])
-
-    def _video_fn(**kwargs):
-        return SimpleNamespace(id="job-1", status="queued", error=None)
-
-    def _status_fn(**kwargs):
-        return SimpleNamespace(id="job-1", status=next(statuses), error=None)
-
-    sleeps: list[float] = []
-    result = run_video_generation_stage(
-        image_path,
-        "a prompt",
-        model="openai/sora-2",
-        video_fn=_video_fn,
-        status_fn=_status_fn,
-        content_fn=lambda **kw: b"fake video bytes",
-        sleep_fn=sleeps.append,
-        output_dir=tmp_path,
-    )
-
-    assert result.video_path.exists()
-    assert len(sleeps) == 3  # one poll per status_fn call above
-
-
-def test_run_video_generation_stage_raises_on_missing_image(tmp_path):
-    with pytest.raises(VideoGenerationError, match="not found"):
-        run_video_generation_stage(
-            tmp_path / "missing.png",
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=lambda **kw: SimpleNamespace(id="x", status="completed", error=None),
-            status_fn=lambda **kw: None,
-            content_fn=lambda **kw: b"x",
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_raises_on_missing_job_id(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-
-    def _video_fn(**kwargs):
-        return SimpleNamespace(id=None, status="queued", error=None)
-
-    with pytest.raises(VideoGenerationError, match="no job id"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=_video_fn,
-            status_fn=lambda **kw: None,
-            content_fn=lambda **kw: b"x",
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_raises_on_failed_status(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    video_fn, status_fn, content_fn = _immediate_job_fns(
-        status="failed", error={"message": "content policy violation"}
-    )
-
-    with pytest.raises(VideoGenerationError, match="content policy violation"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=video_fn,
-            status_fn=status_fn,
-            content_fn=content_fn,
-            sleep_fn=lambda _seconds: None,
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_raises_after_max_poll_attempts(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-
-    def _video_fn(**kwargs):
-        return SimpleNamespace(id="job-1", status="queued", error=None)
-
-    def _status_fn(**kwargs):
-        return SimpleNamespace(id="job-1", status="in_progress", error=None)
-
-    with pytest.raises(VideoGenerationError, match="did not finish"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=_video_fn,
-            status_fn=_status_fn,
-            content_fn=lambda **kw: b"x",
-            sleep_fn=lambda _seconds: None,
-            max_poll_attempts=2,
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_raises_on_empty_content(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    video_fn, status_fn, _ = _immediate_job_fns()
-
-    with pytest.raises(VideoGenerationError, match="no video data"):
-        run_video_generation_stage(
-            image_path,
-            "a prompt",
-            model="openai/sora-2",
-            video_fn=video_fn,
-            status_fn=status_fn,
-            content_fn=lambda **kw: b"",
-            sleep_fn=lambda _seconds: None,
-            output_dir=tmp_path,
-        )
-
-
-def test_run_video_generation_stage_resolves_model_from_config_when_not_passed(tmp_path):
-    image_path = _write_fake_image(tmp_path)
-    captured = {}
-
-    def _video_fn(**kwargs):
-        captured["model"] = kwargs["model"]
-        return SimpleNamespace(id="job-1", status="completed", error=None)
+    calls = []
 
     run_video_generation_stage(
         image_path,
-        "a prompt",
-        video_fn=_video_fn,
-        status_fn=lambda **kw: None,
-        content_fn=lambda **kw: b"x",
-        sleep_fn=lambda _seconds: None,
-        output_dir=tmp_path,
+        "prompt",
+        model="replicate/wan-video/wan-2.2-i2v-fast",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
     )
 
-    assert captured["model"] == get_stage_model("video_generation")
+    assert calls[0]["model"] == "wan-video/wan-2.2-i2v-fast"
+
+
+def test_raises_when_model_is_missing_the_replicate_prefix(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+
+    with pytest.raises(VideoGenerationError, match="must start with 'replicate/'"):
+        run_video_generation_stage(
+            image_path,
+            "prompt",
+            model="openai/sora-2",
+            prediction_fn=_prediction_fn(),
+            download_fn=_download_fn(),
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_default_duration_is_the_models_minimum_frame_count(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
+
+    result = run_video_generation_stage(
+        image_path,
+        "prompt",
+        model="replicate/owner/model",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
+    )
+
+    assert calls[0]["input"]["num_frames"] == 81
+    assert result.seconds_actual == pytest.approx(81 / 16)
+
+
+def test_requested_seconds_are_converted_to_a_frame_count(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
+
+    result = run_video_generation_stage(
+        image_path,
+        "prompt",
+        model="replicate/owner/model",
+        seconds=7.0,
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
+    )
+
+    assert calls[0]["input"]["num_frames"] == 112
+    assert result.seconds_requested == 7.0
+    # Actual differs from requested whenever the request doesn't land on a
+    # whole frame -- recording both is the point (docs/decisions/0012).
+    assert result.seconds_actual == pytest.approx(112 / 16)
+
+
+@pytest.mark.parametrize("seconds", [4.0, MIN_VIDEO_SECONDS - 0.1, MAX_VIDEO_SECONDS + 0.1, 20.0])
+def test_rejects_durations_outside_the_models_range_before_any_call(tmp_path, seconds):
+    image_path = _write_fake_image(tmp_path)
+
+    def _must_not_be_called(*args, **kwargs):
+        raise AssertionError("no API call should happen for an out-of-range duration")
+
+    with pytest.raises(VideoGenerationError, match="outside what this model supports"):
+        run_video_generation_stage(
+            image_path,
+            "prompt",
+            model="replicate/owner/model",
+            seconds=seconds,
+            prediction_fn=_must_not_be_called,
+            download_fn=_must_not_be_called,
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_accepts_720p_and_rejects_anything_else(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
+
+    run_video_generation_stage(
+        image_path,
+        "prompt",
+        model="replicate/owner/model",
+        resolution="720p",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
+    )
+    assert calls[0]["input"]["resolution"] == "720p"
+
+    with pytest.raises(VideoGenerationError, match="isn't supported"):
+        run_video_generation_stage(
+            image_path,
+            "prompt",
+            model="replicate/owner/model",
+            resolution="1080p",
+            prediction_fn=_prediction_fn(),
+            download_fn=_download_fn(),
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_raises_when_reference_image_is_missing(tmp_path):
+    with pytest.raises(VideoGenerationError, match="Reference image not found"):
+        run_video_generation_stage(
+            tmp_path / "nope.png",
+            "prompt",
+            model="replicate/owner/model",
+            prediction_fn=_prediction_fn(),
+            download_fn=_download_fn(),
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_accepts_a_list_output_as_well_as_a_bare_url(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    downloaded = []
+
+    run_video_generation_stage(
+        image_path,
+        "prompt",
+        model="replicate/owner/model",
+        prediction_fn=_prediction_fn(output=[_OUTPUT_URL, "second.mp4"]),
+        download_fn=_download_fn(record=downloaded),
+        output_dir=tmp_path / "out",
+    )
+
+    assert downloaded == [_OUTPUT_URL]
+
+
+@pytest.mark.parametrize("output", [None, "", [], 42])
+def test_raises_when_the_finished_prediction_has_no_usable_url(tmp_path, output):
+    image_path = _write_fake_image(tmp_path)
+
+    with pytest.raises(VideoGenerationError, match="no usable video URL"):
+        run_video_generation_stage(
+            image_path,
+            "prompt",
+            model="replicate/owner/model",
+            prediction_fn=_prediction_fn(output=output),
+            download_fn=_download_fn(),
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_passes_extra_kwargs_through_to_the_prediction_client(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
+
+    run_video_generation_stage(
+        image_path,
+        "prompt",
+        model="replicate/owner/model",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
+        max_poll_attempts=3,
+    )
+
+    assert calls[0]["kwargs"]["max_poll_attempts"] == 3
+
+
+def test_resolves_model_from_config_when_not_passed(tmp_path):
+    image_path = _write_fake_image(tmp_path)
+    calls = []
+
+    run_video_generation_stage(
+        image_path,
+        "prompt",
+        prediction_fn=_prediction_fn(record=calls),
+        download_fn=_download_fn(),
+        output_dir=tmp_path / "out",
+    )
+
+    expected = get_stage_model("video_generation").removeprefix("replicate/")
+    assert calls[0]["model"] == expected

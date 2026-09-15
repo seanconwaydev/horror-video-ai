@@ -25,20 +25,20 @@ Flags:
 - `--video-gen-from <run_dir> [...]`: runs stage 9 standalone against one
   or more completed previz outputs (docs/decisions/0010), writing each
   video into its source run_dir and appending to that run's existing log.
-- `--video-seconds`: requests a clip duration, validated against Sora's
-  documented values before any API call (docs/decisions/0012, 0020).
+- `--video-seconds`: requests a clip duration, validated against the
+  video model's real supported range before any API call
+  (docs/decisions/0020, 0038).
 - `--video-prompt`: overrides the saved previz prompt for --video-gen-from,
   to test a hand-written prompt against an already-approved image.
 - `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
   an "uncertain" fact-check flag, but stops the run on a "contradicted"
-  one rather than auto-accepting it (docs/decisions/0017, 0019), and skips
-  (rather than auto-proceeding past) any scene a moderation pre-flight
-  flags before video generation (docs/decisions/0022).
+  one rather than auto-accepting it (docs/decisions/0017, 0019).
 
-Every --video-gen-from scene also runs a two-layer moderation pre-flight
-(docs/decisions/0022, stages/moderation.py) before the paid video-
-generation call: a free policy-category check plus a paid pose/risk
-review, both against the actual image and prompt about to be submitted.
+Every --video-gen-from scene runs a free, advisory moderation check
+(docs/decisions/0038, stages/moderation.py) before the paid video-
+generation call. It reports flagged categories and never blocks -- horror
+routinely trips the violence category, and this project's video model has
+no vendor moderation for it to predict.
 """
 
 from __future__ import annotations
@@ -60,10 +60,7 @@ from historical_video_ai.stages.fact_check import (
     PremiseConflict,
     run_fact_check_stage,
 )
-from historical_video_ai.stages.moderation import (
-    run_moderation_policy_check,
-    run_moderation_risk_review,
-)
+from historical_video_ai.stages.moderation import run_moderation_policy_check
 from historical_video_ai.stages.previz import (
     PrevizResult,
     build_character_sheet_prompt,
@@ -83,14 +80,17 @@ from historical_video_ai.stages.scene_planning import (
     check_unique_ids,
     run_scene_planning_stage,
 )
-from historical_video_ai.stages.video_generation import run_video_generation_stage
+from historical_video_ai.stages.video_generation import (
+    MAX_VIDEO_SECONDS,
+    MIN_VIDEO_SECONDS,
+    run_video_generation_stage,
+)
 
-# 90x160 (Sora's exact 9:16 target ratio, tiny for speed) rather than a
-# bare 1x1 pixel -- video_generation's aspect-ratio guard (docs/decisions
-# /0011) genuinely opens and checks this image even in --mock mode (only
-# the litellm-facing calls are mocked, not local image processing), so a
-# 1x1 image used to fail --mock --video-gen-from with a real
-# VideoGenerationError instead of exercising the mock path.
+# 90x160 (9:16, tiny for speed). The aspect-ratio guard that originally
+# forced a real image here is gone with Sora (docs/decisions/0038) -- the
+# video stage now only base64-encodes whatever file it's given -- but a
+# real PNG is still the honest stand-in for a previz output, and previz's
+# own code paths do open it.
 _MOCK_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAFoAAACgCAIAAAADw+wqAAABOUlEQVR4nO3SsQ3AMBAD"
     "sY/339mpYvgyA1mpPuiZ2cNnnYUcf94RcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfI"
@@ -182,32 +182,27 @@ def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
-def _mock_video_generation(**kwargs: object) -> SimpleNamespace:
-    """No network call, no API key -- returns a job already 'completed', so
-    --video-gen-from --mock exercises the polling loop's mechanics (it just
-    skips the loop entirely, since the job is terminal on creation) without
-    cost or credentials."""
-    return SimpleNamespace(id="mock-video-id", status="completed", error=None)
+def _mock_prediction(*args: object, **kwargs: object) -> dict:
+    """No network call, no API token -- returns a prediction already
+    'succeeded', so --video-gen-from --mock exercises the stage's own
+    payload-building and output-handling without cost or credentials."""
+    return {
+        "id": "mock-prediction-id",
+        "status": "succeeded",
+        "output": "https://example.invalid/mock-video.mp4",
+        "error": None,
+    }
 
 
-def _mock_video_status(**kwargs: object) -> SimpleNamespace:
-    return SimpleNamespace(id="mock-video-id", status="completed", error=None)
-
-
-def _mock_video_content(**kwargs: object) -> bytes:
+def _mock_download(*args: object, **kwargs: object) -> bytes:
     return b"[MOCK] not a real video file"
 
 
 def _mock_moderation_policy_check(**kwargs: object) -> SimpleNamespace:
     """No network call, no API key -- always comes back clean, so --mock
-    exercises the moderation pre-flight's mechanics (docs/decisions/0022)
+    exercises the moderation pre-flight's mechanics (docs/decisions/0038)
     without cost or credentials."""
     return SimpleNamespace(results=[SimpleNamespace(flagged=False, categories={})])
-
-
-def _mock_moderation_risk_review(**kwargs: object) -> SimpleNamespace:
-    content = json.dumps({"flagged": False, "concern": None})
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
@@ -1142,12 +1137,6 @@ def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) ->
     return image_path, prompt_used
 
 
-# Wording that has actually tripped real Sora moderation in this project
-# (docs/playbook/video-generation-prompting.md) -- not a claimed-complete
-# list, just the concrete evidence gathered so far.
-_VIDEO_PROMPT_RISK_WORDS = frozenset(
-    {"fight", "attack", "kill", "blood", "injury", "weapon", "battle", "war", "die", "tactical"}
-)
 # Research found 2-3 sequential beats is the practical ceiling for one
 # generation call before quality degrades (docs/playbook/video-generation-
 # prompting.md) -- flagged, not enforced, since a human may have a good
@@ -1162,21 +1151,23 @@ def _check_video_prompt_practices(prompt: str) -> list[str]:
     structure enforced anywhere, and it's easy to leave out something the
     playbook already learned the hard way (a real run did exactly this).
     Deliberately narrow: flags concrete, objectively-checkable omissions
-    (no character block, no audio direction, too many beats crammed into
-    one call, wording that's tripped real moderation before) rather than
+    (no character block, too many beats crammed into one call) rather than
     judging actual prompt quality, which isn't something this can do
     reliably and isn't its job -- a human still decides whether to proceed.
+
+    Two checks were removed in docs/decisions/0038 when the video model
+    changed: an audio-direction check (Wan generates no audio at all, so
+    asking a prompt to describe sound is dead weight until a real
+    sound-design step exists) and a list of words that had tripped Sora's
+    moderation -- "fight", "attack", "blood", "weapon" and similar. That
+    list steered prompts away from the exact vocabulary this project's own
+    genre needs, and the model it was protecting against is gone.
     """
     found = []
     if "CHARACTER:" not in prompt:
         found.append(
             "no 'CHARACTER:' block -- character consistency across beats relies on "
             "reusing one verbatim"
-        )
-    if "Audio:" not in prompt:
-        found.append(
-            "no 'Audio:' direction -- Sora generates audio natively and expects to be "
-            "told what to hear"
         )
     # [-–] not just "-": the playbook's own documented timecode format
     # ("(0–3s)") uses an en-dash, not an ASCII hyphen -- an ASCII-only
@@ -1189,19 +1180,6 @@ def _check_video_prompt_practices(prompt: str) -> list[str]:
             "the practical ceiling before quality degrades; consider a separate image + "
             "generation per beat instead"
         )
-    # \w* not a bare \b...\b: catches regular inflected forms ("attacking",
-    # "weapons", "killing") that an exact-word match silently let through --
-    # still not exhaustive for irregular forms ("die" -> "dying"), same
-    # "concrete evidence, not a claimed-complete list" scope as the word
-    # list itself above.
-    risk_words = sorted(
-        w for w in _VIDEO_PROMPT_RISK_WORDS if re.search(rf"\b{w}\w*\b", prompt, re.IGNORECASE)
-    )
-    if risk_words:
-        found.append(
-            f"wording that has tripped real moderation before: {', '.join(risk_words)} -- "
-            "consider neutral, film-direction language instead"
-        )
     return found
 
 
@@ -1209,9 +1187,8 @@ def _run_video_generation_only(
     run_dirs: list[Path],
     *,
     mock: bool,
-    auto_yes: bool = False,
     video_model: str | None = None,
-    video_seconds: str | None = None,
+    video_seconds: float | None = None,
     video_prompt: str | None = None,
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
@@ -1225,19 +1202,16 @@ def _run_video_generation_only(
     0004). Lets VideoGenerationError propagate uncaught, same fail-loud
     convention as every other stage.
 
-    Before each target's paid video-generation call, runs the two-layer
-    moderation pre-flight (docs/decisions/0022) -- a free policy-category
-    check plus a paid pose/risk review, both against the actual image and
-    prompt about to be submitted. A flag from either layer prints the
-    concern and requires confirmation (`_confirm`) to proceed with that
-    target; under `auto_yes` (--yes), a flag skips that target rather than
-    auto-proceeding, same precedent as 0019's contradicted-flag refusal.
-    This skips only the flagged target, not the whole run -- each target is
-    independent, and one flagged target shouldn't block generating the
-    others.
+    Before each target's paid video-generation call, runs the free
+    moderation check (docs/decisions/0038) against the actual image and
+    prompt about to be submitted. Flagged categories are printed and
+    recorded, and the run continues either way -- this project's genre
+    trips the violence category as a matter of course, and the model being
+    called has no vendor moderation for the check to predict. It is a
+    YouTube-policy signal for the human reading the run log, not a gate.
 
-    `video_seconds`, if given, requests that duration (see 0012 for why
-    it's not validated client-side).
+    `video_seconds`, if given, requests that duration -- validated against
+    the model's real supported range before any call (0020, 0038).
 
     `video_prompt` (--video-prompt), if given, replaces the saved previz
     prompt for every run_dir -- a deliberately simple one-override-for-all
@@ -1257,21 +1231,9 @@ def _run_video_generation_only(
     a scene's whole history.
     """
     video_kwargs = (
-        {
-            "video_fn": _mock_video_generation,
-            "status_fn": _mock_video_status,
-            "content_fn": _mock_video_content,
-            "sleep_fn": lambda _seconds: None,
-        }
-        if mock
-        else {}
+        {"prediction_fn": _mock_prediction, "download_fn": _mock_download} if mock else {}
     )
-    policy_check_kwargs = (
-        {"moderation_fn": _mock_moderation_policy_check} if mock else {}
-    )
-    risk_review_kwargs = (
-        {"completion_fn": _mock_moderation_risk_review} if mock else {}
-    )
+    policy_check_kwargs = {"moderation_fn": _mock_moderation_policy_check} if mock else {}
 
     video_model = video_model or get_stage_model("video_generation")
 
@@ -1293,38 +1255,24 @@ def _run_video_generation_only(
         print(f"\n--- video generation (model: {video_model}, scene {i}/{len(targets)}) ---")
         print(f"Source: {target.label} (image: {target.image_path})")
 
-        print("Running moderation pre-flight (docs/decisions/0022)...")
+        print("Running moderation check (advisory -- docs/decisions/0038)...")
         policy_result = run_moderation_policy_check(
             target.prompt_used, target.image_path, **policy_check_kwargs
         )
-        risk_review = run_moderation_risk_review(target.image_path, **risk_review_kwargs)
-
-        concerns = []
         if policy_result.flagged:
-            concerns.append(
-                "omni-moderation-latest flagged categories: "
-                + ", ".join(policy_result.flagged_categories)
+            categories = ", ".join(policy_result.flagged_categories)
+            print(
+                f"Note: omni-moderation-latest flagged [{categories}]. Recorded for "
+                "YouTube-policy review; not blocking generation."
             )
-        if risk_review.flagged:
-            concerns.append(f"pose/risk review: {risk_review.concern}")
-
-        if concerns:
-            print("\nModeration pre-flight raised a concern before spending on video generation:")
-            for concern in concerns:
-                print(f"- {concern}")
             _record_video_gen_result(
-                target, "moderation_preflight_flags", {"concerns": concerns, "prompt_used": target.prompt_used}
+                target,
+                "moderation_flags",
+                {
+                    "flagged_categories": policy_result.flagged_categories,
+                    "prompt_used": target.prompt_used,
+                },
             )
-
-            if auto_yes:
-                print(
-                    "\n--yes won't auto-proceed past a moderation pre-flight flag -- "
-                    f"skipping {target.label}. Rerun without --yes to review and confirm."
-                )
-                continue
-            if not _confirm("Proceed with video generation for this scene anyway?"):
-                print(f"Skipped {target.label} by user choice.")
-                continue
 
         # Microsecond precision, not just seconds -- two attempts against
         # the same previz output (e.g. comparing --video-seconds values)
@@ -1343,7 +1291,7 @@ def _run_video_generation_only(
         )
         print(
             f"Video saved to {result.video_path} "
-            f"(requested {result.seconds_requested}s, provider reports {result.seconds_actual}s)"
+            f"(requested {result.seconds_requested:.2f}s, actual {result.seconds_actual:.2f}s)"
         )
 
         _record_video_gen_result(
@@ -1759,11 +1707,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--video-seconds",
+        type=float,
         help=(
             "Requested clip duration in seconds (only used with "
-            "--video-gen-from) -- one of \"4\", \"8\", \"12\", \"16\", "
-            "\"20\"; any other value is rejected before any API call "
-            "(docs/decisions/0012, 0020). Defaults to the stage's own "
+            "--video-gen-from). The video model accepts a narrow range "
+            f"({MIN_VIDEO_SECONDS:.2f}-{MAX_VIDEO_SECONDS:.2f}s); anything "
+            "outside it is rejected before any API call "
+            "(docs/decisions/0020, 0038). Defaults to the stage's own "
             "default if not given."
         ),
     )
@@ -1873,7 +1823,6 @@ def main() -> None:
         _run_video_generation_only(
             args.video_gen_from,
             mock=args.mock,
-            auto_yes=args.yes,
             video_seconds=args.video_seconds,
             video_prompt=args.video_prompt,
         )

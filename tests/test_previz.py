@@ -61,9 +61,10 @@ def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
 
 
 def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
-    # See docs/decisions/0011: requests an aspect ratio close to Sora-2's
-    # target size so video_generation only needs a barely-perceptible
-    # resize, not a large content-losing crop.
+    # 9:16 portrait for this project's Shorts-only format
+    # (docs/decisions/0002). This used to be driven by Sora's pixel-exact
+    # reference-image requirement; docs/decisions/0038 removed that
+    # coupling, so previz now owns the choice.
     captured = {}
 
     def _image_fn(**kwargs):

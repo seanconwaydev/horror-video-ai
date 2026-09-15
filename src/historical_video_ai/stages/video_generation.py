@@ -4,65 +4,56 @@ docs/pipeline.md ("9. Video generation") and docs/decisions/0010 for why
 this is scoped to one image + one prompt per call (the caller loops for
 multiple scenes -- cli.py's `_run_video_generation_only`).
 
-Model: openai/sora-2, a placeholder (docs/decisions/0010) -- Veo (via
-vertex_ai/gemini) is a real next candidate. Video generation is an async
-job: video_generation() creates it, video_status() is polled to a
-terminal state, video_content() fetches the finished bytes.
+Model: Wan 2.2 image-to-video, hosted on Replicate and called directly
+rather than through litellm -- docs/decisions/0037 (the decision) and
+0038 (this implementation). Replicate's prediction API is async; the
+polling and HTTP live in `replicate_client`, not here.
 
-Two real litellm bugs had to be found and fixed to get a real call
-working: an internal-params leak (fixed upstream since, no longer worked
-around here -- docs/decisions/0013) and broken os.PathLike support for
-input_reference (still handled in this module, see comments below).
-Confirmed end to end, including a full paid run producing a downloaded
-video file.
+Two real API-shape facts worth keeping, since a type signature can't
+carry them:
 
-Duration: `seconds` is validated against OpenAI's documented enum before
-any API call (docs/decisions/0020) -- confirmed by testing `seconds="20"`
-and `seconds="8"` directly against the real API (docs/decisions/0012), and
-by a real failure: an undocumented value ("6") didn't cleanly reject, it
-corrupted the request in a way that surfaced as an unrelated-looking error
-about `input_reference`, not a clear "bad seconds value" message.
+- Duration is expressed as `num_frames` at a given `frames_per_second`,
+  not a seconds enum. The model accepts 81-121 frames, so at Replicate's
+  billing-reference 16fps the real duration range is ~5.06s to ~7.56s --
+  much narrower than Sora's old 4-20s, and worth knowing before planning
+  a beat around a specific length.
+- The output video's aspect ratio follows the input image's, so no
+  resizing or pixel-exact matching is needed (Sora required both). This
+  is why previz's image model no longer has to be chosen for
+  aspect-ratio fit -- see docs/decisions/0038 on 0011 being void.
 """
 
 from __future__ import annotations
 
-import io
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import litellm
-from PIL import Image
-
 from historical_video_ai.config import get_stage_model
+from historical_video_ai.replicate_client import (
+    download_output,
+    file_to_data_uri,
+    run_prediction,
+)
 
-# Sora-2 only accepts two fixed sizes (720x1280 portrait or 1280x720
-# landscape) and requires the reference image to match exactly. Portrait,
-# matching this project's Shorts-only format (docs/decisions/0002). See
-# docs/decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md for
-# why previz targets a close aspect ratio (Gemini's 9:16) instead of
-# leaving this to a large, content-losing crop.
-_TARGET_VIDEO_SIZE = (720, 1280)
-_TARGET_VIDEO_SIZE_STR = "720x1280"
+# Replicate prices this model against duration at 16fps, so frame counts
+# are converted at 16fps here too -- a different fps would silently change
+# what a requested "5 seconds" costs.
+_FPS = 16
+_MIN_FRAMES = 81
+_MAX_FRAMES = 121
 
-# How far a reference image's aspect ratio may deviate from the target
-# before resizing it would visibly distort the scene (stretching people/
-# objects) rather than a barely-perceptible sub-1% adjustment. Gemini's
-# 9:16 output measured ~0.8% off Sora's exact ratio -- comfortably under
-# this; a landscape image (previz's old default) is wildly over it. Refuse
-# rather than silently produce a distorted video, same fail-loud principle
-# as everything else in this stage.
-_MAX_ASPECT_RATIO_DEVIATION = 0.10
+MIN_VIDEO_SECONDS = _MIN_FRAMES / _FPS
+MAX_VIDEO_SECONDS = _MAX_FRAMES / _FPS
 
-_TERMINAL_SUCCESS_STATUS = "completed"
-# Covers the terminal-failure vocabulary used by both provider families
-# litellm currently supports for video generation (OpenAI's Sora API and
-# Google's Veo) -- if a provider's error status doesn't match this, the
-# stage keeps polling until max_poll_attempts is exhausted rather than
-# guessing at an unrecognized status, per this project's fail-loud
-# convention.
-_TERMINAL_FAILURE_STATUSES = {"failed", "cancelled", "canceled", "expired"}
+# 81 frames -- the model card's own "81 frames give the best results".
+_DEFAULT_VIDEO_SECONDS = _MIN_FRAMES / _FPS
+
+# 480p (480x832 at 9:16) rather than 720p: this project generates many
+# short iterations and 720p costs roughly double per clip. Overridable
+# per call for a take actually intended for publishing.
+_DEFAULT_RESOLUTION = "480p"
+_VALID_RESOLUTIONS = frozenset({"480p", "720p"})
 
 
 class VideoGenerationError(Exception):
@@ -76,65 +67,52 @@ class VideoGenerationResult:
     human spot-checking it, per docs/pipeline.md's stage 9 review gate, can
     see what was asked for, not just what came back).
 
-    `seconds_requested`/`seconds_actual` record what duration was asked
-    for vs. what the provider's completed job object actually reports
-    (`seconds_actual` is None if the job object doesn't expose it) -- see
-    docs/decisions/0012 for why this is worth recording rather than
-    assuming the two always match."""
+    `seconds_requested` is what the caller asked for; `seconds_actual` is
+    what the clip really is, which differs whenever the request didn't
+    land exactly on a whole frame boundary (docs/decisions/0012's original
+    reason for recording both)."""
 
     video_path: Path
     prompt_used: str
     source_image_path: Path
-    seconds_requested: str
-    seconds_actual: str | None
+    seconds_requested: float
+    seconds_actual: float
 
 
-def _resize_reference_image(image_bytes: bytes, target_size: tuple[int, int]) -> bytes:
-    """Resize a reference image to exactly `target_size` -- Sora rejects
-    any reference image that isn't pixel-exact to the video's requested
-    size. Only makes sense when the source is already close to the target
-    ratio; otherwise it's a distorting stretch (docs/decisions/0011).
-    Padding was considered and rejected: OpenAI's docs confirm the
-    reference image becomes the video's literal first frame, so padding
-    bars would get baked in as fake visible content.
+def _resolve_replicate_model(model: str) -> str:
+    """Strip config/models.yaml's "replicate/" marker to get the bare
+    "owner/name" slug Replicate's API expects.
 
-    Raises VideoGenerationError if the source aspect ratio deviates from
-    the target by more than _MAX_ASPECT_RATIO_DEVIATION, rather than
-    silently producing a badly distorted video.
+    The prefix exists so a reader of models.yaml can tell at a glance that
+    this one stage doesn't go through litellm like every other stage's
+    "<provider>/<model>" string does (docs/decisions/0003, 0037). Missing
+    prefix is a config error rather than a silent guess.
     """
-    with Image.open(io.BytesIO(image_bytes)) as img:
-        width, height = img.size
-        source_ratio = width / height
-        target_ratio = target_size[0] / target_size[1]
-        deviation = abs(source_ratio - target_ratio) / target_ratio
-        if deviation > _MAX_ASPECT_RATIO_DEVIATION:
-            raise VideoGenerationError(
-                f"Reference image is {width}x{height} (aspect ratio {source_ratio:.3f}), "
-                f"too different from the target video size {target_size[0]}x{target_size[1]} "
-                f"(aspect ratio {target_ratio:.3f}, {deviation:.1%} deviation, max allowed "
-                f"{_MAX_ASPECT_RATIO_DEVIATION:.0%}) to resize without visibly distorting the "
-                "scene -- regenerate previz with a model/size close to this aspect ratio "
-                "(see docs/decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md)."
-            )
-        resized = img.convert("RGB").resize(target_size)
-        buffer = io.BytesIO()
-        resized.save(buffer, format="PNG")
-        return buffer.getvalue()
+    if not model.startswith("replicate/"):
+        raise VideoGenerationError(
+            f"video_generation model {model!r} must start with 'replicate/' -- this stage "
+            "calls Replicate directly rather than litellm (docs/decisions/0037). Fix the "
+            "'video_generation' entry in config/models.yaml."
+        )
+    return model.removeprefix("replicate/")
 
 
-# Sora's own documented-consistent default (its API reference's `seconds`
-# enum lists "4" as the default) -- used when the caller doesn't ask for a
-# specific duration. See docs/decisions/0012 for what longer durations
-# actually do against the real API, given OpenAI's own docs disagree with
-# each other about what's allowed above this.
-_DEFAULT_VIDEO_SECONDS = "4"
+def _frames_for_seconds(seconds: float) -> int:
+    """Convert a requested duration to a frame count, failing loud when
+    it's outside what the model accepts.
 
-# The full enum from OpenAI's video-generation guide (the page 0012 found
-# more trustworthy than the API reference page, which only lists
-# "4"/"8"/"12"). "4", "8", and "20" are confirmed directly against the
-# real API by this project (0012, 0020); "12" and "16" aren't individually
-# confirmed yet but are accepted since they're consistently documented.
-_VALID_VIDEO_SECONDS = frozenset({"4", "8", "12", "16", "20"})
+    Refusing rather than clamping, on the same reasoning as
+    docs/decisions/0020: a silently shortened clip is a confusing result
+    to debug later, while a rejected request says exactly what's wrong
+    before anything is spent.
+    """
+    if seconds < MIN_VIDEO_SECONDS or seconds > MAX_VIDEO_SECONDS:
+        raise VideoGenerationError(
+            f"Requested duration {seconds}s is outside what this model supports "
+            f"({MIN_VIDEO_SECONDS:.2f}s to {MAX_VIDEO_SECONDS:.2f}s -- {_MIN_FRAMES} to "
+            f"{_MAX_FRAMES} frames at {_FPS}fps)."
+        )
+    return round(seconds * _FPS)
 
 
 def run_video_generation_stage(
@@ -142,98 +120,62 @@ def run_video_generation_stage(
     prompt: str,
     *,
     model: str | None = None,
-    seconds: str = _DEFAULT_VIDEO_SECONDS,
-    video_fn: Callable = litellm.video_generation,
-    status_fn: Callable = litellm.video_status,
-    content_fn: Callable = litellm.video_content,
-    sleep_fn: Callable[[float], None] = time.sleep,
-    poll_interval_seconds: float = 10.0,
-    max_poll_attempts: int = 60,
+    seconds: float = _DEFAULT_VIDEO_SECONDS,
+    resolution: str = _DEFAULT_RESOLUTION,
+    prediction_fn: Callable = run_prediction,
+    download_fn: Callable = download_output,
     output_dir: Path = Path("outputs"),
     output_filename: str = "video.mp4",
+    **prediction_kwargs: object,
 ) -> VideoGenerationResult:
     """Generate one video clip from a single reference image and prompt.
 
-    `model` defaults to the pinned "video_generation" model. `seconds` is
-    validated against `_VALID_VIDEO_SECONDS` before any API call
-    (docs/decisions/0020) -- reversing 0012's original "let the provider
-    reject it" stance now that a real off-enum value ("6") was observed to
-    corrupt the request instead of cleanly rejecting, surfacing as a
-    confusing, unrelated `input_reference` error rather than a clear
-    message about the duration. `video_fn`/`status_fn`/`content_fn`/
-    `sleep_fn` are injection points for tests.
+    `model` defaults to the pinned "video_generation" model.
+    `prediction_fn`/`download_fn` are injection points for tests; any
+    extra `prediction_kwargs` (e.g. `sleep_fn`, `max_poll_attempts`) pass
+    straight through to the Replicate client's polling loop.
 
-    Polls at `poll_interval_seconds` up to `max_poll_attempts` times before
-    giving up, rather than waiting indefinitely on a job that never finishes.
-
-    Raises VideoGenerationError if `seconds` isn't one of
-    `_VALID_VIDEO_SECONDS`, `image_path` doesn't exist, the job has no id,
-    ends in a failure status, never reaches a terminal status in time, or
-    returns no video bytes.
+    Raises VideoGenerationError if `seconds`/`resolution` are out of
+    range, `image_path` doesn't exist, or the finished prediction has no
+    usable output. ReplicateError propagates uncaught for transport and
+    prediction failures -- same fail-loud convention as every other stage.
     """
-    if seconds not in _VALID_VIDEO_SECONDS:
+    if resolution not in _VALID_RESOLUTIONS:
         raise VideoGenerationError(
-            f"Requested duration {seconds!r} isn't a supported value -- Sora accepts "
-            f"{sorted(_VALID_VIDEO_SECONDS, key=int)} seconds."
+            f"Resolution {resolution!r} isn't supported -- use one of "
+            f"{sorted(_VALID_RESOLUTIONS)}."
         )
     if not image_path.exists():
         raise VideoGenerationError(f"Reference image not found: {image_path}")
 
-    resolved_model = model or get_stage_model("video_generation")
+    num_frames = _frames_for_seconds(seconds)
+    resolved_model = _resolve_replicate_model(model or get_stage_model("video_generation"))
 
-    # Read the file ourselves and pass raw bytes rather than the Path
-    # object itself: litellm's video_generation() signature advertises
-    # os.PathLike as an accepted input_reference type, but the actual
-    # OpenAI-provider code path for it is broken -- it hands the bare Path
-    # straight to httpx's multipart file field, which only knows how to
-    # render `bytes` or a real file-like object with .read()/.seek(), not
-    # a Path (confirmed by reproduction: AttributeError: 'PosixPath'
-    # object has no attribute 'read'). Passing bytes sidesteps that path
-    # entirely -- litellm's own image-content-type detection and
-    # multipart-attachment code both handle raw bytes correctly.
-    #
-    # The image also has to be resized to Sora's exact required pixel
-    # size first (see _resize_reference_image) -- and `size` has to be
-    # passed explicitly here too, since Sora checks the reference image
-    # against whatever size was *requested*, not just its own default
-    # (confirmed by reproduction: omitting `size` still rejected an image
-    # that didn't match Sora's unstated default).
-    resized_image_bytes = _resize_reference_image(image_path.read_bytes(), _TARGET_VIDEO_SIZE)
-    job = video_fn(
-        model=resolved_model,
-        prompt=prompt,
-        input_reference=resized_image_bytes,
-        size=_TARGET_VIDEO_SIZE_STR,
-        seconds=seconds,
+    prediction = prediction_fn(
+        resolved_model,
+        {
+            "image": file_to_data_uri(image_path),
+            "prompt": prompt,
+            "num_frames": num_frames,
+            "frames_per_second": _FPS,
+            "resolution": resolution,
+        },
+        **prediction_kwargs,
     )
-    job_id = getattr(job, "id", None)
-    if not job_id:
-        raise VideoGenerationError(f"Video generation response had no job id: {job!r}")
 
-    status = getattr(job, "status", None)
-    attempts = 0
-    while status != _TERMINAL_SUCCESS_STATUS and status not in _TERMINAL_FAILURE_STATUSES:
-        attempts += 1
-        if attempts > max_poll_attempts:
-            raise VideoGenerationError(
-                f"Video generation job {job_id} did not finish after "
-                f"{max_poll_attempts} polling attempts (last status: {status!r})."
-            )
-        sleep_fn(poll_interval_seconds)
-        job = status_fn(video_id=job_id)
-        status = getattr(job, "status", None)
-
-    if status in _TERMINAL_FAILURE_STATUSES:
-        error = getattr(job, "error", None)
+    # This model's output is a single URI string. A list is tolerated
+    # because several Replicate video models return one, and a future
+    # model swap shouldn't fail on a difference that costs one line here.
+    output = prediction.get("output")
+    if isinstance(output, list):
+        output = output[0] if output else None
+    if not isinstance(output, str) or not output:
         raise VideoGenerationError(
-            f"Video generation job {job_id} ended with status {status!r}: {error}"
+            f"Replicate prediction {prediction.get('id')!r} completed but returned no "
+            f"usable video URL (output was {prediction.get('output')!r})."
         )
 
-    video_bytes = content_fn(video_id=job_id)
-    if not video_bytes:
-        raise VideoGenerationError(
-            f"Video generation job {job_id} completed but returned no video data."
-        )
+    video_bytes = download_fn(output)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / output_filename
@@ -244,5 +186,5 @@ def run_video_generation_stage(
         prompt_used=prompt,
         source_image_path=image_path,
         seconds_requested=seconds,
-        seconds_actual=getattr(job, "seconds", None),
+        seconds_actual=num_frames / _FPS,
     )
