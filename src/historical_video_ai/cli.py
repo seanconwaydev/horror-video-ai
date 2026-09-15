@@ -62,6 +62,9 @@ from historical_video_ai.stages.fact_check import (
 )
 from historical_video_ai.stages.moderation import run_moderation_policy_check
 from historical_video_ai.stages.previz import (
+    DEFAULT_STYLE,
+    PHOTOREAL_STYLES,
+    STYLE_PRESETS,
     PrevizResult,
     build_character_sheet_prompt,
     build_location_reference_prompt,
@@ -77,6 +80,7 @@ from historical_video_ai.stages.scene_planning import (
     ScenePlan,
     ScenePlanningError,
     check_beat_location_references,
+    check_cinematography_is_not_a_style_claim,
     check_unique_ids,
     run_scene_planning_stage,
 )
@@ -172,7 +176,7 @@ def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
                     "action": "[MOCK]",
                     "camera": "[MOCK]",
                     "lighting": "[MOCK]",
-                    "style": "[MOCK]",
+                    "cinematography": "[MOCK]",
                     "audio": "[MOCK]",
                     "duration_seconds": "4",
                 }
@@ -476,11 +480,16 @@ def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
             )
             try:
                 check_beat_location_references([reviewed_beat], reviewed_locations)
+                # Re-checked after a human edit for the same reason as the
+                # location reference above (docs/decisions/0028): a
+                # hand-edit can reintroduce exactly the art-style claim the
+                # planner was stopped from writing.
+                check_cinematography_is_not_a_style_claim([reviewed_beat])
             except ScenePlanningError as exc:
                 print(f"\n{exc}")
                 if auto_yes:
                     raise
-                print("Reviewing this beat again -- fix location_id.")
+                print("Reviewing this beat again.")
                 b = reviewed_beat
                 continue
             reviewed_beats.append(reviewed_beat)
@@ -1758,16 +1767,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--style",
-        choices=["photorealistic", "semi-realistic", "stylized"],
-        default="photorealistic",
+        choices=sorted(STYLE_PRESETS),
+        default=DEFAULT_STYLE,
         help=(
-            "Target realism level for every reference and beat image in "
-            "this run -- the single authoritative style source, replacing "
-            "three previously-independent, driftable ones (docs/decisions/"
-            "0033). 'semi-realistic' means Pixar/Disney-style 3D "
-            "animation, not photoreal and not flat cartoon. First step "
-            "toward a fuller style-bible (docs/playbook/failure-taxonomy.md) "
-            "-- not the final version of this control."
+            "Art style for every reference and beat image in this run, and "
+            "the ONLY thing that sets it (docs/decisions/0033, 0039). Each "
+            "preset is a single committed direction -- pick one per run and "
+            "vary between runs, rather than asking for several at once. "
+            f"Defaults to {DEFAULT_STYLE}. Photoreal presets "
+            f"({', '.join(sorted(PHOTOREAL_STYLES))}) are supported but "
+            "measurably more likely to have violent scenes silently refused "
+            "by the image model -- see docs/playbook/failure-taxonomy.md."
         ),
     )
     parser.add_argument(

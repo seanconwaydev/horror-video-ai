@@ -763,7 +763,7 @@ def _beat(location_id="street", action="checks her phone") -> Beat:
         action=action,
         camera="medium shot",
         lighting="bright midday sun",
-        style="photorealistic",
+        cinematography="35mm, shallow depth of field",
         audio="street ambience",
         duration_seconds="3",
     )
@@ -841,7 +841,7 @@ def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
 
 
 def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path, monkeypatch):
-    # docs/decisions/0033
+    # docs/decisions/0033, 0039
     monkeypatch.setattr("builtins.input", lambda _: "y")
     captured_prompts = []
 
@@ -854,11 +854,11 @@ def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _capturing_image_fn},
         out_dir=tmp_path,
-        style="stylized",
+        style="cel-shaded",
     )
 
     assert len(captured_prompts) == 2
-    assert all("stylized/cartoon" in p for p in captured_prompts)
+    assert all("Cel-shaded" in p for p in captured_prompts)
 
 
 def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypatch):

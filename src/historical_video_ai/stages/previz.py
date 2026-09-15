@@ -318,6 +318,21 @@ def run_reference_image_stage(
 # entry. Explicit negative constraints on each, since a bare positive
 # adjective ("photorealistic") wasn't enough to prevent drift toward an
 # unrequested style in real runs.
+# Named style presets. Every entry is written the same way on purpose:
+# one committed direction plus hard negatives, short enough to be read as
+# a single instruction.
+#
+# This replaces a three-value set whose "stylized" entry was ~100 words of
+# hedging -- several directions offered, each disclaimed, consistency
+# explicitly "not required or expected". A blind A/B over five horror
+# scenes (evals/, docs/decisions/0039) had it lose on style 5-0 against
+# committed instructions, and the project owner's read of every hedged
+# image was the same word: mush.
+#
+# The hedging was an attempt to preserve stylistic range. Range is instead
+# preserved by having several committed presets and picking one per run --
+# commit within a video, vary between videos. Adding a preset is the
+# supported way to widen the range; loosening one is not.
 _STYLE_INSTRUCTIONS = {
     "photorealistic": (
         "Photorealistic -- an actual photograph of a real person/place, "
@@ -333,21 +348,48 @@ _STYLE_INSTRUCTIONS = {
         "cartoon or anime -- a controlled balance between realism and "
         "stylization."
     ),
-    "stylized": (
-        "Deliberately stylized/cartoon illustration, loosely interpreted -- "
-        "flat or graphic cel-shaded rendering with bold outlines and strong "
-        "color blocking is one welcome direction among several (games like "
-        "Jet Set Radio and Killer7 are examples of that particular look, "
-        "not a required or exclusive target) -- softer, rounder, more "
-        "conventional cartoon/animation looks are equally valid; consistency "
-        "with other videos using "
-        "this same style setting is not required or expected. Exaggerated "
-        "or simplified proportions and expressions are welcome, and a cute "
-        "or wholesome character design is a legitimate choice, not "
-        "something to avoid. Explicitly NOT photorealistic, and not "
-        "attempting real-world material/lighting fidelity."
+    "horror-comic": (
+        "Stylized horror comic panel -- heavy inked black shadows, bold "
+        "confident linework, flat colour fills, high contrast between lit "
+        "and unlit areas. Explicitly NOT photorealistic, NOT 3D-rendered, "
+        "NOT cute, NOT a soft or rounded children's cartoon."
+    ),
+    "graphic-poster": (
+        "High-contrast graphic poster art -- two or three flat colours "
+        "only, bold silhouettes, screen-printed texture. Explicitly NO "
+        "rendering, NO gradients, NO photorealism."
+    ),
+    "painterly": (
+        "Dark painterly illustration -- visible brushwork, soft edges "
+        "dissolving into shadow, a limited palette of bone white and deep "
+        "umber. Explicitly NO hard outlines, NOT photorealistic, NOT "
+        "flat-shaded cartoon."
+    ),
+    "cel-shaded": (
+        "Cel-shaded animation still -- clean flat colour blocking, "
+        "hard-edged shadow shapes, thick uniform outlines, a saturated "
+        "sickly palette. Explicitly NOT photorealistic, NO soft gradients, "
+        "NO painterly rendering."
+    ),
+    "grainy-16mm": (
+        "Grainy 16mm horror photography -- halation around light sources, "
+        "heavy film grain, crushed blacks, muted green-grey colour timing. "
+        "Explicitly NOT illustrated, NOT cartoon, NOT digitally clean."
     ),
 }
+
+#: Public name for the preset table -- callers pick a style by name.
+STYLE_PRESETS = _STYLE_INSTRUCTIONS
+
+DEFAULT_STYLE = "horror-comic"
+
+#: Styles that render as a real photograph. Kept as data rather than a
+#: comment because it is load-bearing: a controlled eval (2026-09-15,
+#: docs/playbook/failure-taxonomy.md) found gemini-2.5-flash-image refused
+#: an identical violent scene 3 times in 4 when asked for photorealism,
+#: and 0 times in 5 when asked for a stylized treatment. Callers can warn
+#: rather than discover it as an unexplained empty response.
+PHOTOREAL_STYLES = frozenset({"photorealistic", "grainy-16mm"})
 
 
 def _style_instruction(style: str) -> str:
@@ -359,7 +401,7 @@ def _style_instruction(style: str) -> str:
         ) from None
 
 
-def build_character_sheet_prompt(character: Character, *, style: str = "photorealistic") -> str:
+def build_character_sheet_prompt(character: Character, *, style: str = DEFAULT_STYLE) -> str:
     """Build a neutral, non-narrative reference-sheet prompt for a
     Character (docs/decisions/0023, 0024) -- deliberately not a story
     moment, per the playbook's finding that a dedicated neutral reference
@@ -383,7 +425,7 @@ def build_character_sheet_prompt(character: Character, *, style: str = "photorea
     )
 
 
-def build_location_reference_prompt(location: Location, *, style: str = "photorealistic") -> str:
+def build_location_reference_prompt(location: Location, *, style: str = DEFAULT_STYLE) -> str:
     """Build a no-character establishing-shot prompt for a Location
     (docs/decisions/0023, 0024) -- the canonical reference every beat set
     there conditions on, per the playbook's location-consistency finding."""
@@ -401,21 +443,23 @@ def _build_beat_prompt(
     *,
     character: Character | None,
     location: Location | None,
-    style: str = "photorealistic",
+    style: str = DEFAULT_STYLE,
 ) -> str:
-    """Build one beat's image prompt directly from its 7-part fields
-    (docs/decisions/0023) -- deliberately not routed through _build_prompt,
-    whose "historically accurate scene, Time: X, Place: Y" template is
-    scoped to the original single-scene flow, not a planned multi-beat
-    shot list.
+    """Build one beat's image prompt from its fields (docs/decisions/0023)
+    -- deliberately not routed through _build_prompt, whose "historically
+    accurate scene, Time: X, Place: Y" template is scoped to the original
+    single-scene flow, not a planned multi-beat shot list.
 
-    `beat.style` (the scene-planning LLM's own per-beat text -- lens,
-    grain, framing notes) is kept, since that's legitimate beat-to-beat
-    cinematographic variety, not the realism level. `style`
-    (docs/decisions/0033) is appended after it as an explicit override so
-    the realism level stays the single authoritative source across every
-    beat and reference in a run, rather than competing with whatever
-    beat.style happened to say on a given call.
+    STYLE appears exactly once, and only the run's chosen preset can
+    supply it. The beat's own `cinematography` text (lens, depth of field,
+    grain, colour grade) is legitimate beat-to-beat variety, so it is kept
+    -- but attached to CAMERA, where it cannot compete for the same slot.
+
+    Until docs/decisions/0039 this emitted `STYLE: {beat.style}` followed
+    by an "OVERRIDING STYLE REQUIREMENT (takes priority over anything
+    above)" line, which shipped a live contradiction in every prompt and
+    left the model to adjudicate it. A blind A/B over five horror scenes
+    (evals/) had that construction lose on style 5-0.
     """
     parts = []
     if character is not None:
@@ -429,13 +473,10 @@ def _build_beat_prompt(
     parts.append(f"ACTION: {beat.action}")
     if location is not None:
         parts.append(f"SETTING: {location.architecture}. Fixed props: {location.fixed_props}.")
-    parts.append(f"CAMERA: {beat.camera}")
+    parts.append(f"CAMERA: {beat.camera.rstrip('.')}. {beat.cinematography}".rstrip())
     parts.append(f"LIGHTING: {beat.lighting}")
-    parts.append(f"STYLE: {beat.style}")
-    parts.append(
-        f"OVERRIDING STYLE REQUIREMENT (takes priority over anything above): "
-        f"{_style_instruction(style)}"
-    )
+    parts.append(f"STYLE: {_style_instruction(style)}")
+    parts.append("No on-screen text, no UI, no logos, no watermark.")
     return "\n".join(parts)
 
 
@@ -446,7 +487,7 @@ def run_beat_image_stage(
     location: Location | None = None,
     character_reference: Path | None = None,
     location_reference: Path | None = None,
-    style: str = "photorealistic",
+    style: str = DEFAULT_STYLE,
     model: str | None = None,
     image_fn: Callable = litellm.image_generation,
     edit_fn: Callable = litellm.image_edit,
