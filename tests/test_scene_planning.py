@@ -9,6 +9,7 @@ from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
     ScenePlanningError,
     _resolve_composition_mode,
+    _resolve_threat_mode,
     run_scene_planning_stage,
 )
 
@@ -462,6 +463,84 @@ def test_run_scene_planning_stage_uses_chaotic_composition_rule_for_surreal_genr
     prompt = captured["messages"][0]["content"]
     assert "Commit fully to a strange, asymmetric, or chaotic composition" in prompt
     assert 'the animation principle of "staging"' not in prompt
+
+
+# threat_mode: a third early-resolved, closed-set routing signal alongside
+# composition_mode (0036), added after a real horror test run showed the
+# threat mentioned in only 2 of 9 beats' text -- see
+# docs/research/short-form-format-selection.md.
+
+
+@pytest.mark.parametrize(
+    "genre,tone",
+    [
+        ("horror", ""),
+        ("psychological thriller", None),
+        ("historical", "creepy and dread-filled"),  # keyword can come from tone alone
+        ("HORROR comedy", ""),  # case-insensitive
+        ("supernatural mystery", None),
+    ],
+)
+def test_resolve_threat_mode_returns_present_for_horror_signals(genre, tone):
+    assert _resolve_threat_mode(genre, tone) == "present"
+
+
+@pytest.mark.parametrize(
+    "genre,tone",
+    [
+        ("historical", "sincere"),
+        ("meme", None),
+        (None, None),
+        ("vlog", "upbeat"),
+    ],
+)
+def test_resolve_threat_mode_defaults_to_none(genre, tone):
+    assert _resolve_threat_mode(genre, tone) == "none"
+
+
+def test_run_scene_planning_stage_includes_threat_presence_rule_for_horror_genre():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread-filled",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "the central threat must read as present across a clear majority of beats" in prompt
+    assert "give EVERY beat its own explicit, distinct point along that progression" in prompt
+    assert "one single, hard-edged, dominant light source explicitly" in prompt
+
+
+def test_run_scene_planning_stage_omits_threat_presence_rule_by_default():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=True,
+        genre="historical",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "central threat must read as present" not in prompt
 
 
 def test_run_scene_planning_stage_uses_staged_composition_rule_by_default():

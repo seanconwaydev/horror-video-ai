@@ -54,7 +54,9 @@ Sometimes a third-party dependency has a real bug with no released fix, and the 
 
 Every such workaround must be tagged with a greppable `WORKAROUND(<issue-or-PR-URL>):` marker at the patch site, so a later session can find every currently-applied one (`grep -rn "WORKAROUND(" src/`) and check whether it's now safe to delete because upstream shipped a real fix.
 
-None currently active. The last two (`src/historical_video_ai/_litellm_workarounds.py`, covering litellm's `Message`/`ModelResponse` construction failing on Python 3.10/3.11 per [litellm#36384](https://github.com/BerriAI/litellm/issues/36384), and a separate undocumented leak of litellm's own internal params into the `video_generation()` request body) were both deleted once the project moved to Python 3.11 + litellm 1.98.0 confirmed both fixed for real — see [docs/decisions/0013](./docs/decisions/0013-python-3.11-upgrade.md).
+One currently active: `stages/moderation.py`'s `run_moderation_policy_check` strips a leading `"openai/"` from the model string before calling litellm's synchronous `moderation()`, which passes `model` straight through to `openai_client.moderations.create()` with no provider-prefix stripping at all (unlike `completion()`/`image_generation()`) — confirmed still present in litellm 1.100.1 (latest released as of 2026-09-14) by inspecting that version's source directly; [litellm#6020](https://github.com/BerriAI/litellm/issues/6020) documents the same bug and is closed "not planned," so no upstream fix is coming.
+
+The previous two (`src/historical_video_ai/_litellm_workarounds.py`, covering litellm's `Message`/`ModelResponse` construction failing on Python 3.10/3.11 per [litellm#36384](https://github.com/BerriAI/litellm/issues/36384), and a separate undocumented leak of litellm's own internal params into the `video_generation()` request body) were both deleted once the project moved to Python 3.11 + litellm 1.98.0 confirmed both fixed for real — see [docs/decisions/0013](./docs/decisions/0013-python-3.11-upgrade.md).
 
 ## Project conventions
 
