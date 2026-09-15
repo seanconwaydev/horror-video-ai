@@ -1,4 +1,5 @@
 import json
+import random
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
     ScenePlanningError,
+    _random_character_trait_hint,
     _resolve_composition_mode,
     _resolve_threat_mode,
     run_scene_planning_stage,
@@ -342,6 +344,108 @@ def test_run_scene_planning_stage_includes_genre_and_tone_when_ungrounded():
     assert "Tone: comedic." in prompt
 
 
+def test_run_scene_planning_stage_includes_location_physical_consistency_rule():
+    # Real run (2026-09-15): scene planning assigned a "lying in bed, near
+    # the headboard/nightstand" beat to a Location whose own architecture
+    # was a hallway/landing with no bed at all -- previz then rendered the
+    # location it was actually given (a landing) with a bed awkwardly
+    # implied into it, not the contradiction-free scene the beat's own
+    # text described. This rule is always included (not genre-gated).
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "must be physically possible in the Location it's assigned to" in prompt
+
+
+def test_run_scene_planning_stage_includes_within_location_position_rule():
+    # Real report (2026-09-15): two beats sharing a staircase location
+    # came out basically identical images -- the existing "coverage" rule
+    # covered camera position and pose, but nothing required the
+    # character's own physical position within the space (e.g. top vs.
+    # bottom of the stairs) to actually differ.
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "genuinely different physical position *within* that location's own space" in prompt
+
+
+def test_run_scene_planning_stage_includes_facial_expression_rule():
+    # Real report (2026-09-15): generated beats consistently showed a
+    # flat, deadpan expression -- image models render neutral unless a
+    # specific emotion is named outright, the same "vague adjective
+    # doesn't work" pattern behind several other rules in this file.
+    # Always included, not genre-gated -- every genre benefits from an
+    # explicit facial expression, not just horror.
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "must state the character's facial expression/emotion explicitly" in prompt
+    assert "give every beat its own distinct, specifically-named point along that arc" in prompt
+
+
+def test_random_character_trait_hint_is_deterministic_for_a_seeded_rng():
+    hint_a = _random_character_trait_hint(random.Random(42))
+    hint_b = _random_character_trait_hint(random.Random(42))
+    assert hint_a == hint_b
+
+
+def test_run_scene_planning_stage_includes_character_variety_rule_with_trait_hint():
+    # Real report (2026-09-15): the same character recurred nearly
+    # identically across separate runs of an identical prompt, since
+    # nothing forced the planning model to vary physical traits when the
+    # scene's own description didn't specify any. A seeded `rng` makes
+    # the injected hint's exact wording deterministic and checkable here.
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        completion_fn=_completion,
+        rng=random.Random(42),
+    )
+
+    prompt = captured["messages"][0]["content"]
+    expected_hint = _random_character_trait_hint(random.Random(42))
+    assert "Vary each Character's physical appearance meaningfully" in prompt
+    assert expected_hint in prompt
+
+
 def test_run_scene_planning_stage_omits_genre_when_grounded():
     # "historical" is always the genre when grounded -- redundant with the
     # preamble's own framing, so it's not echoed.
@@ -496,6 +600,32 @@ def test_resolve_threat_mode_returns_present_for_horror_signals(genre, tone):
 )
 def test_resolve_threat_mode_defaults_to_none(genre, tone):
     assert _resolve_threat_mode(genre, tone) == "none"
+
+
+def test_run_scene_planning_stage_includes_fear_driven_motivation_rule_for_horror_genre():
+    # Real report (2026-09-15): beats read as emotionally wrong for a
+    # horror scene -- the character's motivation came across as neutral
+    # curiosity, not fear, even though nothing forced the description
+    # text itself to say "she is afraid" (genre/tone are the mechanism
+    # meant to carry that without needing to restate it every time).
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "must read as fear/apprehension/dread-driven in every beat" in prompt
 
 
 def test_run_scene_planning_stage_includes_threat_presence_rule_for_horror_genre():

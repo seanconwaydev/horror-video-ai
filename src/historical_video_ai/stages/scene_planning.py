@@ -13,6 +13,7 @@ references yet -- that's docs/decisions/0024.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -205,6 +206,19 @@ def _resolve_threat_mode(genre: str | None, tone: str | None) -> str:
 
 
 _THREAT_PRESENCE_RULE = """\
+- This is a horror/suspense scene: the protagonist's own motivation and \
+emotional register must read as fear/apprehension/dread-driven in every \
+beat, not neutral curiosity or a calm errand -- unless the scene's own \
+tone explicitly calls for something else (comedic, deadpan, morbid \
+curiosity). Investigating a threat should look reluctant, hesitant, or \
+tense (a held breath, a flinch, a wary glance back) even when the action \
+itself is mundane (walking, reaching for a door); a character exploring a \
+genuinely frightening situation with the same calm affect they'd use to \
+check the mail undercuts the genre even when the visual threat itself is \
+rendered correctly. This is a stronger, genre-specific version of the \
+general facial-expression rule stated earlier -- for this genre \
+specifically, "some expression" isn't enough; it has to be \
+fear-appropriate.
 - This is a horror/suspense scene: the central threat must read as present \
 across a clear majority of beats, not declared once and then dropped -- \
 give most beats some concrete visual trace of it (a shadow, a disturbed \
@@ -240,6 +254,93 @@ _THREAT_RULES = {
     "none": "",
 }
 
+# Real, sourced finding (2026-09-15): LLMs collapse toward a narrow set of
+# "default" outputs when a prompt doesn't force variety, and this doesn't
+# meaningfully improve with temperature -- research on LLM idea diversity
+# found only marginal improvement at 1.5x default temperature, with
+# quality degrading badly above that. The reliable fix used in production
+# LLM pipelines for this exact problem is injecting randomness in code
+# rather than relying on the model's own sampling to produce it -- these
+# lists back that: a few structural physical traits are randomly picked
+# per call and handed to the model as a required starting point, so
+# separate runs of an identical prompt get a genuinely different-looking
+# character by construction, not by hoping for it. Deliberately excludes
+# race/ethnicity -- randomly assigning that from a canned list is its own
+# can of worms distinct from "make each run look different," and isn't
+# needed to solve the actual reported problem (the same character
+# recurring run after run).
+_CHARACTER_AGE_RANGES = (
+    "late teens",
+    "early 20s",
+    "mid-20s",
+    "late 20s",
+    "early 30s",
+    "mid-30s",
+    "40s",
+)
+_CHARACTER_BUILDS = (
+    "slight and slender",
+    "athletic",
+    "average build",
+    "stocky",
+    "tall and lean",
+    "short and sturdy",
+)
+_CHARACTER_HAIR_STYLES = (
+    "a short pixie cut",
+    "a shoulder-length bob",
+    "long and straight",
+    "long and curly",
+    "a tight bun",
+    "buzzed very short",
+    "shoulder-length waves",
+    "a messy shag cut",
+)
+_CHARACTER_HAIR_COLORS = (
+    "black",
+    "dark brown",
+    "light brown",
+    "auburn",
+    "blonde",
+    "gray-streaked",
+    "dyed a deep red",
+)
+_CHARACTER_DISTINGUISHING_FEATURES = (
+    "a small scar through one eyebrow",
+    "a scattering of freckles across the nose",
+    "a septum piercing",
+    "wire-frame glasses",
+    "a birthmark on the jaw",
+    "a chipped front tooth",
+    "an ear cuff on one ear",
+)
+
+
+def _random_character_trait_hint(rng: random.Random) -> str:
+    """One randomly-assembled starting point for a Character's physical
+    traits -- see the lists above for why this exists. `rng` is an
+    injection point for tests (pass a seeded `random.Random` for a
+    deterministic result)."""
+    return (
+        f"in their {rng.choice(_CHARACTER_AGE_RANGES)}, {rng.choice(_CHARACTER_BUILDS)} build, "
+        f"with {rng.choice(_CHARACTER_HAIR_STYLES)} in {rng.choice(_CHARACTER_HAIR_COLORS)} hair, "
+        f"and {rng.choice(_CHARACTER_DISTINGUISHING_FEATURES)}"
+    )
+
+
+_CHARACTER_VARIETY_RULE = """\
+- Vary each Character's physical appearance meaningfully across separate \
+runs of this same pipeline -- left with no explicit physical description \
+in the scene itself, an LLM defaults to a narrow, generic "protagonist" \
+look that recurs nearly identically run after run, even though nothing \
+about the scene requires it. Unless the scene's own description states a \
+character's physical traits explicitly, build that Character's \
+`face_build`/`hair`/`distinguishing_detail` fields around this specific \
+starting point rather than inventing your own generic default: a person \
+{character_trait_hint}. Adjust or override any part of it the scene's own \
+description actually contradicts.
+"""
+
 
 _PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
@@ -250,6 +351,31 @@ concrete terms (materials, fixed structures), not aesthetic ones.
 - A BEAT is exactly one moment/shot, never more -- do not describe \
 multiple sequential actions in one beat's `action` field. Every beat must \
 reference a `location_id` matching one of the Locations you define.
+- A beat's `action`/`lighting`/`camera` text must be physically possible in \
+the Location it's assigned to -- if the scene's description mentions a \
+distinct space (a bedroom, a bathroom, a car), that space needs its own \
+Location with its own id, and any beat set there must use that \
+`location_id`, not a different, physically incompatible one (e.g. never \
+describe a character lying in bed, near a headboard/nightstand, if the \
+beat's `location_id` points at a hallway, landing, or stairwell Location \
+that has no bed in its own `fixed_props`). Check this explicitly before \
+finishing the plan: for each beat, does its own location's `architecture`/\
+`fixed_props` actually contain what the beat's `action`/`lighting` \
+describes interacting with?
+{character_variety_rule}\
+- Every beat's `action` field must state the character's facial \
+expression/emotion explicitly, not just their physical action -- image \
+models default to a flat, neutral expression unless a specific emotion is \
+named outright (e.g. "her jaw tightens, eyes wide with fear" rather than \
+just "she listens"). Never write a beat's `action` describing only body \
+movement or position with no stated facial expression or emotional state.
+- If the scene describes or implies a character's emotional state \
+building or shifting over its course (fear or dread escalating, \
+excitement rising, calm curdling into panic), give every beat its own \
+distinct, specifically-named point along that arc -- not just the \
+scene's starting and ending emotional states repeated. This is the same \
+escalation-arc requirement that applies to a visually escalating threat, \
+generalized to the character's own face and body.
 - Vary camera framing deliberately per beat rather than defaulting every \
 shot to facing the camera -- a character can face away from camera, be \
 seen in profile, or be shot from behind, whenever that's the more natural \
@@ -263,6 +389,15 @@ closer one, not two medium shots back to back). The same static shot \
 repeated can be a legitimate deliberate choice for a specific effect, but \
 must never be the unplanned default outcome of two beats sharing a \
 location.
+- Beyond camera position, also place the character at a genuinely \
+different physical position *within* that location's own space for each \
+beat that shares it, whenever the location's own geography supports it -- \
+a staircase has a top, a middle, and a bottom; a hallway has a near end \
+and a far end; a room has multiple walls and corners. Two beats at "the \
+staircase" reading as basically the same image is usually this specific \
+gap: state explicitly where in the space the character is (e.g. "near \
+the top step" vs. "three steps from the bottom"), not just a pose or \
+camera change layered onto an otherwise identical composition.
 - Also vary the character's body position and what they're physically \
 doing across beats -- avoid repeating the same standing position, \
 orientation, and pose in consecutive beats at the same location. Give \
@@ -470,12 +605,17 @@ def run_scene_planning_stage(
     genre: str | None = None,
     tone: str | None = None,
     completion_fn: Callable = litellm.completion,
+    rng: random.Random | None = None,
 ) -> ScenePlan:
     """Build a full `ScenePlan` (characters, locations, beats) from a
     verified fact sheet, before any image generation happens.
 
     `model` defaults to the pinned "scene_planning" model. `completion_fn`
     is an injection point for tests.
+
+    `rng`, if given, is an injection point for tests wanting a
+    deterministic `_random_character_trait_hint` (pass a seeded
+    `random.Random`); defaults to a fresh, unseeded one per call.
 
     `max_beats`, if given, is passed to the model as a soft target *and*
     enforced afterward by truncating the parsed beat list -- a cost-control
@@ -553,8 +693,13 @@ def run_scene_planning_stage(
         )
     composition_rule = _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]
     threat_rule = _THREAT_RULES[_resolve_threat_mode(genre, tone)]
+    character_variety_rule = _CHARACTER_VARIETY_RULE.format(
+        character_trait_hint=_random_character_trait_hint(rng or random.Random())
+    )
     prompt = preamble + _PLANNING_RULES_AND_SHAPE.format(
-        composition_rule=composition_rule, threat_rule=threat_rule
+        composition_rule=composition_rule,
+        threat_rule=threat_rule,
+        character_variety_rule=character_variety_rule,
     )
 
     response = completion_fn(model=resolved_model, messages=[{"role": "user", "content": prompt}])

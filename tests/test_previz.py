@@ -722,6 +722,11 @@ def test_run_previz_review_stage_includes_planned_details_when_character_and_bea
     assert "already deliberately planned and human-reviewed" in prompt_text
     assert "white crop top, gray leggings" in prompt_text
     assert "checks her phone, puzzled" in prompt_text
+    # Real report (2026-09-15): the reviewer was rejecting otherwise-correct
+    # images for not showing a distinguishing detail (a chipped tooth, a
+    # forearm scar) that the beat's own described pose/camera couldn't
+    # have shown in the first place -- this carve-out stops that.
+    assert "only needs to be visible when the beat's own described pose" in prompt_text
 
 
 def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_path):

@@ -7,12 +7,13 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
-    _build_beat_gallery,
+    _beat_gallery_dir,
     _check_video_prompt_practices,
     _confirm,
     _generate_beats_with_choices,
     _generate_previz_with_review,
     _generate_scene_references,
+    _link_beat_into_gallery,
     _load_fact_sheet_from_fixture,
     _load_fixture,
     _load_previz_output,
@@ -889,32 +890,37 @@ def _write_reference_png(tmp_path, name):
     return path
 
 
-def test_build_beat_gallery_symlinks_accepted_beats_by_index(tmp_path):
+def test_beat_gallery_dir_exists_immediately_before_any_beat_is_linked(tmp_path):
+    # The gallery folder must exist as soon as a run starts -- not only
+    # after the first beat finishes -- so a run cancelled before any beat
+    # completes still leaves a (empty) folder behind, per the project
+    # owner's own reported use case (restarting runs often).
+    gallery = _beat_gallery_dir(tmp_path)
+
+    assert gallery == tmp_path / "all_beats"
+    assert gallery.is_dir()
+    assert list(gallery.iterdir()) == []
+
+
+def test_link_beat_into_gallery_symlinks_by_index(tmp_path):
     beat1_dir = tmp_path / "beat_1"
     beat1_dir.mkdir()
     image1 = _write_reference_png(beat1_dir, "previz.png")
-    beat_results = [
-        {"index": 1, "image_path": str(image1)},
-        {"index": 2, "image_path": None},  # every attempt rejected -- no image to link
-    ]
 
-    _build_beat_gallery(tmp_path, beat_results)
+    _link_beat_into_gallery(tmp_path, 1, str(image1))
 
-    gallery = tmp_path / "all_beats"
-    link = gallery / "beat_1.png"
+    link = tmp_path / "all_beats" / "beat_1.png"
     assert link.is_symlink()
     assert link.resolve() == image1.resolve()
-    assert not (gallery / "beat_2.png").exists()
 
 
-def test_build_beat_gallery_is_idempotent(tmp_path):
+def test_link_beat_into_gallery_is_idempotent(tmp_path):
     beat1_dir = tmp_path / "beat_1"
     beat1_dir.mkdir()
     image1 = _write_reference_png(beat1_dir, "previz.png")
-    beat_results = [{"index": 1, "image_path": str(image1)}]
 
-    _build_beat_gallery(tmp_path, beat_results)
-    _build_beat_gallery(tmp_path, beat_results)  # re-running must not raise
+    _link_beat_into_gallery(tmp_path, 1, str(image1))
+    _link_beat_into_gallery(tmp_path, 1, str(image1))  # re-linking must not raise
 
     assert (tmp_path / "all_beats" / "beat_1.png").resolve() == image1.resolve()
 
@@ -946,6 +952,12 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
     assert len(results) == 1
     assert results[0]["image_path"] is not None
     assert results[0]["beat"]["action"] == "checks her phone"
+    # The gallery is populated as beats are accepted, as part of this same
+    # call -- not a separate step a caller has to remember to run
+    # afterward (see _link_beat_into_gallery's docstring).
+    link = tmp_path / "all_beats" / "beat_1.png"
+    assert link.is_symlink()
+    assert link.resolve() == Path(results[0]["image_path"]).resolve()
 
 
 def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_path, monkeypatch):
@@ -1006,6 +1018,43 @@ def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected
 
     assert results[0]["image_path"] is None
     assert len(results[0]["attempts"]) == 3
+
+
+def test_generate_beats_with_choices_folds_rejection_reason_into_next_attempts_prompt(
+    tmp_path, monkeypatch
+):
+    # Real report (2026-09-15): previz_review's own rejection text is
+    # itself a near-ready correction ("the image shows anger, not fear"),
+    # confirmed by a human manually typing almost the same note via
+    # (f)eedback and getting a fixed result. A blind retry with the exact
+    # same prompt and zero new information is strictly worse than folding
+    # that concern back in automatically -- this should now happen on
+    # every retry, not just when a human manually intervenes.
+    # Blank at the on-rejection prompt (keep auto-retrying), then "a" at
+    # the post-acceptance accept/reroll/edit confirm.
+    responses = iter(["", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    captured_prompts = []
+
+    def _capturing_image_fn(**kwargs):
+        captured_prompts.append(kwargs["prompt"])
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion(
+            [(False, "She looks angry, not scared."), (True, None)]
+        )
+    }
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert len(captured_prompts) == 2
+    assert "Fix this: She looks angry, not scared." not in captured_prompts[0]
+    assert "Fix this: She looks angry, not scared." in captured_prompts[1]
 
 
 def test_generate_beats_with_choices_passes_character_and_beat_to_review(tmp_path):
