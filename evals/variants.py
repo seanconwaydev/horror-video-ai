@@ -67,7 +67,31 @@ def single_source(body: str, style: str) -> str:
     return f"{body}\nSTYLE: {style} {_NO_TEXT}"
 
 
+# Every preset written so far describes a STATIC graphic artform -- a
+# comic panel, a poster, a painting. The blind A/B that chose committed
+# styles (docs/decisions/0039) won 19-6 overall but LOST motion 3-2, and
+# the owner's notes said why: "A is more of a comic book still". The
+# hedged instruction it beat had drifted toward generic animation, which
+# carries conventions that imply movement.
+#
+# So this varies one clause and nothing else: does naming motion
+# conventions recover the implied-movement the committed presets gave up,
+# without costing the style confidence they gained?
+_MOTION_CLAUSE = (
+    "Composed at a moment of movement rather than a held pose: the figure is caught "
+    "mid-stride, mid-turn, or mid-reach, with cloth and hair displaced by the movement "
+    "and a clear sense of what happens next. Use this medium's own conventions for "
+    "implying motion -- trailing edges, directional blur, a body off its centre of balance."
+)
+
+
+def single_source_motion(body: str, style: str) -> str:
+    """The winning construction plus an explicit motion-composition clause."""
+    return f"{body}\nSTYLE: {style} {_MOTION_CLAUSE} {_NO_TEXT}"
+
+
 VARIANTS = {
     "current": current,
     "single_source": single_source,
+    "single_source_motion": single_source_motion,
 }
