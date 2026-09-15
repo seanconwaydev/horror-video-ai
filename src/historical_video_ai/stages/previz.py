@@ -629,7 +629,16 @@ def run_previz_review_stage(
             "anachronisms or problems on their own, no matter how implausible "
             "they'd look in isolation; only flag if the image fails to actually "
             "depict them faithfully, or introduces a DIFFERENT, new problem not "
-            "covered here:\n" + "\n".join(planned_lines) + "\n"
+            "covered here. A physical distinguishing detail (a scar, a chipped "
+            "tooth, a piercing) only needs to be visible when the beat's own "
+            "described pose, camera angle, or action would naturally reveal it "
+            "-- do NOT reject an image for failing to show a detail that the "
+            "described framing wouldn't show anyway (e.g. a forearm scar when "
+            "that arm/side isn't presented to camera, a chipped tooth when the "
+            "mouth isn't open toward camera). Only flag a missing detail when "
+            "the described pose/angle genuinely would have shown it:\n"
+            + "\n".join(planned_lines)
+            + "\n"
         )
     previous_concerns_block = ""
     if previous_concerns:

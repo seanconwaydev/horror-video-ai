@@ -354,6 +354,23 @@ def _print_item_fields(item: object) -> None:
 _BEAT_QUICK_EDIT_FIELDS = ("action", "camera", "lighting")
 
 
+def _beat_with_review_corrections(beat: Beat, previous_concerns: list[str]) -> Beat:
+    """Return `beat` with every prior rejection reason appended to its
+    `action` text as a direct correction, or `beat` unchanged if there are
+    none yet (first attempt). Reframes previz_review's own third-person
+    critique ("the image shows anger, not fear") as an imperative
+    instruction ("Fix this: ...") rather than passing the raw complaint
+    through verbatim -- the same shape as the project owner's own real
+    (f)eedback note that fixed a near-identical case by hand. Does not
+    mutate the caller's stored `beat` -- only this specific generation
+    attempt's prompt sees the correction; `beat_results`' recorded `beat`
+    field stays the original, human/scene-plan-approved text."""
+    if not previous_concerns:
+        return beat
+    corrections = " ".join(f"Fix this: {concern}" for concern in previous_concerns)
+    return dataclasses.replace(beat, action=f"{beat.action} {corrections}")
+
+
 def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) -> object:
     """Prompt for a new value per field (blank keeps the current one) and
     return the updated item -- the shared editing mechanism behind both
@@ -672,7 +689,7 @@ def _resolve_premise_conflict(
 
 
 def _generate_image_with_review(
-    generate_fn: Callable[[], PrevizResult],
+    generate_fn: Callable[[list[str]], PrevizResult],
     fact_check_result: FactCheckResult,
     *,
     review_model: str,
@@ -682,15 +699,29 @@ def _generate_image_with_review(
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_rejected: Callable[[str, int], str] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
-    """Generate an image via `generate_fn` (a zero-arg callable producing
-    one PrevizResult -- a closure over run_previz_stage for the original
-    single-scene flow, or over run_beat_image_stage for a scene-plan beat,
-    docs/decisions/0023/0024), then have an independent pass review the
-    actual image against the scene (docs/decisions/0009). On rejection,
-    regenerates blind (no prompt rewriting) unless `on_rejected` says to
-    stop, capped at _MAX_PREVIZ_ATTEMPTS regardless.
-    Shared by both generation paths -- only how the image itself gets
-    made differs between them.
+    """Generate an image via `generate_fn` (a callable producing one
+    PrevizResult from the concerns accumulated so far -- a closure over
+    run_previz_stage for the original single-scene flow, or over
+    run_beat_image_stage for a scene-plan beat, docs/decisions/0023/0024),
+    then have an independent pass review the actual image against the
+    scene (docs/decisions/0009). On rejection, regenerates -- now with
+    every prior rejection reason handed to `generate_fn` too (see below),
+    not a truly blind identical retry -- unless `on_rejected` says to
+    stop, capped at _MAX_PREVIZ_ATTEMPTS regardless. Shared by both
+    generation paths -- only how the image itself gets made differs
+    between them.
+
+    `generate_fn` receives the list of rejection reasons accumulated on
+    this beat so far (empty on the first attempt). Real usage (2026-09-15)
+    found previz_review's own rejection text -- e.g. "the image shows
+    anger, not the fear/terror the beat calls for" -- is itself a
+    near-ready corrective instruction, confirmed by a human manually
+    typing almost the same correction via the (f)eedback option and
+    getting a fixed result. Previously a blind retry reused the exact
+    same prompt with zero new information on every attempt; feeding the
+    reviewer's own concerns back into generation is strictly more
+    information than that, at no extra cost (no added model call -- the
+    concern text already exists from the review that just ran).
 
     Returns (accepted PrevizResult, attempt log), or (None, attempt log)
     if every attempt was rejected or `on_rejected` stopped early. A
@@ -710,17 +741,18 @@ def _generate_image_with_review(
     the reviewer's, and previously there was no way to act on that short
     of editing the beat and hoping for a different roll. "stop" ends the
     retry loop with no accepted image, same outcome as exhausting every
-    attempt. Anything else keeps regenerating blind -- which only helps
-    for genuine bad-luck rejections; a concern baked into the prompt
-    itself (e.g. an anachronistic detail on a Character, reused verbatim
-    on every attempt) fails identically every time, so "stop"/"accept"
-    exist for a human to intervene before more money gets spent on
-    attempts guaranteed to fail.
+    attempt. Anything else keeps regenerating -- now with the accumulated
+    concerns folded in per the note above, though that's still no
+    guarantee: a concern baked into something `generate_fn` can't act on
+    (e.g. an anachronistic detail on a Character, structurally unfixable
+    by rewording one beat's action text) can still fail repeatedly, so
+    "stop"/"accept" exist for a human to intervene before more money gets
+    spent on attempts still likely to fail.
     """
     attempts: list[dict] = []
     previous_concerns: list[str] = []
     for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
-        previz_result = generate_fn()
+        previz_result = generate_fn(previous_concerns)
         print(f"Image saved to {previz_result.image_path}")
         if on_image_generated is not None:
             on_image_generated(previz_result)
@@ -787,10 +819,19 @@ def _generate_previz_with_review(
 ) -> tuple[PrevizResult | None, list[dict]]:
     """The original single-scene previz+review flow (docs/decisions/0009) --
     now a thin wrapper around _generate_image_with_review. See that
-    function's docstring for the shared retry/review behavior."""
+    function's docstring for the shared retry/review behavior.
+
+    Unlike the scene-plan beat path (`_generate_beats_with_choices`),
+    this flow doesn't fold prior rejection reasons back into the retry --
+    `run_previz_stage` builds its prompt from the whole `fact_check_result`
+    with no per-attempt correction-injection point today. Left as a real,
+    known gap rather than force-fit, since this flow predates scene
+    planning and is less actively used now that beats exist.
+    """
     attempt_n = 0
 
-    def _generate() -> PrevizResult:
+    def _generate(previous_concerns: list[str]) -> PrevizResult:
+        del previous_concerns  # not used by this flow -- see docstring above
         nonlocal attempt_n
         attempt_n += 1
         print(f"\n--- previz (model: {previz_model}, attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---")
@@ -1525,6 +1566,7 @@ def _generate_beats_with_choices(
             # over loop variables is a real footgun ruff correctly flags
             # (B023) even though this particular control flow is safe.
             def _generate(
+                previous_concerns: list[str],
                 beat: Beat = beat,
                 location: Location | None = location,
                 location_ref: Path | None = location_ref,
@@ -1537,7 +1579,7 @@ def _generate_beats_with_choices(
                     f"attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---"
                 )
                 return run_beat_image_stage(
-                    beat,
+                    _beat_with_review_corrections(beat, previous_concerns),
                     character=character,
                     location=location,
                     character_reference=character_ref,
@@ -1588,6 +1630,7 @@ def _generate_beats_with_choices(
                 # accept/reroll/edit again immediately after is the same
                 # question a second time, not a real second checkpoint.
                 print("Beat accepted (human override at rejection).")
+                _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
                 beat_results.append(
                     {
                         "index": i,
@@ -1609,6 +1652,7 @@ def _generate_beats_with_choices(
                     ).strip().lower()
 
             if choice == "a":
+                _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
                 beat_results.append(
                     {
                         "index": i,
@@ -1634,26 +1678,37 @@ def _generate_beats_with_choices(
     return beat_results
 
 
-def _build_beat_gallery(out_dir: Path, beat_results: list[dict]) -> None:
-    """Symlink every accepted beat image into a single flat `all_beats/`
-    folder, named by beat index -- clicking through `beat_1/`, `beat_2/`,
-    ... individually to review a run's images was real, reported friction.
-    Symlinks rather than copies, per the project owner's own correction:
-    same one-folder browsing convenience with no extra disk space, and
-    macOS Finder/Preview/Quick Look all follow them transparently. Relative
-    targets so the links stay valid if the whole run folder (or all of
-    `outputs/`) is later moved or copied elsewhere as a unit.
+def _beat_gallery_dir(out_dir: Path) -> Path:
+    """Create (if needed) and return this run's flat `all_beats/` folder --
+    clicking through `beat_1/`, `beat_2/`, ... individually to review a
+    run's images was real, reported friction. Called as early as possible
+    (right when `out_dir` itself is created), not only after beat
+    generation finishes, since the project owner reported restarting runs
+    often -- a folder that only appears at the very end is useless to
+    someone who never reaches the end.
     """
     gallery_dir = out_dir / "all_beats"
     gallery_dir.mkdir(exist_ok=True)
-    for result in beat_results:
-        image_path = result["image_path"]
-        if image_path is None:
-            continue
-        source = Path(image_path)
-        link = gallery_dir / f"beat_{result['index']}{source.suffix}"
-        link.unlink(missing_ok=True)  # re-running against the same out_dir shouldn't fail
-        link.symlink_to(os.path.relpath(source, start=gallery_dir))
+    return gallery_dir
+
+
+def _link_beat_into_gallery(out_dir: Path, index: int, image_path: str) -> None:
+    """Symlink one beat's accepted image into `_beat_gallery_dir(out_dir)`,
+    named by beat index. Called immediately once a beat's image is
+    finalized (both the override-accept and normal-accept paths), not
+    batched until the whole run finishes -- same reasoning as
+    `_beat_gallery_dir`. Symlinks rather than copies, per the project
+    owner's own correction: same one-folder browsing convenience with no
+    extra disk space, and macOS Finder/Preview/Quick Look all follow them
+    transparently. Relative targets so the links stay valid if the whole
+    run folder (or all of `outputs/`) is later moved or copied elsewhere
+    as a unit.
+    """
+    gallery_dir = _beat_gallery_dir(out_dir)
+    source = Path(image_path)
+    link = gallery_dir / f"beat_{index}{source.suffix}"
+    link.unlink(missing_ok=True)  # re-running against the same out_dir shouldn't fail
+    link.symlink_to(os.path.relpath(source, start=gallery_dir))
 
 
 def main() -> None:
@@ -1857,6 +1912,7 @@ def main() -> None:
         # docstring on why the directory name now carries a content hint,
         # not just a timestamp.
         out_dir = _run_dir(_slugify(description))
+        _beat_gallery_dir(out_dir)  # exists from the very start -- see its own docstring
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
         # A fixture is always a replay of a previously completed *real*
@@ -1902,6 +1958,7 @@ def main() -> None:
             args.description, "What the main character does", auto_yes=args.yes
         )
         out_dir = _run_dir(_slugify(description))
+        _beat_gallery_dir(out_dir)  # exists from the very start -- see its own docstring
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         # docs/decisions/0035: genre, not a binary flag, is what determines
         # this -- "historical" (the default) is the only value that needs
@@ -1998,7 +2055,15 @@ def main() -> None:
     log["research_claims"] = [dataclasses.asdict(c) for c in resolved_fact_sheet.claims]
     _write_log(out_dir, log)
 
-    if not _confirm("\nProceed to scene planning with this fact-check result?", auto_yes=args.yes):
+    # Wording (and whether to ask at all) depends on whether there's
+    # actually a fact-check result to confirm -- a genre that skipped
+    # research/fact-check entirely (requires_grounding=False) has nothing
+    # here worth a human decision on; asking "proceed with this
+    # fact-check result?" for a scene that was never fact-checked is a
+    # confusing, pointless confirm, not a real checkpoint.
+    if requires_grounding and not _confirm(
+        "\nProceed to scene planning with this fact-check result?", auto_yes=args.yes
+    ):
         print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
 
@@ -2083,7 +2148,9 @@ def main() -> None:
     )
     log["previz_beats"] = beat_results
     _write_log(out_dir, log)
-    _build_beat_gallery(out_dir, beat_results)
+    # Gallery is already fully populated by this point -- each beat was
+    # linked in immediately on acceptance (_link_beat_into_gallery), not
+    # batched here at the end.
 
     accepted = sum(1 for b in beat_results if b["image_path"] is not None)
     print(f"\nDone: {accepted}/{len(beat_results)} beat(s) produced an accepted image.")
