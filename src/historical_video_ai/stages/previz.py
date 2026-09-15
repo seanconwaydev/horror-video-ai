@@ -26,7 +26,6 @@ from historical_video_ai.image_utils import build_image_content_block
 from historical_video_ai.json_utils import parse_json_response
 from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.scene_planning import Beat, Character, Location
-from historical_video_ai.stages.video_generation import _TARGET_VIDEO_SIZE_STR
 
 # Errors worth retrying automatically -- transient in nature (server
 # overload, a network blip, a rate limit that clears with time), unlike
@@ -52,15 +51,21 @@ class PrevizError(Exception):
     """Raised when the previz stage's image response is missing or malformed."""
 
 
-# Requests the aspect ratio closest to Sora-2's fixed 720x1280 portrait size
-# -- imported from video_generation.py rather than a second hardcoded
-# "720x1280", so the two modules can't silently drift apart (see
-# docs/decisions/0011). gemini-2.5-flash-image only supports requesting an
-# aspect ratio, not an exact pixel size, so this is a hint litellm maps to
-# Gemini's nearest named ratio ("9:16"), not a literal request for these
-# exact pixels -- video_generation.py still resizes the actual output to
-# Sora's exact required dimensions before submission.
-_PREVIZ_SIZE_HINT = _TARGET_VIDEO_SIZE_STR
+# 9:16 portrait, for this project's Shorts-only format
+# (docs/decisions/0002).
+#
+# Until docs/decisions/0038 this was imported from video_generation.py,
+# because Sora required its reference image to be pixel-exact to the video
+# size and the two modules could not be allowed to drift. Wan derives the
+# video's aspect ratio from whatever image it is handed, so that coupling
+# is gone and previz now owns this choice outright -- which is also why
+# docs/decisions/0011's reason for pinning this stage's model no longer
+# holds.
+#
+# gemini-2.5-flash-image only supports requesting an aspect ratio, not an
+# exact pixel size, so this is a hint litellm maps to Gemini's nearest
+# named ratio ("9:16"), not a literal request for these exact pixels.
+_PREVIZ_SIZE_HINT = "720x1280"
 
 
 @dataclass(frozen=True)
