@@ -329,10 +329,18 @@ _STYLE_INSTRUCTIONS = {
         "stylization."
     ),
     "stylized": (
-        "Deliberately stylized/cartoon illustration -- flat or graphic "
-        "cel-shaded rendering; exaggerated proportions and expressions are "
-        "welcome. Explicitly NOT photorealistic and not attempting "
-        "real-world material/lighting fidelity."
+        "Deliberately stylized/cartoon illustration, loosely interpreted -- "
+        "flat or graphic cel-shaded rendering with bold outlines and strong "
+        "color blocking is one welcome direction among several (games like "
+        "Jet Set Radio and Killer7 are examples of that particular look, "
+        "not a required or exclusive target) -- softer, rounder, more "
+        "conventional cartoon/animation looks are equally valid; consistency "
+        "with other videos using "
+        "this same style setting is not required or expected. Exaggerated "
+        "or simplified proportions and expressions are welcome, and a cute "
+        "or wholesome character design is a legitimate choice, not "
+        "something to avoid. Explicitly NOT photorealistic, and not "
+        "attempting real-world material/lighting fidelity."
     ),
 }
 

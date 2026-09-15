@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
+    _build_beat_gallery,
     _check_video_prompt_practices,
     _confirm,
     _generate_beats_with_choices,
@@ -888,6 +889,36 @@ def _write_reference_png(tmp_path, name):
     return path
 
 
+def test_build_beat_gallery_symlinks_accepted_beats_by_index(tmp_path):
+    beat1_dir = tmp_path / "beat_1"
+    beat1_dir.mkdir()
+    image1 = _write_reference_png(beat1_dir, "previz.png")
+    beat_results = [
+        {"index": 1, "image_path": str(image1)},
+        {"index": 2, "image_path": None},  # every attempt rejected -- no image to link
+    ]
+
+    _build_beat_gallery(tmp_path, beat_results)
+
+    gallery = tmp_path / "all_beats"
+    link = gallery / "beat_1.png"
+    assert link.is_symlink()
+    assert link.resolve() == image1.resolve()
+    assert not (gallery / "beat_2.png").exists()
+
+
+def test_build_beat_gallery_is_idempotent(tmp_path):
+    beat1_dir = tmp_path / "beat_1"
+    beat1_dir.mkdir()
+    image1 = _write_reference_png(beat1_dir, "previz.png")
+    beat_results = [{"index": 1, "image_path": str(image1)}]
+
+    _build_beat_gallery(tmp_path, beat_results)
+    _build_beat_gallery(tmp_path, beat_results)  # re-running must not raise
+
+    assert (tmp_path / "all_beats" / "beat_1.png").resolve() == image1.resolve()
+
+
 def _generate_beats_with_choices_kwargs(out_dir, *, image_fn=_fake_image_fn, edit_fn=_fake_image_fn):
     return {
         "previz_model": "gemini/gemini-2.5-flash-image",
@@ -942,10 +973,10 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
 
 
 def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(tmp_path, monkeypatch):
-    # "e" to edit, then a new action, blank for every other field, then "a" to accept.
-    responses = iter(
-        ["e", "street", "The influencer", "smiles warmly", "", "", "", "", "", "a"]
-    )
+    # "e" to edit -- a beat's edit is restricted to action/camera/lighting
+    # (_BEAT_QUICK_EDIT_FIELDS), not every field -- then a new action,
+    # blank for camera/lighting, then "a" to accept.
+    responses = iter(["e", "smiles warmly", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -1060,6 +1091,54 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
     assert len(results[0]["attempts"]) == 1
 
 
+def test_generate_beats_with_choices_lets_human_accept_rejected_image_anyway(
+    tmp_path, monkeypatch
+):
+    # A human's own "good enough for me" judgment can override
+    # previz_review's rejection -- (a)ccept at the on-rejection prompt.
+    # This is the *only* input needed: the redundant post-generation
+    # accept/reroll/edit confirm is skipped for an override, since the
+    # human already made that exact call one step ago.
+    responses = iter(["a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is not None
+    # No second generation call -- the rejected attempt's own image is
+    # what gets kept, not a fresh roll.
+    assert len(results[0]["attempts"]) == 1
+    assert results[0]["attempts"][0]["accepted"] is True
+    assert results[0]["attempts"][0]["concern"] == "Wrong."
+
+
+def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_retry(
+    tmp_path, monkeypatch
+):
+    # (f)eedback appends a short note to the beat's existing action text
+    # instead of rewriting it -- a targeted correction, not a full edit,
+    # for the common case where the plan was mostly right.
+    responses = iter(["f", "make her noticeably smaller", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(False, "Too large."), (True, None)])
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is not None
+    assert results[0]["beat"]["action"] == "checks her phone make her noticeably smaller"
+
+
 def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry(
     tmp_path, monkeypatch
 ):
@@ -1067,9 +1146,10 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     # something baked into the beat's own text (not bad luck) needs an
     # edit-and-retry path, not just three guaranteed-to-fail blind
     # attempts. (e)dit at the on-rejection prompt, then blank through
-    # every Beat field (keep as-is for this test), should restart a fresh
-    # attempt cycle that can then be accepted normally.
-    responses = iter(["e", "", "", "", "", "", "", "", "", "a"])
+    # action/camera/lighting (_BEAT_QUICK_EDIT_FIELDS, keep as-is for
+    # this test), should restart a fresh attempt cycle that can then be
+    # accepted normally.
+    responses = iter(["e", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)

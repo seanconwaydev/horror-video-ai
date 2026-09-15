@@ -1,0 +1,65 @@
+# Short-form format selection — research
+
+Last updated: 2026-09-09
+
+Task: find a short-form video format that (a) is genuinely popular right now, (b) actually uses generated *video* — not a still image with music, which the project owner has ruled out — and (c) fits what this pipeline can realistically produce, now or with modest additional work. This is research, not a decision; see the Recommendation section for what would need to happen to turn it into one.
+
+## What's popular right now (sourced, 2026)
+
+Platform-wide, short-form's engagement sweet spot is 15–45 seconds, and YouTube Shorts specifically averages 200 billion daily views with a 5.91% engagement rate — the highest of the major short-form formats. This is consistent with (not new information beyond) `youtube-monetization-policy.md`'s existing finding that 30–60s Shorts substantially outperform anything under 10 seconds.
+
+Named high-performing AI-video formats, most-cited across current sources: tier-ranking/countdown videos, horror narration (200–400% higher engagement than baseline), **POV historical recreations**, UGC-style AI-avatar testimonials, reaction content, and "pattern-break" structure (starts like one kind of video, flips expectation halfway through).
+
+**AI micro-drama** is the single biggest AI-video trend by volume and money: the global micro-drama market went from $11B (2025) to a projected $14B (end of 2026); over 10,000 AI-produced titles now release monthly in China alone; AI titles went from 7% to 38% of the top-100 drama chart in one year. AI-generated film content in this space runs roughly a tenth the cost of live-action. But the format itself is serialized (multi-episode, cliffhanger-driven), dialogue-heavy, and depends on holding character identity and lip-sync consistent across many episodes — a much bigger production lift than a single vignette.
+
+**AI "History POV"** is a specifically named, currently-viral sub-format (started TikTok early 2025, since spread to Shorts/Reels): an AI-generated "time traveler" films first-person, selfie-style inside a real historical moment and talks to camera as if living it — opens on captions like "POV: You wake up in 1351," structured as hook (first 2–3s) → escalation → an unresolved beat rather than a tidy conclusion, to hold retention.
+
+## Cross-referenced against this pipeline's actual demonstrated strengths and weaknesses
+
+`docs/playbook/failure-taxonomy.md`'s logged runs are almost entirely about one recurring class of problem: **coverage across multiple camera positions at a shared location** — same-background repetitiveness, static pose/composition locked to the reference image, secondary-character identity drift across beats. That's specifically the failure mode of classical continuity-editing cinematography (establishing shot + reverse-angle coverage), which is also the convention `architecture.md`'s open questions section already flags as *not* the right convention for every genre — it calls out "an influencer/vlog-style video routinely breaks those rules on purpose (jump cuts, direct-to-camera address)" as a genre with its own legitimate, different trope set.
+
+POV/vlog format is that genre. It doesn't need coverage at all — a single handheld, direct-to-camera framing is the idiom, not a defect to fix. That routes around this pipeline's most-logged, least-resolved weakness rather than running straight into it.
+
+It's also not a new genre for this project to guess at from scratch: the Pompeii "influencer" dry runs already logged in `failure-taxonomy.md` (genre tag: `modern-visitor-in-historical-setting`) are this format in substance — a modern-dressed character navigating a historical setting, direct engagement with camera. Most of the prompt-rule hardening those runs already produced (specific contemporary wardrobe, subtle screen lighting, screen-orientation-hidden-from-camera, staging/clarity of action) transfers directly rather than needing to be rediscovered.
+
+Structurally, this also lines up with what's already built rather than needing new capability: previz already produces one single-character, single-scene reference image per beat; `video_generation.py` already turns a beat into an ~8s clip conditioned on that image; a new (currently untracked, explicitly-marked-throwaway) `scripts/stitch_clips.sh` already joins multiple generated clips into one file. Four to six ~8s beats stitched together lands at roughly 32–48 seconds — inside the documented 30–60s best-performing range.
+
+Research/fact-check being genuinely useful (not decoration) is also a real differentiator here, not just a nice-to-have: YouTube's monetization policy explicitly rewards "a unique, well-researched, or creative narrative" and penalizes "generic or unoriginal templates" — a POV scene grounded in a specific fact-checked historical moment satisfies that directly, in a way a generic templated format wouldn't.
+
+## Against the alternatives
+
+- **Single image + music** (already ruled out by the project owner): closest thing to what the monetization policy calls out by name as ineligible — "image slideshows... with minimal or no narrative" — and doesn't exercise the video-generation stage at all.
+- **AI micro-drama**: legitimate, larger trend, but serialized/dialogue-heavy with cross-episode character and lip-sync consistency — this pipeline has no dialogue/audio stage and no episode-continuity mechanism yet. A plausible longer-term target once assembly and audio stages exist, not a fit for "current pipeline plus a bit more work."
+- **Countdown/tier-ranking/reaction formats**: high-performing, but typically voiceover-over-stock-footage or screen-recording — doesn't exercise this pipeline's actual core capability (previz + conditioned video generation of an original scene) at all.
+
+## Other formats considered as alternatives to POV History
+
+Broader research turned up two kinds of "popular short-form format": ones built around an actual generated *scene* (this pipeline's core capability — previz + conditioned video generation), and ones built around narration/commentary over something else (stock footage, screen recording, a listicle) where scene generation is beside the point. Only the first kind is a real alternative to weigh against POV History; the second kind is popular but wouldn't exercise what this pipeline actually does.
+
+**Real alternatives (also use generated-scene video):**
+
+| Format | What it is | How it compares to POV History |
+|---|---|---|
+| **Cinematic vignette / short film** | A single dramatic moment shot like a movie scene (no direct-to-camera address) — the format `previz.py`'s own test fixture (the "Agent Voss rooftop chase" scene) already resembles. | Needs classical continuity coverage (establishing shot + reverse angles) to read as cinematic — exactly the failure mode `failure-taxonomy.md` has the most open, unresolved entries on. Harder, not easier, than POV vlog with the pipeline as it stands today. |
+| **Consistent-character story universe** | A recurring AI "character" appearing across many separate shorts, building a following the way a real creator's recurring persona does. | Directly answers `architecture.md`'s open "fixed recurring brand character" question, but requires *that* character's identity to hold consistently across many separate runs/videos, not just within one — a materially bigger consistency bar than anything tested so far. Worth revisiting once within-one-video consistency is solid. |
+| **Before/After transformation** | Shows a contrast between a start state and an end state (place, object, person) — "curiosity + satisfaction" payoff. | Simpler than POV History, not harder: one previz image (before) and one conditioned video-gen clip (the transformation/reveal) can be a complete video — no multi-beat continuity needed at all. A genuine lower-risk/lower-effort alternative, though a thinner fit for this project's historical-research strength specifically (a transformation reveal doesn't need fact-checking the way a historical moment does). |
+| **Atmospheric narration (e.g. "abandoned places" / horror narration)** | A moody establishing scene or two, carried mostly by voiceover narration rather than character performance or dialogue. Horror narration specifically shows 200–400% higher engagement than baseline. | Sidesteps both the coverage problem *and* the direct-to-camera-performance demands of POV vlog — narration does the storytelling work, the generated video only needs to hold one or two atmospheric wide shots. Structurally the easiest of these options, but this project has no narration/voiceover (audio) stage built yet, per `architecture.md`'s stage list. |
+| **"I tried X for N days" case study** | A documented personal experiment across several distinct scenes/days with a result at the end. | Needs multiple distinct locations/scenes per video (more previz+video-gen runs per video, not just more beats within one scene) — a bigger production lift than any of the above, closer to micro-drama's scale than to POV History's. |
+
+**Popular, but not a fit for this pipeline's actual capability** (narration/commentary-over-something-else, not generated-scene video): tier-ranking/countdown lists, "3 quick tips," ultra-short tutorials, "you're doing it wrong" breakdowns, reaction/duet content, comment-reply videos, two-AI-voices debate formats. All are genuinely popular and cheap to produce, but they'd be a different kind of channel built around a script-reading/commentary engine, not this pipeline's previz/video-generation stages at all.
+
+## Genre chosen: horror, motion-comic style
+
+Following up on the "other formats considered" section above: the project owner picked **horror** as the one genre to commit to, paired with the motion-comic treatment (previz panel + light per-panel motion), 20–60s Shorts. Deliberately not historical, per the owner's explicit instruction not to let the project's implementation history steer this choice.
+
+Real test runs (2026-09-14, `--genre horror --style stylized`) validated the pairing directly: a 4-beat single-location run and a 5-beat multi-room run (bedroom hallway → stairs → living room, explicit room names in the description) both produced coherent, atmospheric, on-brief images — the shadowy "just out of sight" monster rendered exactly as vague/featureless as intended in one beat, and the multi-room run's three separate location references read as one consistent house (matching window/curtain style, color grade) despite no explicit cross-location consistency mechanism existing in the pipeline. The multi-room run also landed zero rejections across 9 images, vs. 3-of-4 beats needing a retry in the earlier single-shared-location run — a real, mildly counterintuitive data point that splitting beats across more (simpler, single-reference) locations may reduce retry friction rather than increase it.
+
+**A tentative, not-yet-explored future idea worth keeping on record**: the owner floated deliberately *not* keeping locations consistent with each other — rooms subtly changing/not agreeing from beat to beat, as though reality itself is shifting around the character, to the point that per-room reference images might not even be necessary. Not tested; the two real runs above both deliberately aimed for a coherent house instead. Worth a dedicated experiment later if the coherent-house version doesn't differentiate the channel enough on its own.
+
+## Recommendation
+
+AI History POV — a first-person "time traveler" vlog inside a real, fact-checked historical moment — is the strongest fit against all three criteria: genuinely popular right now, genuinely uses generated video, and plays to this pipeline's demonstrated strength (single scene/character, direct-to-camera, no continuity-coverage requirement) instead of its most-logged weakness. It isn't a new build, mostly a genre choice inside what `ADR 0036`'s genre-routing mechanism already supports — the one real gap is that clip-stitching is currently a manual, explicitly-throwaway shell script rather than the actual (unbuilt) stage 11 "Assembly."
+
+This is written up as research, not a decision — worth confirming with a real (mock or cheap-model) run in this genre before it's worth its own ADR.
+
+Sources: [Short-Form Video Statistics 2026](https://postplanify.com/blog/short-form-video-statistics-2026) · [10 AI Shorts Formats That Actually Go Viral in 2026](https://miraflow.ai/blog/ai-shorts-formats-that-go-viral-2026) · [Chinese short dramas became AI content machines — MIT Technology Review](https://www.technologyreview.com/2026/05/15/1137326/chinese-short-dramas-ai/) · [China's short-drama producers flood the market with cheap bets — CNBC](https://www.cnbc.com/2026/08/26/short-drama-china-production-ai-entertainment-economics.html) · [AI History POV Videos: The Time Travel Trend Taking Over TikTok — Autoclips](https://www.autoclips.app/ai-history-pov-videos) · [How to Make History Shorts for YouTube with AI (2026 Guide)](https://fluxnote.io/guides/how-to-make-history-shorts-for-youtube-with-ai-guide-2026)

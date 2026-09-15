@@ -175,6 +175,71 @@ _COMPOSITION_RULES = {
     "chaotic": _CHAOTIC_COMPOSITION_RULE,
 }
 
+# A third early-resolved, closed-set routing signal alongside
+# requires_grounding (0034/0035) and composition_mode (0036): whether this
+# scene has a threat/antagonist that needs to stay visibly present across
+# beats. Added after a real horror test run (2026-09-14) showed the threat
+# mentioned in only 2 of 9 beats' text -- previz only ever paints what a
+# beat's prompt actually asks for, so an unmentioned threat in most beats
+# is a scene-planning gap, not an image-generation one. See
+# docs/research/short-form-format-selection.md.
+_THREAT_KEYWORDS = (
+    "horror",
+    "thriller",
+    "scary",
+    "suspense",
+    "creepy",
+    "dread",
+    "slasher",
+    "supernatural",
+)
+
+
+def _resolve_threat_mode(genre: str | None, tone: str | None) -> str:
+    """Closed two-value signal selecting whether `_THREAT_PRESENCE_RULE`
+    applies below."""
+    combined = f"{genre or ''} {tone or ''}".lower()
+    if any(keyword in combined for keyword in _THREAT_KEYWORDS):
+        return "present"
+    return "none"
+
+
+_THREAT_PRESENCE_RULE = """\
+- This is a horror/suspense scene: the central threat must read as present \
+across a clear majority of beats, not declared once and then dropped -- \
+give most beats some concrete visual trace of it (a shadow, a disturbed \
+object, a shape at the edge of vision), even when the beat's main action \
+is just the character moving through a space. Never rely on a vague \
+adjective like "barely visible" or "half-hidden" to control how prominent \
+the threat is -- an image model renders that as a bold, centered \
+silhouette unless given a literal constraint instead. State it \
+concretely: roughly what fraction of the frame it occupies, where in the \
+frame (a background corner, a frame edge, never centered), and what \
+specifically occludes it (a doorframe, furniture, deep unlit shadow).
+- If the scene describes a threat that escalates or transforms gradually \
+over its course (a shadow growing more distorted, an environment \
+decaying, a sound growing louder), give EVERY beat its own explicit, \
+distinct point along that progression -- name specifically what's \
+different about it compared to the beat before, not just the scene's \
+starting and ending states. No two non-adjacent beats should describe the \
+same stage of the progression, and no beat should skip stating the \
+progression's current stage, even a beat whose main action is something \
+else entirely (walking, reaching for a door). A progression only \
+described once, at the start and the end, will not survive into the \
+individual beats on its own.
+- Whenever a beat's threat is a shadow, that beat's `lighting` field must \
+name one single, hard-edged, dominant light source explicitly (e.g. "the \
+only light in the frame is X, throwing one sharp-edged shadow onto Y") -- \
+a shadow described only through diffuse or multiple weak ambient sources \
+frequently fails to render as a discernible silhouette at all, regardless \
+of whether its distortion is otherwise described correctly.
+"""
+
+_THREAT_RULES = {
+    "present": _THREAT_PRESENCE_RULE,
+    "none": "",
+}
+
 
 _PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
@@ -247,6 +312,7 @@ wind, a hand tightening on a strap, steam rising) rather than a flat, \
 static figure with nothing else happening in frame. Keep it subtle for a \
 photorealistic scene and can be more pronounced for a stylized one.
 {composition_rule}\
+{threat_rule}\
 - When a beat places a character near furniture or props (sitting at a \
 table, leaning on a counter), describe the specific point of contact \
 explicitly (e.g. "her feet rest flat on the floor in front of the low \
@@ -440,6 +506,11 @@ def run_scene_planning_stage(
     than the LLM inferring which composition instinct applies from one
     rule's inline prose hedges.
 
+    `genre`/`tone` also resolve a third such signal, whether
+    `_THREAT_PRESENCE_RULE` applies -- keeps a horror/suspense scene's
+    threat visually traceable across most beats instead of only the one
+    beat that happens to mention it.
+
     Raises ScenePlanningError if the response isn't valid JSON, is missing
     required fields, or a beat references an undefined location.
     """
@@ -481,7 +552,10 @@ def run_scene_planning_stage(
             max_beats_line=max_beats_line,
         )
     composition_rule = _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]
-    prompt = preamble + _PLANNING_RULES_AND_SHAPE.format(composition_rule=composition_rule)
+    threat_rule = _THREAT_RULES[_resolve_threat_mode(genre, tone)]
+    prompt = preamble + _PLANNING_RULES_AND_SHAPE.format(
+        composition_rule=composition_rule, threat_rule=threat_rule
+    )
 
     response = completion_fn(model=resolved_model, messages=[{"role": "user", "content": prompt}])
     raw_content = response.choices[0].message.content

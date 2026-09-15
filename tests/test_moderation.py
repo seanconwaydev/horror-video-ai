@@ -119,7 +119,27 @@ def test_run_moderation_policy_check_resolves_model_from_config_when_not_passed(
 
     run_moderation_policy_check("prompt", image_path, moderation_fn=_moderation)
 
-    assert captured["model"] == get_stage_model("moderation_check")
+    assert captured["model"] == get_stage_model("moderation_check").removeprefix("openai/")
+
+
+def test_run_moderation_policy_check_strips_openai_prefix_before_calling_moderation_fn(tmp_path):
+    """WORKAROUND(https://github.com/BerriAI/litellm/issues/6020): litellm's
+    synchronous moderation() doesn't strip a provider prefix the way
+    completion()/image_generation() do, so the pinned
+    "openai/omni-moderation-latest" format must be stripped at this call
+    site or OpenAI's real API rejects it with a 400."""
+    image_path = _write_tiny_png(tmp_path)
+    captured = {}
+
+    def _moderation(**kwargs):
+        captured["model"] = kwargs["model"]
+        return SimpleNamespace(results=[SimpleNamespace(flagged=False, categories={})])
+
+    run_moderation_policy_check(
+        "prompt", image_path, model="openai/omni-moderation-latest", moderation_fn=_moderation
+    )
+
+    assert captured["model"] == "omni-moderation-latest"
 
 
 # --- Layer 2: run_moderation_risk_review ---

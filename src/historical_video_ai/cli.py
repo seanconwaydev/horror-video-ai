@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -344,18 +345,32 @@ def _print_item_fields(item: object) -> None:
         print(f"  {f.name}: {getattr(item, f.name)}")
 
 
-def _edit_item_fields(item: object) -> object:
+# A Beat has 8 fields, but a human editing one is almost always reacting
+# to a specific rendered mismatch (the wrong action, the wrong framing, a
+# missing shadow) -- walking through all 8 one by one (including
+# location_id, which shouldn't change here without the revalidation
+# decisions/0028 requires for a real structural edit) was real, reported
+# friction. These three are what actually drives what gets rendered.
+_BEAT_QUICK_EDIT_FIELDS = ("action", "camera", "lighting")
+
+
+def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) -> object:
     """Prompt for a new value per field (blank keeps the current one) and
     return the updated item -- the shared editing mechanism behind both
     _review_item's (a)ccept/(e)dit loop and the beat-generation loop's
     (e)dit choice (docs/decisions/0023, 0024). Generic over any frozen
-    dataclass with string fields."""
+    dataclass with string fields.
+
+    `fields`, if given, restricts prompting to just those field names --
+    every other field keeps its current value untouched. See
+    _BEAT_QUICK_EDIT_FIELDS."""
     updates = {}
-    for f in dataclasses.fields(item):
-        current = getattr(item, f.name)
-        new_value = input(f"  {f.name} [{current}]: ").strip()
+    field_names = fields if fields is not None else [f.name for f in dataclasses.fields(item)]
+    for name in field_names:
+        current = getattr(item, name)
+        new_value = input(f"  {name} [{current}]: ").strip()
         if new_value:
-            updates[f.name] = new_value
+            updates[name] = new_value
     return dataclasses.replace(item, **updates)
 
 
@@ -370,7 +385,8 @@ def _review_item(item: object, *, item_desc: str, auto_yes: bool = False) -> obj
 
     Generic over any frozen dataclass with string fields -- Character,
     Location, and Beat all qualify, so one function serves all three
-    review passes in `_review_scene_plan`.
+    review passes in `_review_scene_plan`. A Beat's edit is restricted to
+    _BEAT_QUICK_EDIT_FIELDS rather than every field -- see that constant.
     """
     print(f"\n{item_desc}:")
     _print_item_fields(item)
@@ -384,6 +400,8 @@ def _review_item(item: object, *, item_desc: str, auto_yes: bool = False) -> obj
         action = input("(a)ccept or (e)dit? [a/e]: ").strip().lower()
     if action == "a":
         return item
+    if isinstance(item, Beat):
+        return _edit_item_fields(item, fields=_BEAT_QUICK_EDIT_FIELDS)
     return _edit_item_fields(item)
 
 
@@ -685,14 +703,19 @@ def _generate_image_with_review(
     already-paid-for image on disk with no record of it in the log.
 
     `on_rejected`, if given, is called with (concern, attempt) after
-    *every* rejection, including the final automatic attempt -- blind
-    regeneration only helps for genuine bad-luck rejections; a concern
-    baked into the prompt itself (e.g. an anachronistic detail on a
-    Character, reused verbatim on every attempt) fails identically every
-    time, so a human needs a way to intervene before more money gets spent
-    on attempts guaranteed to fail. Returning "stop" ends the retry loop
-    immediately (same outcome as exhausting every attempt); anything else
-    keeps regenerating blind.
+    *every* rejection, including the final automatic attempt, and its
+    return value picks one of three outcomes. "accept" keeps *this*
+    attempt's image as the final result despite the reviewer's rejection
+    -- a human's own "good enough for me" judgment doesn't always match
+    the reviewer's, and previously there was no way to act on that short
+    of editing the beat and hoping for a different roll. "stop" ends the
+    retry loop with no accepted image, same outcome as exhausting every
+    attempt. Anything else keeps regenerating blind -- which only helps
+    for genuine bad-luck rejections; a concern baked into the prompt
+    itself (e.g. an anachronistic detail on a Character, reused verbatim
+    on every attempt) fails identically every time, so "stop"/"accept"
+    exist for a human to intervene before more money gets spent on
+    attempts guaranteed to fail.
     """
     attempts: list[dict] = []
     previous_concerns: list[str] = []
@@ -723,6 +746,15 @@ def _generate_image_with_review(
             return previz_result, attempts
 
         print(f"Rejected: {review.concern}")
+        decision = on_rejected(review.concern, attempt) if on_rejected is not None else "continue"
+
+        if decision == "accept":
+            print("Accepted despite rejection (human override).")
+            attempts.append(
+                {"attempt": attempt, "accepted": True, "concern": review.concern, "override": True}
+            )
+            return previz_result, attempts
+
         archived_path = out_dir / f"{archive_prefix}_{attempt}_rejected.png"
         previz_result.image_path.rename(archived_path)
         attempts.append(
@@ -734,7 +766,7 @@ def _generate_image_with_review(
             }
         )
         previous_concerns.append(review.concern)
-        if on_rejected is not None and on_rejected(review.concern, attempt) == "stop":
+        if decision == "stop":
             break
         if attempt < _MAX_PREVIZ_ATTEMPTS:
             print("Regenerating...")
@@ -1451,16 +1483,35 @@ def _generate_beats_with_choices(
                     last_concern = concern
                     return "stop" if is_repeat else "continue"
                 choice = None
-                while choice not in ("", "e", "g"):
+                while choice not in ("", "e", "f", "a", "g"):
                     choice = input(
                         "(Enter) keep auto-retrying / (e)dit this beat and retry / "
-                        "(g)ive up on this beat: "
+                        "(f)eedback: add a short note and retry / "
+                        "(a)ccept this image anyway / (g)ive up on this beat: "
                     ).strip().lower()
                 if choice == "e":
                     print(f"\nBeat {i}:")
-                    beat = _edit_item_fields(beat)
+                    beat = _edit_item_fields(beat, fields=_BEAT_QUICK_EDIT_FIELDS)
                     beat_was_edited = True
                     return "stop"
+                if choice == "f":
+                    # A targeted correction ("keep this, just make her
+                    # smaller") appended to the existing action text --
+                    # cheaper than rewriting a field that was already
+                    # mostly right, for the common case where the plan was
+                    # fine and only the render missed one specific thing.
+                    note = ""
+                    while not note:
+                        note = input("  Feedback (appended to the beat's action): ").strip()
+                    beat = dataclasses.replace(beat, action=f"{beat.action} {note}")
+                    beat_was_edited = True
+                    return "stop"
+                if choice == "a":
+                    # The reviewer's rejection doesn't have to be the last
+                    # word -- a human's own "good enough for me" judgment
+                    # overrides it, same as previz_review's own verdict
+                    # would have if it had accepted this attempt.
+                    return "accept"
                 if choice == "g":
                     return "stop"
                 return "continue"
@@ -1531,6 +1582,23 @@ def _generate_beats_with_choices(
                 )
                 break  # every automatic attempt was rejected, or the human gave up on this beat
 
+            if attempts and attempts[-1].get("override"):
+                # The human already made this exact call at the rejection
+                # prompt ((a)ccept this image anyway) -- asking
+                # accept/reroll/edit again immediately after is the same
+                # question a second time, not a real second checkpoint.
+                print("Beat accepted (human override at rejection).")
+                beat_results.append(
+                    {
+                        "index": i,
+                        "beat": dataclasses.asdict(beat),
+                        "image_path": str(previz_result.image_path),
+                        "prompt_used": previz_result.prompt_used,
+                        "attempts": attempts,
+                    }
+                )
+                break
+
             if auto_yes:
                 choice = "a"
             else:
@@ -1561,9 +1629,31 @@ def _generate_beats_with_choices(
                 continue
             # choice == "e"
             print(f"\nBeat {i}:")
-            beat = _edit_item_fields(beat)
+            beat = _edit_item_fields(beat, fields=_BEAT_QUICK_EDIT_FIELDS)
 
     return beat_results
+
+
+def _build_beat_gallery(out_dir: Path, beat_results: list[dict]) -> None:
+    """Symlink every accepted beat image into a single flat `all_beats/`
+    folder, named by beat index -- clicking through `beat_1/`, `beat_2/`,
+    ... individually to review a run's images was real, reported friction.
+    Symlinks rather than copies, per the project owner's own correction:
+    same one-folder browsing convenience with no extra disk space, and
+    macOS Finder/Preview/Quick Look all follow them transparently. Relative
+    targets so the links stay valid if the whole run folder (or all of
+    `outputs/`) is later moved or copied elsewhere as a unit.
+    """
+    gallery_dir = out_dir / "all_beats"
+    gallery_dir.mkdir(exist_ok=True)
+    for result in beat_results:
+        image_path = result["image_path"]
+        if image_path is None:
+            continue
+        source = Path(image_path)
+        link = gallery_dir / f"beat_{result['index']}{source.suffix}"
+        link.unlink(missing_ok=True)  # re-running against the same out_dir shouldn't fail
+        link.symlink_to(os.path.relpath(source, start=gallery_dir))
 
 
 def main() -> None:
@@ -1993,10 +2083,12 @@ def main() -> None:
     )
     log["previz_beats"] = beat_results
     _write_log(out_dir, log)
+    _build_beat_gallery(out_dir, beat_results)
 
     accepted = sum(1 for b in beat_results if b["image_path"] is not None)
     print(f"\nDone: {accepted}/{len(beat_results)} beat(s) produced an accepted image.")
     print(f"Run artifacts saved in {out_dir}")
+    print(f"All accepted beat images linked in {out_dir / 'all_beats'}")
 
 
 if __name__ == "__main__":

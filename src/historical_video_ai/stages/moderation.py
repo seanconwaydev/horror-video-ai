@@ -73,12 +73,22 @@ def run_moderation_policy_check(
     'flagged'.
     """
     resolved_model = model or get_stage_model("moderation_check")
+    # WORKAROUND(https://github.com/BerriAI/litellm/issues/6020): litellm's
+    # synchronous moderation() passes `model` straight through to
+    # openai_client.moderations.create() with no provider-prefix stripping
+    # at all (unlike completion()/image_generation()), so config.yaml's
+    # pinned "openai/omni-moderation-latest" -- the LiteLLM format every
+    # other stage uses -- gets rejected by OpenAI's own API with a real
+    # 400. Confirmed still present in litellm 1.100.1 (latest released,
+    # checked 2026-09-14); the issue itself is closed "not planned", so
+    # this strips the prefix at this one call site instead of waiting on
+    # an upstream fix that was declined.
     response = moderation_fn(
         input=[
             {"type": "text", "text": prompt},
             build_image_content_block(image_path),
         ],
-        model=resolved_model,
+        model=resolved_model.removeprefix("openai/"),
     )
     if not response.results:
         raise ModerationError("Moderation response has no results")
