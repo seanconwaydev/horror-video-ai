@@ -2282,3 +2282,35 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     assert results[0]["image_path"] is not None
     # The character's own description still reaches the model as text.
     assert "white crop top" in seen[0]["prompt"]
+
+
+def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
+    """staging is a list of dataclasses; the editor must prompt per
+    character rather than asking for a repr back (docs/decisions/0049)."""
+    from historical_video_ai.cli import _edit_item_fields
+    from historical_video_ai.stages.scene_planning import Beat, Staging
+
+    beat = Beat(
+        location_id="carpark", subject="w1", action="she reaches the car",
+        camera="medium", lighting="one hard strip light", audio="hum",
+        duration_seconds="4",
+        staging=[
+            Staging(character_id="w1", action="stands", frame_position="centre"),
+            Staging(character_id="fig1", action="stands", frame_position="left"),
+        ],
+    )
+    prompts = []
+
+    def _fake_input(prompt):
+        prompts.append(prompt)
+        # Rewrite only the antagonist's action; keep everything else.
+        return "leans around the pillar toward her" if "fig1 action" in prompt else ""
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+    edited = _edit_item_fields(beat, fields=("staging",))
+
+    assert any("w1 action" in p for p in prompts)
+    assert any("fig1 in frame" in p for p in prompts)
+    assert edited.staging[0].action == "stands"
+    assert edited.staging[1].action == "leans around the pillar toward her"
+    assert edited.staging[1].frame_position == "left"

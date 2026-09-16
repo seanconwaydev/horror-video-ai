@@ -406,14 +406,25 @@ def _build_beat_prompt(
     # one has a way to say which is which. Before docs/decisions/0041 only
     # the scene's first character was ever passed here, so a planned
     # antagonist could not be rendered at all.
+    staging_by_id = {s.character_id: s for s in beat.staging}
     for character in characters:
         label = f"CHARACTER {character.id}" if len(characters) > 1 else "CHARACTER"
-        parts.append(
+        block = (
             f"{label}: {character.face_build}, {character.hair}.\n"
             f"WARDROBE (signature): {character.wardrobe_signature}.\n"
             f"WARDROBE (flexible): {character.wardrobe_flexible}.\n"
             f"DISTINGUISHING DETAIL: {character.distinguishing_detail}."
         )
+        # Each character's action sits in their own block rather than in one
+        # shared ACTION paragraph, so the model binds the verb to the person
+        # it belongs to (docs/decisions/0049). A single blob reliably gave
+        # the focal character the verb and left everyone else a static pose.
+        staged = staging_by_id.get(character.id)
+        if staged is not None:
+            block += f"\nDOING: {staged.action}"
+            if staged.frame_position:
+                block += f"\nPOSITION IN FRAME: {staged.frame_position}"
+        parts.append(block)
     if len(characters) > 1:
         present = ", ".join(c.id for c in characters)
         parts.append(
@@ -423,6 +434,12 @@ def _build_beat_prompt(
         )
     parts.append(f"SUBJECT: {beat.subject}")
     parts.append(f"ACTION: {beat.action}")
+    if len(beat.staging) > 1:
+        parts.append(
+            "These characters are in the same moment and must react to each other -- "
+            "their gazes, distances and body angles have to agree, not read as separate "
+            "figures posed independently and placed in one frame."
+        )
     if location is not None:
         parts.append(f"SETTING: {location.architecture}. Fixed props: {location.fixed_props}.")
     parts.append(f"CAMERA: {beat.camera}")

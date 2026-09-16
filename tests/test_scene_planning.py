@@ -11,6 +11,7 @@ from historical_video_ai.stages.scene_planning import (
     Beat,
     Character,
     ScenePlanningError,
+    Staging,
     _parse_scene_plan,
     _random_character_trait_hint,
     _resolve_composition_mode,
@@ -56,15 +57,26 @@ def _valid_payload(**overrides) -> dict:
                 "location_id": "street",
                 "subject": "The influencer",
                 "action": "checks her phone",
+                "staging": [
+                    {
+                        "character_id": "influencer",
+                        "action": "thumbs the screen awake and angles it away from the sun",
+                        "frame_position": "right third, filling half the frame height",
+                    }
+                ],
                 "camera": "medium shot",
                 "lighting": "bright midday sun",
-                        "audio": "street ambience",
+                "audio": "street ambience",
                 "duration_seconds": "3",
             }
         ],
     }
     payload.update(overrides)
     return payload
+
+
+def _staging(cid, action="reaches for the door handle", frame_position="left third"):
+    return Staging(character_id=cid, action=action, frame_position=frame_position)
 
 
 def _beat(**overrides) -> Beat:
@@ -726,7 +738,7 @@ def test_beat_renders_every_named_character_and_says_all_are_present():
         wardrobe_signature="olive work jacket", wardrobe_flexible="collar turned up",
         distinguishing_detail="brass keyring",
     )
-    beat = _beat(subject="w1", character_ids=["w1", "fig1"])
+    beat = _beat(subject="w1", staging=[_staging("w1"), _staging("fig1")])
 
     prompt = _build_beat_prompt(beat, characters=[woman, figure], location=None)
 
@@ -738,16 +750,16 @@ def test_beat_renders_every_named_character_and_says_all_are_present():
 def test_check_beat_character_references_rejects_an_unknown_id():
     known = [Character(id="w1", face_build="x", hair="x", wardrobe_signature="x",
                        wardrobe_flexible="x", distinguishing_detail="x")]
-    beat = _beat(subject="w1", character_ids=["w1", "ghost"])
+    beat = _beat(subject="w1", staging=[_staging("w1"), _staging("ghost")])
     with pytest.raises(ScenePlanningError, match="don't match any defined character"):
         check_beat_character_references([beat], known)
 
 
-def test_a_beat_without_character_ids_falls_back_to_the_first_character():
+def test_a_beat_without_staging_falls_back_to_the_first_character():
     """A planning model that ignores the new field still produces a usable
     single-character beat -- which is what every beat was before ADR 0041."""
     payload = _valid_payload()
-    payload["beats"][0].pop("character_ids", None)
+    payload["beats"][0].pop("staging", None)
 
     def _completion(**kwargs):
         return SimpleNamespace(
@@ -755,7 +767,7 @@ def test_a_beat_without_character_ids_falls_back_to_the_first_character():
         )
 
     plan = run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
-    assert plan.beats[0].character_ids == [plan.characters[0].id]
+    assert [s.character_id for s in plan.beats[0].staging] == [plan.characters[0].id]
 
 
 def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():
@@ -774,8 +786,8 @@ def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():
         _fact_check_result(), genre="horror", tone="dread", completion_fn=_completion
     )
     prompt = captured["messages"][0]["content"]
-    assert "LIST ITS ID in `character_ids`" in prompt
-    assert "EVERY character visible in that shot" in prompt
+    assert "GIVE IT ITS OWN `staging` ENTRY" in prompt
+    assert "EVERY character visible in" in prompt
 
 
 # --- identity fields describe appearance, never behaviour (ADR 0042) ---
@@ -900,3 +912,98 @@ def test_planning_prompt_asks_for_screen_direction_not_camera_side():
 
     assert "SCREEN DIRECTION" in prompt
     assert "which side of an imaginary line the camera sits on is not" in prompt
+
+
+# --- docs/decisions/0049: per-character staging -----------------------------
+
+
+def test_each_characters_action_sits_in_that_characters_own_prompt_block():
+    """A single shared ACTION paragraph gave the focal character the verb
+    and left everyone else a static pose. Binding the verb to the person
+    is the whole point of the schema change (docs/decisions/0049)."""
+    from historical_video_ai.stages.previz import _build_beat_prompt
+
+    woman = Character(id="w1", face_build="early twenties", hair="blonde bun",
+                      wardrobe_signature="green puffer", wardrobe_flexible="hood up",
+                      distinguishing_detail="birthmark on the jaw")
+    figure = Character(id="fig1", face_build="very tall, gaunt", hair="shaved scalp",
+                       wardrobe_signature="black rain jacket", wardrobe_flexible="hood up",
+                       distinguishing_detail="scar down the throat")
+    beat = _beat(
+        subject="w1",
+        staging=[
+            _staging("w1", action="jams the key at the lock", frame_position="right of frame"),
+            _staging("fig1", action="reaches over the car roof toward her",
+                     frame_position="far left edge, a quarter of the frame"),
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[woman, figure], location=None)
+
+    w_block = prompt.split("CHARACTER fig1:")[0]
+    f_block = "CHARACTER fig1:" + prompt.split("CHARACTER fig1:")[1]
+    assert "jams the key at the lock" in w_block
+    assert "jams the key at the lock" not in f_block
+    assert "reaches over the car roof toward her" in f_block
+    assert "far left edge, a quarter of the frame" in f_block
+
+
+def test_a_multi_character_beat_demands_the_characters_react_to_each_other():
+    """The failure this addresses: "two independently-posed figures that
+    happen to share a frame" in all four beats of a real run."""
+    from historical_video_ai.stages.previz import _build_beat_prompt
+
+    chars = [
+        Character(id=cid, face_build="x", hair="x", wardrobe_signature="x",
+                  wardrobe_flexible="x", distinguishing_detail="x")
+        for cid in ("w1", "fig1")
+    ]
+    two = _build_beat_prompt(
+        _beat(staging=[_staging("w1"), _staging("fig1")]), characters=chars, location=None
+    )
+    one = _build_beat_prompt(
+        _beat(staging=[_staging("w1")]), characters=chars[:1], location=None
+    )
+
+    assert "must react to each other" in two
+    assert "must react to each other" not in one
+
+
+def test_staging_the_same_character_twice_is_rejected():
+    known = [Character(id="w1", face_build="x", hair="x", wardrobe_signature="x",
+                       wardrobe_flexible="x", distinguishing_detail="x")]
+    beat = _beat(staging=[_staging("w1"), _staging("w1", action="turns away")])
+    with pytest.raises(ScenePlanningError, match="stages the same character twice"):
+        check_beat_character_references([beat], known)
+
+
+def test_a_staging_entry_missing_its_action_is_rejected():
+    payload = _valid_payload()
+    payload["beats"][0]["staging"][0].pop("action")
+    with pytest.raises(ScenePlanningError, match="A staging entry"):
+        _parse_scene_plan(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        # Each rule the run's failures map onto, asserted so a prompt edit
+        # can't quietly drop one (docs/decisions/0049).
+        "are states, not actions",
+        "BECAUSE OF another character",
+        "must show in the BODY",
+        "Never encode",
+        "rendered dead centre",
+    ],
+)
+def test_planning_prompt_carries_the_staging_rules(phrase):
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    assert phrase in captured["messages"][0]["content"]
