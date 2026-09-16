@@ -742,6 +742,8 @@ def _generate_image_with_review(
     archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_reviewed: Callable[[str | None, int], str] | None = None,
+    initial_concerns: list[str] | None = None,
+    max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
     PrevizResult from the concerns accumulated so far -- a closure over
@@ -794,8 +796,19 @@ def _generate_image_with_review(
     --yes does.
     """
     attempts: list[dict] = []
-    previous_concerns: list[str] = []
-    for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
+    # Seeded rather than always empty: an (e)dit or (f)eedback ends this
+    # call and starts a fresh one, and the reviewer's concerns used to be
+    # thrown away at that boundary -- so adding a note of your own silently
+    # discarded everything the reviewer had said (docs/decisions/0043).
+    previous_concerns: list[str] = list(initial_concerns or [])
+    # `max_attempts=None` means no ceiling. The cap exists to stop an
+    # UNATTENDED run regenerating forever; once every attempt is an
+    # explicit human choice (docs/decisions/0043) it stops being a guard
+    # and becomes a refusal to do what was just asked for. Choosing
+    # (r)etry on the last allowed attempt silently behaved as a give-up.
+    attempt = 0
+    while max_attempts is None or attempt < max_attempts:
+        attempt += 1
         previz_result = generate_fn(previous_concerns)
         print(f"Image saved to {previz_result.image_path}")
         if on_image_generated is not None:
@@ -863,7 +876,7 @@ def _generate_image_with_review(
             previous_concerns.append(review.concern)
         if decision == "stop":
             break
-        if attempt < _MAX_PREVIZ_ATTEMPTS:
+        if max_attempts is None or attempt < max_attempts:
             print("Regenerating...")
 
     print(f"\nNo image kept for this beat after {len(attempts)} attempt(s).")
@@ -1581,6 +1594,11 @@ def _generate_beats_with_choices(
         location_ref = location_refs.get(beat.location_id)
         beat_out_dir = out_dir / f"beat_{i}"
 
+        # Spans attempt cycles, unlike the list inside
+        # _generate_image_with_review, which is per call. An (e)dit or
+        # (f)eedback starts a new call, and the reviewer's concerns must
+        # survive that (docs/decisions/0043).
+        carried_concerns: list[str] = []
         cycle = 0
         while True:
             cycle += 1
@@ -1598,7 +1616,15 @@ def _generate_beats_with_choices(
             beat_was_edited = False
             last_concern: str | None = None
 
-            def _on_reviewed(concern: str | None, attempt: int, i: int = i) -> str:
+            def _on_reviewed(
+                concern: str | None,
+                attempt: int,
+                i: int = i,
+                # Bound as a default like the other loop captures
+                # (ruff B023). It is mutated in place, not rebound,
+                # so the caller sees every append.
+                carried_concerns: list[str] = carried_concerns,
+            ) -> str:
                 """One prompt after every review, whatever the verdict.
 
                 The reviewer's opinion is shown above this as information
@@ -1623,11 +1649,29 @@ def _generate_beats_with_choices(
                     last_concern = concern
                     return "stop" if is_repeat else "continue"
 
+                if concern is not None:
+                    carried_concerns.append(concern)
+
+                # The retry option says what it actually does. It folds
+                # every concern so far into the next attempt's prompt, and
+                # nothing said so -- which led to the reasonable assumption
+                # that the reviewer's wording had to be copy-pasted in by
+                # hand via (f)eedback.
+                n_carried = len(carried_concerns)
+                retry_label = (
+                    f"(r)etry carrying {n_carried} review "
+                    f"concern{'' if n_carried == 1 else 's'}"
+                    if n_carried
+                    else "(r)etry"
+                )
                 choice = None
                 while choice not in ("a", "r", "e", "f", "g"):
+                    # No "/3": interactively there is no ceiling, so a
+                    # denominator would promise a limit that isn't there.
+                    # The running count is the cost signal instead.
                     choice = input(
-                        f"  Attempt {attempt}/{_MAX_PREVIZ_ATTEMPTS} -- "
-                        "(a)ccept / (r)etry / (e)dit the beat / "
+                        f"  Attempt {attempt} -- (a)ccept / "
+                        f"{retry_label} / (e)dit the beat / "
                         "(f)eedback then retry / (g)ive up: "
                     ).strip().lower()
                 if choice == "a":
@@ -1672,9 +1716,10 @@ def _generate_beats_with_choices(
             ) -> PrevizResult:
                 nonlocal attempt_n
                 attempt_n += 1
+                cap = f"/{_MAX_PREVIZ_ATTEMPTS}" if auto_yes else ""
                 print(
                     f"--- beat image (model: {previz_model}, "
-                    f"attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---"
+                    f"attempt {attempt_n}{cap}) ---"
                 )
                 return run_beat_image_stage(
                     _beat_with_review_corrections(beat, previous_concerns),
@@ -1707,6 +1752,8 @@ def _generate_beats_with_choices(
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
                 on_reviewed=_on_reviewed,
+                initial_concerns=carried_concerns,
+                max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
             )
 
             if previz_result is None:

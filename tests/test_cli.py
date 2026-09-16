@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
+    _MAX_PREVIZ_ATTEMPTS,
     _beat_gallery_dir,
     _check_video_prompt_practices,
     _confirm,
@@ -1008,23 +1009,53 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     assert results[0]["beat"]["action"] == "smiles warmly"
 
 
-def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected(
-    tmp_path, monkeypatch
-):
-    # Blank input at the on-rejection prompt means "keep auto-retrying" --
-    # this exercises the same all-3-attempts-rejected path as before that
-    # hook existed, just with the human declining to intervene each time.
-    monkeypatch.setattr("builtins.input", lambda _: "r")  # retry every time
+def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch):
+    """The cap exists to stop an UNATTENDED run regenerating forever. Once
+    every attempt is an explicit human choice, refusing one that was just
+    asked for is wrong -- choosing (r)etry on the last allowed attempt
+    silently behaved as a give-up, reported from a real run:
+
+        Attempt 3/3 -- ... / (r)etry carrying 3 review concerns / ...: r
+        No image kept for this beat after 3 attempt(s).
+    """
+    # Four retries -- one more than _MAX_PREVIZ_ATTEMPTS -- then accept.
+    responses = iter(["r", "r", "r", "r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")] * 3)}
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(False, "Wrong.")] * 4 + [(True, None)])
+    }
 
     results = _generate_beats_with_choices(
         scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
     )
 
+    assert results[0]["image_path"] is not None, "the 5th attempt was refused"
+    assert len(results[0]["attempts"]) == 5
+
+
+def test_an_unattended_run_still_stops_at_the_attempt_cap(tmp_path):
+    """--yes has no human to ask, so the ceiling still applies there."""
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion(
+            [(False, "One."), (False, "Two."), (False, "Three.")]
+        )
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        **kwargs,
+    )
+
     assert results[0]["image_path"] is None
-    assert len(results[0]["attempts"]) == 3
+    assert len(results[0]["attempts"]) <= _MAX_PREVIZ_ATTEMPTS
 
 
 def test_generate_beats_with_choices_folds_rejection_reason_into_next_attempts_prompt(
@@ -1994,3 +2025,76 @@ def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     # one image was ever generated before the human gave up.
     assert results[0]["image_path"] is None
     assert len(results[0]["attempts"]) == 1
+
+
+def test_feedback_keeps_the_reviewers_concerns_instead_of_discarding_them(tmp_path, monkeypatch):
+    """(f)eedback ends the attempt cycle and starts a fresh one, and the
+    reviewer's concerns used to be thrown away at that boundary -- so
+    adding a note of your own silently discarded everything the reviewer
+    had said, and the only way to keep both was to copy-paste the review
+    text in by hand."""
+    responses = iter(["r", "f", "make the shadow smaller", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    captured_prompts = []
+
+    def _capturing_image_fn(**kwargs):
+        captured_prompts.append(kwargs["prompt"])
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion(
+            [(False, "Concern ONE."), (False, "Concern TWO."), (True, None)]
+        )
+    }
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    third = captured_prompts[2]
+    assert "make the shadow smaller" in third, "the human's own note was lost"
+    assert "Fix this: Concern ONE." in third, "a concern from before the feedback was discarded"
+    assert "Fix this: Concern TWO." in third, "the concern that prompted the feedback was discarded"
+
+
+def test_the_retry_option_says_that_it_carries_the_concerns(tmp_path, monkeypatch):
+    """Nothing said (r)etry did anything, which led to the reasonable
+    assumption that the reviewer's wording had to be pasted in by hand."""
+    prompts_shown = []
+
+    def _capturing_input(prompt):
+        prompts_shown.append(prompt)
+        return "a"
+
+    monkeypatch.setattr("builtins.input", _capturing_input)
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Too bright.")])}
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert "(r)etry carrying 1 review concern " in prompts_shown[0]
+
+
+def test_the_retry_option_is_plain_when_the_review_had_no_concerns(tmp_path, monkeypatch):
+    prompts_shown = []
+
+    def _capturing_input(prompt):
+        prompts_shown.append(prompt)
+        return "a"
+
+    monkeypatch.setattr("builtins.input", _capturing_input)
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert "(r)etry /" in prompts_shown[0]
+    assert "carrying" not in prompts_shown[0]
