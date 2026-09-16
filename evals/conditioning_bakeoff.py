@@ -137,14 +137,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="print the plan, spend nothing")
     parser.add_argument("--mock", action="store_true", help="run end to end with fake images")
-    parser.add_argument("--reference", type=Path, help="a location reference image to condition on")
+    parser.add_argument(
+        "--reference",
+        type=Path,
+        help="a location reference to condition on. Omitted, one is generated from the same "
+        "LOCATION text below -- which is what the pipeline actually does, and avoids "
+        "conditioning a hallway prompt on an unrelated room.",
+    )
     parser.add_argument("--conditions", default=",".join(CONDITIONS))
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
     conditions = {k: CONDITIONS[k] for k in args.conditions.split(",")}
-    total = len(conditions) * len(BEATS)
-    print(f"{len(conditions)} condition(s) x {len(BEATS)} beat(s) = {total} images")
+    n_ref = 1 if any(c["use_ref"] for c in conditions.values()) and not args.reference else 0
+    total = len(conditions) * len(BEATS) + n_ref
+    print(
+        f"{len(conditions)} condition(s) x {len(BEATS)} beat(s)"
+        + (" + 1 generated location reference" if n_ref else "")
+        + f" = {total} images"
+    )
     for name, cond in conditions.items():
         ref = "reference" if cond["use_ref"] else f"no reference, seed {_SEED}"
         strength = f" @ prompt_strength {cond['strength']}" if "strength" in cond else ""
@@ -153,16 +164,38 @@ def main() -> None:
         print("\n--dry-run: nothing called, nothing spent.")
         return
 
-    # Checked after the dry run, not before: a dry run spends nothing and
-    # should work without a reference to hand.
-    needs_ref = [k for k, c in conditions.items() if c["use_ref"]]
-    if needs_ref and not args.reference and not args.mock:
-        parser.error(f"--reference is required for: {', '.join(needs_ref)}")
 
     if not args.mock:
         load_environment()
     run_dir = EVALS_DIR / "results" / f"conditioning-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     run_dir.mkdir(parents=True)
+
+    # Generated from the same LOCATION text rather than required as an
+    # argument. The beats describe one specific hallway, so conditioning on
+    # some other room would measure confusion rather than consistency -- and
+    # generating it here is what the pipeline itself does.
+    reference_path = args.reference
+    if any(c["use_ref"] for c in conditions.values()) and reference_path is None:
+        reference_path = run_dir / "_the_reference.png"
+        ref_prompt = (
+            f"{LOCATION}\n"
+            "CAMERA: wide establishing shot, eye level, no person in frame -- this is a "
+            "location reference, not a character shot.\n"
+            f"STYLE: {STYLE}"
+        )
+        # Generated on whichever model the conditions actually use, rather
+        # than hardcoding one: the reference is shared across conditions, so
+        # tying it to a provider that may be out of credit would block the
+        # whole experiment over a single setup image.
+        ref_model = next(iter(conditions.values()))["model"]
+        data = (
+            base64.b64decode(_TINY_PNG_B64)
+            if args.mock
+            else _generate({"model": ref_model, "use_ref": False}, ref_prompt, None)
+        )
+        print(f"  (reference generated on {ref_model})")
+        reference_path.write_bytes(data)
+        print(f"generated location reference -> {reference_path.name}")
 
     rng = random.Random(args.seed)
     labels = [chr(ord("P") + n) for n in range(len(conditions))]
@@ -174,7 +207,7 @@ def main() -> None:
         for label, cond_name in key.items():
             cond = conditions[cond_name]
             prompt = f"{beat}\n{LOCATION}\nSTYLE: {STYLE}"
-            reference = args.reference if cond["use_ref"] else None
+            reference = reference_path if cond["use_ref"] else None
             try:
                 data = (
                     base64.b64decode(_TINY_PNG_B64)
