@@ -426,7 +426,37 @@ def test_build_character_sheet_prompt_includes_all_character_fields():
     assert "light brown wavy" in prompt
     assert "white crop top, gray leggings" in prompt
     assert "a glowing phone" in prompt
-    assert "reference sheet, not a story moment" in prompt
+
+
+def test_character_sheet_is_an_in_world_frame_not_a_turnaround():
+    """docs/decisions/0040. Every beat is generated as an edit of this
+    image, so whatever it establishes as normal the beats inherit. The
+    previous version specified a grey void, shadowless studio light, a
+    centred eye-level camera and a calm neutral expression, and every beat
+    then had to fight all four. A blind A/B chose it 0 times out of 9."""
+    prompt = build_character_sheet_prompt(_character())
+
+    # In-world, not a studio backdrop.
+    assert "shadowless" not in prompt
+    assert "neutral backdrop" not in prompt
+    assert "eye-level, centered" not in prompt
+    assert "calm neutral" not in prompt
+
+    assert "hard, directional source" in prompt
+    assert "off-centre in frame" in prompt
+    assert "alert and uneasy" in prompt
+
+
+def test_character_sheet_asks_for_exactly_one_figure():
+    """Listing a signature and a flexible wardrobe made the model render a
+    two-figure turnaround, so every beat was conditioned on an image
+    containing two people."""
+    prompt = build_character_sheet_prompt(_character())
+    assert "Exactly ONE person" in prompt
+    assert "no second figure" in prompt
+    # The flexible wardrobe is what produced the second figure, so it is
+    # deliberately not in this prompt.
+    assert "accessories may vary" not in prompt
 
 
 def test_build_location_reference_prompt_includes_all_location_fields():
