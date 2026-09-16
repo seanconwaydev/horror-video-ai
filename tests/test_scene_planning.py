@@ -16,6 +16,7 @@ from historical_video_ai.stages.scene_planning import (
     _resolve_threat_mode,
     check_beat_character_references,
     check_cinematography_is_not_a_style_claim,
+    check_identity_fields_describe_appearance,
     run_scene_planning_stage,
 )
 
@@ -826,3 +827,62 @@ def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():
     prompt = captured["messages"][0]["content"]
     assert "LIST ITS ID in `character_ids`" in prompt
     assert "EVERY character visible in that shot" in prompt
+
+
+# --- identity fields describe appearance, never behaviour (ADR 0042) ---
+
+
+def _char(**overrides) -> Character:
+    fields_ = {
+        "id": "fig", "face_build": "gaunt, elongated face", "hair": "no visible hair",
+        "wardrobe_signature": "charcoal overcoat", "wardrobe_flexible": "collar up or flat",
+        "distinguishing_detail": "a thin white scar through one eyebrow",
+    }
+    fields_.update(overrides)
+    return Character(**fields_)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # The real failure: a stalking figure's pose written into its
+        # identity, then emitted into all four beat prompts.
+        {"distinguishing_detail": "Stands perfectly still with both arms straight at its "
+                                  "sides and its head tilted slightly to one shoulder."},
+        {"face_build": "Sits hunched over whenever indoors"},
+        {"hair": "Holds a lantern that lights it from below"},
+    ],
+)
+def test_pose_in_an_identity_field_is_rejected(overrides):
+    with pytest.raises(ScenePlanningError, match="pose or behaviour"):
+        check_identity_fields_describe_appearance([_char(**overrides)])
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"distinguishing_detail": "a thin white scar through the right eyebrow"},
+        {"face_build": "softly rounded face with freckles across the nose"},
+        # "standing collar" is a garment, not a pose -- the leading-verb
+        # check is anchored to the start of the field for this reason.
+        {"wardrobe_signature": "a wool coat with a standing collar"},
+        {"hair": "buzzed very short, sitting close to the scalp"},
+    ],
+)
+def test_genuine_appearance_descriptions_are_allowed(overrides):
+    check_identity_fields_describe_appearance([_char(**overrides)])
+
+
+def test_planning_prompt_tells_the_planner_identity_fields_are_appearance_only():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    prompt = captured["messages"][0]["content"]
+    assert "never what they are doing" in prompt
+    assert "an instruction the character can never escape" in prompt
