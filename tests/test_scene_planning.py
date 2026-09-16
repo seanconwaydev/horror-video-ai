@@ -11,11 +11,12 @@ from historical_video_ai.stages.scene_planning import (
     Beat,
     Character,
     ScenePlanningError,
+    _parse_scene_plan,
     _random_character_trait_hint,
     _resolve_composition_mode,
     _resolve_threat_mode,
     check_beat_character_references,
-    check_identity_fields_describe_appearance,
+    identity_field_pose_warnings,
     run_scene_planning_stage,
 )
 
@@ -801,9 +802,8 @@ def _char(**overrides) -> Character:
         {"hair": "Holds a lantern that lights it from below"},
     ],
 )
-def test_pose_in_an_identity_field_is_rejected(overrides):
-    with pytest.raises(ScenePlanningError, match="pose or behaviour"):
-        check_identity_fields_describe_appearance([_char(**overrides)])
+def test_pose_in_an_identity_field_warns(overrides):
+    assert identity_field_pose_warnings([_char(**overrides)])
 
 
 @pytest.mark.parametrize(
@@ -811,14 +811,33 @@ def test_pose_in_an_identity_field_is_rejected(overrides):
     [
         {"distinguishing_detail": "a thin white scar through the right eyebrow"},
         {"face_build": "softly rounded face with freckles across the nose"},
-        # "standing collar" is a garment, not a pose -- the leading-verb
-        # check is anchored to the start of the field for this reason.
         {"wardrobe_signature": "a wool coat with a standing collar"},
         {"hair": "buzzed very short, sitting close to the scalp"},
     ],
 )
 def test_genuine_appearance_descriptions_are_allowed(overrides):
-    check_identity_fields_describe_appearance([_char(**overrides)])
+    assert identity_field_pose_warnings([_char(**overrides)]) == []
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "Stands perfectly still with both arms straight at its sides.",
+        # The exact string from the real run that this ADR is about: a
+        # description of height the heuristic reads as a posture verb.
+        (
+            "stands a full head taller than an ordinary adult, with wrists so "
+            "thin the glove leather hangs loose and bunched at the cuff"
+        ),
+    ],
+)
+def test_a_posed_identity_field_does_not_fail_the_parse(detail):
+    """The check warns; it must never kill a run after a paid planning
+    call and before the human can edit anything (docs/decisions/0048)."""
+    payload = _valid_payload()
+    payload["characters"][0]["distinguishing_detail"] = detail
+    plan = _parse_scene_plan(json.dumps(payload))
+    assert plan.characters[0].distinguishing_detail == detail
 
 
 def test_planning_prompt_tells_the_planner_identity_fields_are_appearance_only():
