@@ -180,6 +180,24 @@ def _resolve_composition_mode(genre: str | None, tone: str | None) -> str:
     return "staged"
 
 
+# docs/decisions/0052: framing vocabulary is craft, not a genre trait, so
+# it is unconditional -- the two mode rules below layer a genre-specific
+# instinct on top of it rather than being the only place composition is
+# ever discussed.
+_BASE_COMPOSITION_RULE = """\
+- A beat's `camera` must make one deliberate compositional choice about \
+the whole frame, not just name a lens, a height and a distance. State at \
+least one concretely: the subject placed well off-centre with the empty \
+side of the frame left genuinely empty; something solid in the near \
+foreground the shot looks past (a doorframe, the back of a chair, a \
+shoulder) so the frame has depth; the location's own lines (a hallway's \
+walls, a stair rail, a window frame) leading toward the subject or boxing \
+them in; or the subject small and low in a frame mostly filled by the \
+space around them. "Medium shot, eye level, centred on her" is what the \
+image model already produces unasked -- it is the absence of a choice, \
+not a choice.
+"""
+
 _STAGED_COMPOSITION_RULE = """\
 - Every beat should communicate ONE clear, legible focal action or \
 emotion a viewer can read at a glance (the animation principle of \
@@ -468,10 +486,9 @@ camera change layered onto an otherwise identical composition.
 doing across beats -- avoid repeating the same standing position, \
 orientation, and pose in consecutive beats at the same location. Give \
 each beat a distinct, concrete physical action (reaching, turning, \
-stepping, sitting, gesturing) unless stillness is specifically the point \
-of that beat. A slightly different look for the character between beats \
-(hair catching light differently, a minor pose-driven wardrobe shift) is \
-fine and expected -- prioritize dynamic, believable movement over rigid \
+stepping, sitting, gesturing). A slightly different look for the \
+character between beats (hair catching light differently, a minor \
+pose-driven wardrobe shift) is fine and expected -- prioritize dynamic, believable movement over rigid \
 visual sameness.
 - For a character who doesn't belong to the historical setting (a \
 modern-day visitor, time traveler, narrator), describe \
@@ -518,12 +535,11 @@ stool," "her forearm rests on the counter's edge") rather than leaving \
 the spatial relationship implicit -- image models have a documented \
 tendency to merge a limb into nearby furniture with no clear boundary \
 between them when contact isn't specified precisely.
-- EVERY character in a beat gets a `staging` entry, and every entry's \
-`action` must be a physical action done TO someone or something -- \
-reaching for a door handle, stepping between two pillars, turning away \
-from the noise, pressing a palm flat to the wall. "Stands", "is present", \
-"waits", "watches" and "is visible" are states, not actions; a character \
-given one of those is rendered upright, arms at sides, facing camera, \
+- Every `staging` entry's `action` must be a physical action done TO \
+someone or something -- reaching for a door handle, stepping between two \
+pillars, turning away from the noise, pressing a palm flat to the wall. \
+"Stands", "is present", "waits", "watches" and "is visible" are states, \
+not actions; a character given one of those is rendered upright, arms at sides, facing camera, \
 like a character-select screen. This applies to a background or \
 partially-hidden character exactly as much as to the focal one.
 - In EVERY beat with more than one character, at least one `staging` \
@@ -541,7 +557,7 @@ and got one motionless man rendered at four zoom levels.
 - Give EVERY character a `frame_position`, including the focal one. A \
 character with no stated position is rendered dead centre, which is the \
 dullest possible framing; say which side of the frame they sit in, and \
-let the subject sit off-centre unless centring them is the point.
+let the subject sit off-centre.
 - If a Genre and/or Tone are given above, let them actually shape staging, \
 expression, and wardrobe choices -- a comedic/ironic tone reads through \
 confident, knowing expressions and poses (not just a funny premise \
@@ -776,7 +792,18 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
 
 def _parse_scene_plan(raw_content: str) -> ScenePlan:
     data = parse_json_response(raw_content, ScenePlanningError, "Scene-planning response")
+    return load_scene_plan(data)
 
+
+def load_scene_plan(data: object) -> ScenePlan:
+    """Build a ScenePlan from an already-decoded plan object -- the model's
+    response and a saved plan read back off disk take the same path.
+
+    Public because the eval harness reads plans from JSON too; it built
+    beats with `Beat(**beat)` and so got plain dicts where `staging`
+    should have been, which fails at the first attribute access rather
+    than at parse time (docs/playbook/repo-audit-brief.md, finding 4).
+    """
     if not isinstance(data, dict):
         raise ScenePlanningError("Scene-planning response is not a JSON object")
 
@@ -870,7 +897,8 @@ def run_scene_planning_stage(
     -- a second early, closed-set routing signal, selecting between
     `_STAGED_COMPOSITION_RULE` and `_CHAOTIC_COMPOSITION_RULE` -- rather
     than the LLM inferring which composition instinct applies from one
-    rule's inline prose hedges.
+    rule's inline prose hedges. Both are layered on top of
+    `_BASE_COMPOSITION_RULE`, which every run gets (docs/decisions/0052).
 
     `genre`/`tone` also resolve a third such signal, whether
     `_THREAT_PRESENCE_RULE` applies -- keeps a horror/suspense scene's
@@ -917,7 +945,10 @@ def run_scene_planning_stage(
             genre_tone_line=genre_tone_line,
             max_beats_line=max_beats_line,
         )
-    composition_rule = _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]
+    composition_rule = (
+        _BASE_COMPOSITION_RULE
+        + _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]
+    )
     threat_rule = _THREAT_RULES[_resolve_threat_mode(genre, tone)]
     character_variety_rule = _CHARACTER_VARIETY_RULE.format(
         character_trait_hint=_random_character_trait_hint(rng or random.Random())

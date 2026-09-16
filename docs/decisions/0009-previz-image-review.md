@@ -4,6 +4,10 @@ Date: 2026-08-24
 
 Status: Accepted
 
+Superseded by [0043](./0043-one-review-prompt-the-human-decides.md) on the review
+flow and by [0051](./0051-remove-the-single-image-previz-flow.md) on the
+single-image flow it reviewed.
+
 ## Context
 
 A real run (`1920 New York` / "a group of people see godzilla in the

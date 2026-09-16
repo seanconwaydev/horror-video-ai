@@ -4,6 +4,9 @@ Date: 2026-08-28
 
 Status: Accepted
 
+Implementation half superseded by
+[0038](./0038-video-generation-on-replicate-and-moderation-rescope.md).
+
 ## Context
 
 A real `--video-gen-from` run against an approved previz image (Agent Voss

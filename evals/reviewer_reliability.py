@@ -32,7 +32,7 @@ from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import run_previz_review_stage
 from historical_video_ai.stages.research import FactSheet
-from historical_video_ai.stages.scene_planning import Beat, Character
+from historical_video_ai.stages.scene_planning import load_scene_plan
 
 EVALS_DIR = Path(__file__).parent
 
@@ -45,9 +45,9 @@ def main() -> None:
     args = parser.parse_args()
 
     raw = json.loads((EVALS_DIR / "anchor_scene.json").read_text())
-    scene, plan = raw["scene"], raw["plan"]
-    character = Character(**plan["characters"][0])
-    beats = [Beat(**b) for b in plan["beats"]]
+    scene = raw["scene"]
+    plan = load_scene_plan(raw["plan"])
+    character, beats = plan.characters[0], plan.beats
 
     images = sorted(args.run_dir.glob("arm_*/beat_*.png"))
     print(f"{len(images)} image(s) x {args.repeats} repeat(s) = {len(images) * args.repeats} review calls")

@@ -725,6 +725,67 @@ def test_run_scene_planning_stage_uses_staged_composition_rule_by_default():
     assert "Commit fully to a strange, asymmetric, or chaotic composition" not in prompt
 
 
+# docs/decisions/0052: the framing vocabulary used to live only in the
+# chaotic rule, so horror -- which matches no chaotic keyword -- could
+# never reach it. It is unconditional now, so both modes must carry it.
+@pytest.mark.parametrize(
+    ("genre", "tone"),
+    [
+        ("horror", "dread"),  # the gap 0052 was written for
+        ("historical", None),  # staged, the default
+        ("surreal photo collage", "deadpan"),  # chaotic
+    ],
+)
+def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, tone):
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre=genre,
+        tone=tone,
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "one deliberate compositional choice about the whole frame" in prompt
+    assert "the subject placed well off-centre" in prompt
+
+
+# docs/decisions/0049 diagnosed a buried conditional losing to a concrete
+# rule elsewhere. Two rules still ended with an "unless X is the point"
+# hatch -- the stillness one licensed exactly the T-posing 0049 exists to
+# stop (docs/playbook/repo-audit-brief.md, finding 1).
+def test_planning_rules_carry_no_unless_its_the_point_escape_hatches():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "unless stillness is specifically the point" not in prompt
+    assert "unless centring them is the point" not in prompt
+
+
 def test_beat_renders_every_named_character_and_says_all_are_present():
     from historical_video_ai.stages.previz import _build_beat_prompt
 

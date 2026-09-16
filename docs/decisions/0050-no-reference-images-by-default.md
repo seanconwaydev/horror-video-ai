@@ -4,10 +4,10 @@ Date: 2026-09-16
 
 ## Status
 
-Accepted. Supersedes [0024](0024-reference-image-conditioning.md) on the
+Accepted. Supersedes [0024](0024-previz-image-conditioning.md) on the
 question of whether reference conditioning should be on by default; the
 mechanism 0024 built stays, behind `--references`
-([0047](0047-references-are-optional.md)).
+([0047](0047-reference-conditioning-becomes-optional.md)).
 
 ## Context
 
@@ -20,7 +20,7 @@ measured.
 Two things changed underneath that premise without anyone re-measuring
 it. Locations stopped being a single prose blob and became structured
 `architecture` / `fixed_props` / `ambient_light` fields. And the run
-gained committed style presets ([0033](0033-style-presets.md)), so the
+gained committed style presets ([0033](0033-single-authoritative-style-source.md)), so the
 art direction is now stated identically in every beat prompt instead of
 being re-invented per beat.
 
@@ -73,6 +73,6 @@ in 0024. It claims the premise it rested on was fixed by later work --
 structured locations and committed style presets -- and that nobody
 re-checked the original finding afterwards. That pattern, a decision
 outliving the premise that justified it, is the same one recorded in
-[0044](0044-camera-direction-is-not-promptable.md) and
-[0037](0037-horror-motion-comic-wan.md); a superseding ADR should name
+[0044](0044-camera-specified-at-a-granularity-models-follow.md) and
+[0037](0037-horror-motion-comic-shorts-wan-via-replicate.md); a superseding ADR should name
 which other decisions rested on the premise it removes.

@@ -4,6 +4,9 @@ Date: 2026-09-01
 
 Status: Accepted
 
+Its single-character simplification superseded by
+[0041](./0041-beats-name-every-character-present.md).
+
 ## Context
 
 Every real multi-beat scene built so far (Agent Voss, the Pompeii influencer

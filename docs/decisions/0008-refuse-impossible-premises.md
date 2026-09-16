@@ -4,6 +4,11 @@ Date: 2026-08-24
 
 Status: Accepted
 
+Superseded in part by [0025](./0025-keep-premise-conflict-as-intentional-fiction.md)
+(the refusal became an intentional-fiction path) and finally by
+[0051](./0051-remove-the-single-image-previz-flow.md), which deleted the refusal
+with the flow that carried it.
+
 ## Context
 
 Manual testing (`--time "1995 sept 20" --place "harbin, china" --description

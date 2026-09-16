@@ -4,6 +4,10 @@ Date: 2026-08-25
 
 Status: Accepted
 
+Superseded in part by [0020](./0020-video-seconds-validated-client-side.md)
+(client-side validation) and in its implementation half by
+[0038](./0038-video-generation-on-replicate-and-moderation-rescope.md).
+
 ## Context
 
 Testing the video-generation stage against a more deliberately "commercial"

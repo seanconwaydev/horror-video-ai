@@ -4,6 +4,8 @@ Date: 2026-08-25
 
 Status: Accepted
 
+Stated rationale voided by [0038](./0038-video-generation-on-replicate-and-moderation-rescope.md).
+
 ## Context
 
 Building stage 9 ([0010](./0010-video-generation-model-and-standalone-stage.md))

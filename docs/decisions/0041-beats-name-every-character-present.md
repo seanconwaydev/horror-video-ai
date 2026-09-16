@@ -4,6 +4,9 @@ Date: 2026-09-16
 
 Status: Accepted
 
+Its `character_ids` field superseded by
+[0049](./0049-per-character-staging-in-beats.md).
+
 Supersedes the single-character simplification carried since [0023](./0023-scene-planning-stage.md)/[0024](./0024-previz-image-conditioning.md).
 
 ## Context

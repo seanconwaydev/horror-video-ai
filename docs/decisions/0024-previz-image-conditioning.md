@@ -4,6 +4,12 @@ Date: 2026-09-01
 
 Status: Accepted
 
+Its single-character simplification superseded by
+[0041](./0041-beats-name-every-character-present.md); made optional by
+[0047](./0047-reference-conditioning-becomes-optional.md) and turned off by
+default by [0050](./0050-no-reference-images-by-default.md). The mechanism it
+built stays.
+
 ## Context
 
 `run_previz_stage` (`stages/previz.py`) only ever does plain text-to-image
