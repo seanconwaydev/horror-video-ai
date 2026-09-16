@@ -1505,6 +1505,8 @@ def _generate_scene_references(
     out_dir: Path,
     style: str = DEFAULT_STYLE,
     auto_yes: bool = False,
+    want_character: bool = True,
+    want_location: bool = True,
 ) -> tuple[dict[str, Path], dict[str, Path]]:
     """Generate one canonical reference image per Character and per
     Location in scene_plan (docs/decisions/0024). Each gets its own
@@ -1516,7 +1518,7 @@ def _generate_scene_references(
     Returns (character_refs, location_refs), each a dict keyed by id.
     """
     character_refs: dict[str, Path] = {}
-    for i, character in enumerate(scene_plan.characters, start=1):
+    for i, character in enumerate(scene_plan.characters if want_character else [], start=1):
         prompt = build_character_sheet_prompt(character, style=style)
         while True:
             print(
@@ -1545,7 +1547,7 @@ def _generate_scene_references(
             print(f"Previous attempt kept at {archived.name}. Regenerating...")
 
     location_refs: dict[str, Path] = {}
-    for i, location in enumerate(scene_plan.locations, start=1):
+    for i, location in enumerate(scene_plan.locations if want_location else [], start=1):
         prompt = build_location_reference_prompt(location, style=style)
         while True:
             print(f"\n--- location reference '{location.id}' ({i}/{len(scene_plan.locations)}) ---")
@@ -2016,6 +2018,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--references",
+        choices=["both", "location", "character", "none"],
+        default="both",
+        help=(
+            "Which reference images to condition beats on (docs/decisions/0024, 0047). "
+            "'both' is the previous behaviour. 'none' generates no references at all and "
+            "relies on the character and location text already present in every beat "
+            "prompt. The middle options exist because the two references may not be "
+            "earning their keep equally: a location reference was introduced to stop "
+            "cross-beat setting drift, and a character reference to hold identity, but "
+            "both also pin composition."
+        ),
+    )
+    parser.add_argument(
         "--candidates",
         type=int,
         default=1,
@@ -2310,13 +2326,21 @@ def main() -> None:
     # attempts. Rerolls/edits from the human choices below aren't counted
     # here since they're open-ended by nature -- this is the floor and the
     # automatic-review ceiling, not an absolute cap.
-    num_references = len(scene_plan.characters) + len(scene_plan.locations)
+    # Counts only the references this run will actually generate, and the
+    # candidates each beat attempt will actually cost. Both were previously
+    # ignored here, so the figure a human confirmed against could be several
+    # times under the real spend.
+    num_references = (len(scene_plan.characters) if args.references in ("both", "character") else 0) + (
+        len(scene_plan.locations) if args.references in ("both", "location") else 0
+    )
     num_beats = len(scene_plan.beats)
-    min_images = num_references + num_beats
-    max_images = num_references + num_beats * _MAX_PREVIZ_ATTEMPTS
+    per_attempt = num_beats * args.candidates
+    min_images = num_references + per_attempt
+    max_images = num_references + per_attempt * _MAX_PREVIZ_ATTEMPTS
+    candidate_note = f" x {args.candidates} candidates" if args.candidates > 1 else ""
     print(
         f"\nThis scene plan needs {num_references} reference image(s) + {num_beats} beat "
-        f"image(s) = {min_images} previz image(s) minimum "
+        f"image(s){candidate_note} = {min_images} previz image(s) minimum "
         f"({_estimate_image_cost(previz_model, min_images)}), up to {max_images} if every "
         f"beat needs all {_MAX_PREVIZ_ATTEMPTS} automatic review attempts "
         f"({_estimate_image_cost(previz_model, max_images)})."
@@ -2338,7 +2362,18 @@ def main() -> None:
         out_dir=out_dir,
         style=args.style,
         auto_yes=args.yes,
+        want_character=args.references in ("both", "character"),
+        want_location=args.references in ("both", "location"),
     )
+    if args.references != "both":
+        print(
+            f"\n--references {args.references}: beats will be conditioned on "
+            + (
+                "no reference images at all."
+                if args.references == "none"
+                else f"the {args.references} reference only."
+            )
+        )
     log["character_references"] = {k: str(v) for k, v in character_refs.items()}
     log["location_references"] = {k: str(v) for k, v in location_refs.items()}
     _write_log(out_dir, log)

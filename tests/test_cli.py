@@ -2194,3 +2194,68 @@ def test_unattended_runs_take_the_first_candidate(tmp_path):
     )
 
     assert results[0]["image_path"].endswith("candidate_1_1.png")
+
+
+# --- references are optional (ADR 0047) ---
+
+
+@pytest.mark.parametrize(
+    ("want_character", "want_location", "expect_char", "expect_loc"),
+    [(True, True, 1, 1), (False, True, 0, 1), (True, False, 1, 0), (False, False, 0, 0)],
+)
+def test_reference_generation_can_be_turned_off_per_kind(
+    tmp_path, monkeypatch, want_character, want_location, expect_char, expect_loc
+):
+    """Each reference is a separate hypothesis: a location reference was
+    added to stop cross-beat setting drift, a character reference to hold
+    identity. Both also pin composition, so they need to be testable apart."""
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    calls = {"n": 0}
+
+    def _image_fn(**kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    character_refs, location_refs = _generate_scene_references(
+        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        previz_model="gemini/gemini-2.5-flash-image",
+        image_kwargs={"image_fn": _image_fn},
+        out_dir=tmp_path,
+        want_character=want_character,
+        want_location=want_location,
+    )
+
+    assert len(character_refs) == expect_char
+    assert len(location_refs) == expect_loc
+    assert calls["n"] == expect_char + expect_loc, "should not pay for a reference it won't use"
+
+
+def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, monkeypatch):
+    """The whole point: every beat prompt already carries the character and
+    location text, so nothing is lost but the conditioning images."""
+    monkeypatch.setattr("builtins.input", lambda _: "a")
+    seen = []
+
+    def _image_fn(**kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    def _edit_fn(**kwargs):
+        raise AssertionError("image_edit must not be called with no references")
+
+    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_image_fn)
+    kwargs["image_kwargs"]["edit_fn"] = _edit_fn
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        **kwargs,
+    )
+
+    assert results[0]["image_path"] is not None
+    # The character's own description still reaches the model as text.
+    assert "white crop top" in seen[0]["prompt"]
