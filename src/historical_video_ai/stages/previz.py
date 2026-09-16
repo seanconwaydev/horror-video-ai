@@ -665,9 +665,24 @@ def run_previz_review_stage(
                 f"{character.distinguishing_detail}"
             )
         if beat is not None:
+            # Every planned field, not just subject/action. The threat in a
+            # horror beat is specified in `lighting` -- scene_planning's own
+            # threat rule requires its placement and occlusion to be stated
+            # there -- so a reviewer shown only the action had no idea the
+            # monster was planned, and rejected real runs for "an unplanned
+            # humanoid silhouette figure". It was burning all three paid
+            # attempts on exactly the beats that had worked.
+            #
+            # docs/decisions/0032 anticipated this: it noted that a further
+            # recurrence of "reviewer re-derives something the plan already
+            # approved" should mean handing over the whole plan rather than
+            # adding one more named exception. This is that.
             planned_lines.append(
-                f"- This beat's action was already deliberately planned -- do NOT "
-                f"flag it as wrong on its own terms: {beat.subject} {beat.action}"
+                f"- This beat was already deliberately planned in full -- do NOT "
+                f"flag any of it as wrong on its own terms, and in particular do "
+                f"NOT report anything described here as unplanned or unexpected. "
+                f"SUBJECT: {beat.subject}. ACTION: {beat.action} "
+                f"CAMERA: {beat.camera} LIGHTING: {beat.lighting}"
             )
         planned_details_block = (
             "\nThe following specific details were already deliberately planned "
