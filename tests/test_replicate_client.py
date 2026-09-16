@@ -5,6 +5,7 @@ import pytest
 from historical_video_ai.replicate_client import (
     API_BASE,
     ReplicateError,
+    _default_request_fn,
     download_output,
     file_to_data_uri,
     resolve_api_token,
@@ -134,3 +135,83 @@ def test_download_output_returns_content_and_rejects_an_empty_body():
 
     with pytest.raises(ReplicateError, match="was empty"):
         download_output("http://x/y", download_fn=lambda url: b"")
+
+
+# --- throttling and transient transport errors (ADR 0045) ---
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None, headers=None, text=""):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self.headers = headers or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def test_request_retries_a_throttle_and_waits_what_the_api_says(monkeypatch):
+    """Replicate drops to 6 requests/minute with a burst of 1 below $5 of
+    credit. A real run lost 6 of 10 images to that, and the API itself says
+    when the window reopens -- so wait that long rather than guessing."""
+    responses = iter(
+        [
+            _FakeResponse(429, {"retry_after": 3, "detail": "throttled"}),
+            _FakeResponse(429, {"retry_after": 2, "detail": "throttled"}),
+            _FakeResponse(200, {"id": "p1", "status": "succeeded"}),
+        ]
+    )
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+    )
+    slept = []
+
+    result = _default_request_fn(
+        "POST", "http://x", headers={}, json_body=None, sleep_fn=slept.append
+    )
+
+    assert result == {"id": "p1", "status": "succeeded"}
+    assert slept == [3.0, 2.0], "should wait exactly what the API asked for"
+
+
+def test_request_prefers_the_retry_after_header_over_the_body(monkeypatch):
+    responses = iter(
+        [
+            _FakeResponse(429, {"retry_after": 99}, headers={"retry-after": "4"}),
+            _FakeResponse(200, {"ok": True}),
+        ]
+    )
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+    )
+    slept = []
+
+    _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=slept.append)
+
+    assert slept == [4.0]
+
+
+def test_request_does_not_retry_a_client_error(monkeypatch):
+    """A 404 or a bad payload will fail identically forever -- retrying it
+    just delays the error."""
+    calls = {"n": 0}
+
+    def _once(*a, **k):
+        calls["n"] += 1
+        return _FakeResponse(404, text="no such model")
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _once)
+
+    with pytest.raises(ReplicateError, match="404"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
+    assert calls["n"] == 1
+
+
+def test_request_gives_up_after_the_retry_budget(monkeypatch):
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request",
+        lambda *a, **k: _FakeResponse(429, {"retry_after": 1}, text="throttled"),
+    )
+    with pytest.raises(ReplicateError, match="429"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
