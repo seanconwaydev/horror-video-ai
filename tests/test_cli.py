@@ -11,6 +11,7 @@ from historical_video_ai.cli import (
     _check_video_prompt_practices,
     _confirm,
     _generate_beats_with_choices,
+    _generate_image_with_review,
     _generate_previz_with_review,
     _generate_scene_references,
     _link_beat_into_gallery,
@@ -29,6 +30,7 @@ from historical_video_ai.cli import (
     _slugify,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
+from historical_video_ai.stages.previz import PrevizResult
 from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
 
@@ -1725,3 +1727,109 @@ def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatc
     )
 
     assert result is None
+
+
+# --- archived attempts must never be overwritten by a later cycle ---
+
+
+def _rejecting_generate_fn(out_dir, image_name="previz.png"):
+    """A generate_fn that writes a real file each call, like the real one."""
+    counter = {"n": 0}
+
+    def _generate(previous_concerns):
+        counter["n"] += 1
+        path = out_dir / image_name
+        path.write_bytes(f"image bytes {counter['n']}".encode())
+        return PrevizResult(image_path=path, prompt_used=f"prompt {counter['n']}")
+
+    return _generate
+
+
+def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
+    """Regression test for a real data-loss bug found in a paid run.
+
+    A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
+    fresh `_generate_image_with_review` call against the same directory
+    and the same `archive_prefix`. Its attempt counter restarts at 1, so
+    it reused `<prefix>_1_rejected.png` -- and `Path.rename` replaces the
+    destination silently on POSIX, destroying the earlier cycle's already
+    paid-for images with no warning.
+    """
+    out_dir = tmp_path / "beat_1"
+    out_dir.mkdir()
+    common = {
+        "review_model": "anthropic/claude-sonnet-5",
+        "out_dir": out_dir,
+        "archive_prefix": "beat1_attempt",
+    }
+
+    # One generator across both cycles, so every image has distinct bytes
+    # and an overwrite can't hide behind identical content.
+    generate_fn = _rejecting_generate_fn(out_dir)
+    for _ in range(2):
+        _generate_image_with_review(
+            generate_fn,
+            _fact_check_result_for_previz(),
+            review_kwargs={
+                "completion_fn": _fake_review_completion(
+                    [(False, "no"), (False, "no"), (False, "no")]
+                )
+            },
+            **common,
+        )
+
+    archived = sorted(p.name for p in out_dir.glob("*_rejected.png"))
+    assert len(archived) == 6, (
+        f"expected both cycles' 3 rejected attempts to survive, found {archived}"
+    )
+    # Every archived file must have distinct content -- an overwrite would
+    # leave the right count only if names collided, so check bytes too.
+    assert len({(out_dir / name).read_bytes() for name in archived}) == 6
+
+
+def test_each_finished_beat_is_persisted_immediately(tmp_path):
+    """Regression test for a real run that was interrupted partway and
+    recorded zero beats in its log, despite two having been accepted and
+    paid for. The images survived; the metadata pairing them with their
+    prompts -- what --video-gen-from needs -- did not."""
+    scene_plan = ScenePlan(
+        characters=[], locations=[_location()], beats=[_beat(), _beat(), _beat()]
+    )
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(True, None)] * 3)
+    }
+    snapshots = []
+
+    _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        on_beat_complete=lambda results: snapshots.append(len(results)),
+        **kwargs,
+    )
+
+    # Fired once per beat, with the cumulative list each time -- so an
+    # interrupt after beat 2 still leaves beats 1 and 2 on disk.
+    assert snapshots == [1, 2, 3]
+
+
+def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_path, monkeypatch, capsys):
+    """A (r)eroll re-enters the same beat's loop. It used to reprint the
+    original '=== beat i/N: <action> ===' header, which read as a new beat
+    being generated rather than the same one starting over."""
+    responses = iter(["r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    out = capsys.readouterr().out
+    assert out.count("=== beat 1/1:") == 1, "the full beat header should appear only once"
+    assert "restarting, attempt cycle 2" in out
