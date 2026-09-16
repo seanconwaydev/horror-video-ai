@@ -706,6 +706,40 @@ def _safe_path_component(value: str) -> str:
     return cleaned or "unnamed"
 
 
+def _choose_candidate(candidates: list[PrevizResult], *, auto_yes: bool) -> PrevizResult | None:
+    """Ask which of several candidate images to keep, or None to reject all.
+
+    Generating one image per attempt meant a single roll of a
+    non-deterministic process, which is indistinguishable from luck -- the
+    project owner's own read of an improved beat was "not super obvious it's
+    not just getting lucky". A real run spent 1.8 images per beat anyway, one
+    at a time, discarding each before the next existed. Showing them together
+    costs the same money and turns a gamble into a choice
+    (docs/decisions/0046).
+
+    Unattended, the first candidate is taken: there is nobody to ask, and
+    picking arbitrarily is at least honest about that.
+    """
+    if auto_yes:
+        return candidates[0]
+
+    folder = candidates[0].image_path.parent
+    print(f"\n{len(candidates)} candidates in {folder}:")
+    for n, candidate in enumerate(candidates, start=1):
+        print(f"  {n}. {candidate.image_path.name}")
+    # One command that opens them together, since comparing them side by
+    # side is the entire point.
+    print(f"  open {folder}/candidate_*.png")
+
+    valid = {str(n) for n in range(1, len(candidates) + 1)} | {"n"}
+    choice = ""
+    while choice not in valid:
+        choice = input(
+            f"  Keep which? [1-{len(candidates)}] or (n)one of them: "
+        ).strip().lower()
+    return None if choice == "n" else candidates[int(choice) - 1]
+
+
 def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") -> Path:
     """First unused `<prefix>_<n>_rejected.png` in `out_dir`.
 
@@ -743,6 +777,7 @@ def _generate_image_with_review(
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_reviewed: Callable[[str | None, int], str] | None = None,
     initial_concerns: list[str] | None = None,
+    choose_auto: bool = False,
     max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
@@ -809,10 +844,37 @@ def _generate_image_with_review(
     attempt = 0
     while max_attempts is None or attempt < max_attempts:
         attempt += 1
-        previz_result = generate_fn(previous_concerns)
-        print(f"Image saved to {previz_result.image_path}")
-        if on_image_generated is not None:
-            on_image_generated(previz_result)
+        candidates = generate_fn(previous_concerns)
+        for candidate in candidates:
+            print(f"Image saved to {candidate.image_path}")
+            if on_image_generated is not None:
+                on_image_generated(candidate)
+
+        if len(candidates) > 1:
+            chosen = _choose_candidate(candidates, auto_yes=choose_auto)
+            if chosen is None:
+                # Rejecting every candidate is a rejection of the attempt,
+                # not of the beat -- the loop offers the usual choices next.
+                print("None kept.")
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "accepted": False,
+                        "concern": "human rejected every candidate",
+                        "candidates": [str(c.image_path) for c in candidates],
+                    }
+                )
+                decision = (
+                    on_reviewed("none of the candidates were usable", attempt)
+                    if on_reviewed is not None
+                    else "continue"
+                )
+                if decision in ("accept", "stop"):
+                    break
+                continue
+            previz_result = chosen
+        else:
+            previz_result = candidates[0]
 
         print(f"--- previz review (model: {review_model}) ---")
         review = run_previz_review_stage(
@@ -906,20 +968,25 @@ def _generate_previz_with_review(
     """
     attempt_n = 0
 
-    def _generate(previous_concerns: list[str]) -> PrevizResult:
+    def _generate(previous_concerns: list[str]) -> list[PrevizResult]:
         del previous_concerns  # not used by this flow -- see docstring above
         nonlocal attempt_n
         attempt_n += 1
         print(f"\n--- previz (model: {previz_model}, attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---")
-        return run_previz_stage(
-            fact_check_result,
-            model=previz_model,
-            output_dir=out_dir,
-            on_transient_retry=lambda n, exc: print(
-                f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
-            ),
-            **image_kwargs,
-        )
+        # A list of one: this flow has no candidate fan-out, but
+        # _generate_image_with_review takes a list from every caller so it
+        # has one shape to handle rather than two.
+        return [
+            run_previz_stage(
+                fact_check_result,
+                model=previz_model,
+                output_dir=out_dir,
+                on_transient_retry=lambda n, exc: print(
+                    f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+                ),
+                **image_kwargs,
+            )
+        ]
 
     return _generate_image_with_review(
         _generate,
@@ -1522,6 +1589,7 @@ def _generate_beats_with_choices(
     style: str = DEFAULT_STYLE,
     requires_grounding: bool = True,
     auto_yes: bool = False,
+    candidates: int = 1,
     on_beat_complete: Callable[[list[dict]], None] | None = None,
 ) -> list[dict]:
     """Generate each beat's image (docs/decisions/0024). `style`
@@ -1707,6 +1775,7 @@ def _generate_beats_with_choices(
             # (B023) even though this particular control flow is safe.
             def _generate(
                 previous_concerns: list[str],
+                candidates: int = candidates,
                 beat: Beat = beat,
                 location: Location | None = location,
                 location_ref: Path | None = location_ref,
@@ -1721,20 +1790,32 @@ def _generate_beats_with_choices(
                     f"--- beat image (model: {previz_model}, "
                     f"attempt {attempt_n}{cap}) ---"
                 )
-                return run_beat_image_stage(
-                    _beat_with_review_corrections(beat, previous_concerns),
-                    characters=beat_characters,
-                    location=location,
-                    character_references=beat_character_refs,
-                    location_reference=location_ref,
-                    style=style,
-                    model=previz_model,
-                    output_dir=beat_out_dir,
-                    on_transient_retry=lambda n, exc: print(
-                        f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
-                    ),
-                    **image_kwargs,
-                )
+                corrected = _beat_with_review_corrections(beat, previous_concerns)
+                # One call per candidate. Gemini's image API has no n>1
+                # parameter via litellm, so the fan-out lives here rather
+                # than in the provider call (docs/decisions/0046).
+                return [
+                    run_beat_image_stage(
+                        corrected,
+                        characters=beat_characters,
+                        location=location,
+                        character_references=beat_character_refs,
+                        location_reference=location_ref,
+                        style=style,
+                        model=previz_model,
+                        output_dir=beat_out_dir,
+                        filename=(
+                            "previz.png"
+                            if candidates == 1
+                            else f"candidate_{attempt_n}_{n}.png"
+                        ),
+                        on_transient_retry=lambda n, exc: print(
+                            f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
+                        ),
+                        **image_kwargs,
+                    )
+                    for n in range(1, candidates + 1)
+                ]
 
             previz_result, attempts = _generate_image_with_review(
                 _generate,
@@ -1753,6 +1834,7 @@ def _generate_beats_with_choices(
                 archive_prefix=f"beat{i}_attempt",
                 on_reviewed=_on_reviewed,
                 initial_concerns=carried_concerns,
+                choose_auto=auto_yes,
                 max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
             )
 
@@ -1937,6 +2019,19 @@ def main() -> None:
             f"({', '.join(sorted(PHOTOREAL_STYLES))}) are supported but "
             "measurably more likely to have violent scenes silently refused "
             "by the image model -- see docs/playbook/failure-taxonomy.md."
+        ),
+    )
+    parser.add_argument(
+        "--candidates",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Generate N images per beat attempt and choose between them, "
+            "instead of one at a time (docs/decisions/0046). A real run "
+            "already spent 1.8 images per beat sequentially, discarding each "
+            "before seeing the next -- this costs about the same and lets you "
+            "pick. Defaults to 1, which is the previous behaviour."
         ),
     )
     parser.add_argument(
@@ -2238,6 +2333,10 @@ def main() -> None:
         print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
 
+    if args.candidates < 1:
+        print(f"--candidates must be at least 1, got {args.candidates}.")
+        return
+
     character_refs, location_refs = _generate_scene_references(
         scene_plan,
         previz_model=previz_model,
@@ -2269,6 +2368,7 @@ def main() -> None:
         style=args.style,
         requires_grounding=requires_grounding,
         auto_yes=args.yes,
+        candidates=args.candidates,
         on_beat_complete=_persist_beats,
     )
     _persist_beats(beat_results)

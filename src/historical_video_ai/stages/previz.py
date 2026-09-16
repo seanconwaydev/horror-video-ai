@@ -529,6 +529,9 @@ def run_beat_image_stage(
     image_fn: Callable = litellm.image_generation,
     edit_fn: Callable = litellm.image_edit,
     output_dir: Path = Path("outputs"),
+    #: Lets a caller generate several candidates for one beat into the same
+    #: directory without each overwriting the last (docs/decisions/0046).
+    filename: str = "previz.png",
     sleep_fn: Callable[[float], None] = time.sleep,
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizResult:
@@ -556,7 +559,7 @@ def run_beat_image_stage(
         sleep_fn=sleep_fn,
         on_transient_retry=on_transient_retry,
     )
-    image_path = _extract_and_save_image(response, output_dir, "previz.png")
+    image_path = _extract_and_save_image(response, output_dir, filename)
     return PrevizResult(image_path=image_path, prompt_used=prompt)
 
 
