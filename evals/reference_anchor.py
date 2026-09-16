@@ -88,8 +88,8 @@ a defined shadow across the far side of the face and the wall behind.
 STYLE: {style} No on-screen text, no logos, no watermark."""
 
 
-def _dramatic_character_sheet_prompt(character: Character, style_text: str) -> str:
-    return _DRAMATIC_SHEET.format(
+def _sheet_prompt(kind: str, character: Character, style_text: str) -> str:
+    return _SHEETS[kind].format(
         face_build=character.face_build,
         hair=character.hair,
         wardrobe_signature=character.wardrobe_signature,
@@ -99,8 +99,54 @@ def _dramatic_character_sheet_prompt(character: Character, style_text: str) -> s
     )
 
 
+# Identity with no body pose and no camera framing to copy. The neutral
+# full-body sheet held identity better than anything else tried, and
+# suppressed pose, camera and mood in every beat -- so this keeps the face
+# and drops the rest of the frame.
+_PORTRAIT_SHEET = """\
+CHARACTER: {face_build}, {hair}.
+DISTINGUISHING DETAIL: {distinguishing_detail}.
+WARDROBE (collar and shoulders only, visible at the very bottom of frame): \
+{wardrobe_signature}.
+
+SUBJECT: The face of the character described above.
+ACTION: Neutral, unposed, looking slightly off camera. This is an identity \
+reference for the face ONLY.
+SETTING: A plain dark backdrop, no location, nothing narrative.
+CAMERA: Tight head-and-shoulders portrait. Nothing below the collarbone is \
+in frame -- no arms, no hands, no body pose, no standing posture.
+LIGHTING: Soft and slightly directional, enough to show the bone structure.
+STYLE: {style} No on-screen text, no logos, no watermark."""
+
+# The dramatic arm won on adherence and lost identity, its wardrobe
+# drifting to black long sleeves against a grey t-shirt and sleep shorts,
+# because the prompt left clothing underconstrained. Same pose, wardrobe
+# pinned.
+_DRAMATIC_LOCKED_SHEET = """\
+CHARACTER: {face_build}, {hair}.
+DISTINGUISHING DETAIL: {distinguishing_detail}.
+
+WARDROBE -- EXACT, NON-NEGOTIABLE. The character wears precisely this and \
+nothing else: {wardrobe_signature}. Do not substitute, restyle, recolour, \
+add layers, lengthen sleeves, or change the fabric. If the pose or setting \
+would suggest different clothing, keep this clothing anyway.
+
+SUBJECT: The character described above, alone.
+ACTION: Caught mid-movement in an unguarded moment, weight off-centre, \
+expression alert and uneasy rather than composed.
+SETTING: A dark, unremarkable domestic interior, deliberately vague.
+CAMERA: Three-quarter view from slightly below eye level, subject \
+off-centre in frame.
+LIGHTING: One hard, directional source from low and to one side, throwing \
+a defined shadow across the far side of the face and the wall behind.
+STYLE: {style} No on-screen text, no logos, no watermark."""
+
+_SHEETS = {"dramatic": _DRAMATIC_SHEET, "portrait": _PORTRAIT_SHEET, "dramatic_locked": _DRAMATIC_LOCKED_SHEET}
+
 ARMS = {
     "current": {"character_ref": "neutral", "location_ref": True},
+    "portrait": {"character_ref": "portrait", "location_ref": True},
+    "dramatic_locked": {"character_ref": "dramatic_locked", "location_ref": True},
     "location": {"character_ref": None, "location_ref": True},
     "dramatic": {"character_ref": "dramatic", "location_ref": True},
     "none": {"character_ref": None, "location_ref": False},
@@ -138,6 +184,12 @@ def main() -> None:
         "intercept them -- an attempt to do that made real paid calls instead.",
     )
     parser.add_argument("--arms", default=",".join(ARMS), help="comma-separated arm names")
+    parser.add_argument(
+        "--reuse-locations",
+        type=Path,
+        help="reuse the shared location references from a previous run directory, instead "
+        "of regenerating them. Cheaper, and it holds them constant across experiments.",
+    )
     args = parser.parse_args()
 
     scene, character, locations, beats = _load_scene()
@@ -192,7 +244,14 @@ def main() -> None:
     # and it holds a variable constant that would otherwise vary per arm
     # for no reason.
     shared_location_refs: dict[str, Path] = {}
-    if any(arm["location_ref"] for arm in arms.values()):
+    if args.reuse_locations:
+        for location in locations:
+            existing = args.reuse_locations / "_shared_locations" / location.id / "reference.png"
+            if not existing.exists():
+                raise SystemExit(f"--reuse-locations: no reference at {existing}")
+            shared_location_refs[location.id] = existing
+        print(f"Reusing {len(shared_location_refs)} location reference(s) from {args.reuse_locations}")
+    elif any(arm["location_ref"] for arm in arms.values()):
         shared_dir = run_dir / "_shared_locations"
         for location in locations:
             result = run_reference_image_stage(
@@ -214,7 +273,7 @@ def main() -> None:
             prompt = (
                 build_character_sheet_prompt(character, style=STYLE)
                 if arm["character_ref"] == "neutral"
-                else _dramatic_character_sheet_prompt(character, _style_instruction(STYLE))
+                else _sheet_prompt(arm["character_ref"], character, _style_instruction(STYLE))
             )
             result = run_reference_image_stage(
                 prompt,
