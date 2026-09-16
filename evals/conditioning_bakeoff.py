@@ -183,13 +183,17 @@ def main() -> None:
             "location reference, not a character shot.\n"
             f"STYLE: {STYLE}"
         )
+        # Generated on whichever model the conditions actually use, rather
+        # than hardcoding one: the reference is shared across conditions, so
+        # tying it to a provider that may be out of credit would block the
+        # whole experiment over a single setup image.
+        ref_model = next(iter(conditions.values()))["model"]
         data = (
             base64.b64decode(_TINY_PNG_B64)
             if args.mock
-            else _generate(
-                {"model": "gemini/gemini-2.5-flash-image", "use_ref": False}, ref_prompt, None
-            )
+            else _generate({"model": ref_model, "use_ref": False}, ref_prompt, None)
         )
+        print(f"  (reference generated on {ref_model})")
         reference_path.write_bytes(data)
         print(f"generated location reference -> {reference_path.name}")
 
