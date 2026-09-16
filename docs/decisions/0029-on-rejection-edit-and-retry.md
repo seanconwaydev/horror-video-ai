@@ -4,6 +4,8 @@ Date: 2026-09-02
 
 Status: Accepted
 
+Superseded by [0043](./0043-one-review-prompt-the-human-decides.md).
+
 ## Context
 
 ADR 0009's automatic reject-and-regenerate loop (`_generate_image_with_review`,

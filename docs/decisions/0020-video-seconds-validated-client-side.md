@@ -4,6 +4,9 @@ Date: 2026-08-27
 
 Status: Accepted
 
+Implementation half superseded by
+[0038](./0038-video-generation-on-replicate-and-moderation-rescope.md).
+
 Supersedes part of [0012](./0012-video-generation-duration.md): the
 "passed through unvalidated, a rejected value surfaces as a normal API
 error" decision. Everything else in 0012 (the duration enum itself, the

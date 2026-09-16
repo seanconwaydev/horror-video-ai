@@ -4,6 +4,9 @@ Date: 2026-08-20
 
 Status: Accepted
 
+Superseded by [0051](./0051-remove-the-single-image-previz-flow.md), which closes out
+this narrow scope.
+
 ## Context
 
 The pipeline in [pipeline.md](../pipeline.md) was designed around a fairly open-ended

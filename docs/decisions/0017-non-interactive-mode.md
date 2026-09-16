@@ -4,6 +4,8 @@ Date: 2026-08-26
 
 Status: Accepted
 
+Superseded in part by [0019](./0019-yes-flag-refuses-contradicted-flags.md).
+
 ## Context
 
 Automated/scripted runs against this CLI (used repeatedly this session to

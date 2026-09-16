@@ -4,6 +4,10 @@ Date: 2026-09-02
 
 Status: Accepted
 
+Its implementation superseded by
+[0039](./0039-committed-style-presets-and-single-style-slot.md); the decision
+itself stands.
+
 ## Context
 
 Two consecutive real runs showed the same style-consistency failure: generated images landed at inconsistent points on the realistic-to-stylized spectrum within a single run -- sometimes a whole beat rendered as stylized 3D/CGI instead of photorealistic, sometimes only the character while the environment stayed photoreal. Root cause, confirmed by inspection: style was specified independently in three separate places with no single source of truth -- `build_character_sheet_prompt`'s hardcoded style line, `build_location_reference_prompt`'s separately hardcoded style line, and every beat's own independently LLM-generated `style` field. Even when each was individually reasonable, nothing forced them to agree with each other.

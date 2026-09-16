@@ -4,6 +4,9 @@ Date: 2026-09-16
 
 Status: Accepted
 
+Amended by [0048](./0048-heuristic-gates-warn-rather-than-fail.md), which demotes
+the check this ADR introduced.
+
 ## Context
 
 [0041](./0041-beats-name-every-character-present.md) made it possible for a planned antagonist to appear in a beat at all. The first run after it worked: a stalking figure showed up in every frame. It also stood in exactly the same posture in every frame -- arms hanging straight down, head tilted, motionless -- which the project owner described as "almost t-posing out there".

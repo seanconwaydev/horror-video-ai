@@ -4,6 +4,8 @@ Date: 2026-09-03
 
 Status: Accepted
 
+Superseded by [0035](./0035-genre-and-tone-replace-binary-creative-flag.md).
+
 ## Context
 
 The project owner identified a real inconsistency in how this project was being reasoned about, not just a missing feature: "you say we need to be flexible but then push back when i want to forego fact checking in certain ways." Fact-checking's mandatory status traces to ADR 0008, written before "research best practices first" became a standing habit on this project -- an early, reasonable-guess decision, not one backed by the research this session has since done. Meanwhile the project's stated goal (ADR 0031) is videos worth watching across whatever genres turn out to work, not historical accuracy for its own sake.

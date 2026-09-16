@@ -56,7 +56,12 @@ from historical_video_ai.stages.previz import (
     run_reference_image_stage,
 )
 from historical_video_ai.stages.research import FactSheet
-from historical_video_ai.stages.scene_planning import Beat, Character, Location
+from historical_video_ai.stages.scene_planning import (
+    Beat,
+    Character,
+    Location,
+    load_scene_plan,
+)
 
 EVALS_DIR = Path(__file__).parent
 STYLE = "horror-comic"
@@ -154,12 +159,12 @@ ARMS = {
 
 
 def _load_scene() -> tuple[dict, Character, list[Location], list[Beat]]:
+    """Goes through the real parser so this fixture stays on the same code
+    path as a live plan -- it drifted out of the Beat schema once already
+    (docs/playbook/repo-audit-brief.md, finding 4)."""
     raw = json.loads((EVALS_DIR / "anchor_scene.json").read_text())
-    plan = raw["plan"]
-    character = Character(**plan["characters"][0])
-    locations = [Location(**location) for location in plan["locations"]]
-    beats = [Beat(**beat) for beat in plan["beats"]]
-    return raw["scene"], character, locations, beats
+    plan = load_scene_plan(raw["plan"])
+    return raw["scene"], plan.characters[0], plan.locations, plan.beats
 
 
 def _fact_check_result(scene: dict) -> FactCheckResult:

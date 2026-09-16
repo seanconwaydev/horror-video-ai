@@ -4,6 +4,9 @@ Date: 2026-09-03
 
 Status: Accepted
 
+Narrowed by [0052](./0052-composition-vocabulary-is-unconditional.md): composition
+vocabulary is no longer routed on genre. Everything else it routes stands.
+
 ## Context
 
 A real test run (recreating a user-supplied surreal reference photo via `--genre "surreal photo collage"`) surfaced a genuine architectural conflict, not just a wording problem: `scene_planning.py`'s "staging" rule (clarity, one legible focal point) was actively fighting what the genre needed (asymmetric, chaotic composition). The first fix was an inline prose hedge — "the staging rule still applies to *what* the strange thing is, not whether the scene stays centered" — which worked but is a known anti-pattern: a rule growing exceptions in its own prose as more genres are tested is not a system, it's debt that compounds with every new genre.
