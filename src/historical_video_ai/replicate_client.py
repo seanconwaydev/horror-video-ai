@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import ssl
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -38,6 +39,15 @@ _DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 _DEFAULT_MAX_POLL_ATTEMPTS = 120
 
 _DEFAULT_TIMEOUT_SECONDS = 60.0
+
+# Replicate throttles hard on a low balance: "your rate limit for creating
+# predictions is reduced to 6 requests per minute with a burst of 1
+# requests while you have less than $5.0 in credit". A pipeline generating
+# one clip per beat walks straight into that, and without a retry the whole
+# run dies on a 429 that the API itself says will clear in ~3 seconds.
+_RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+_MAX_TRANSPORT_RETRIES = 5
+_FALLBACK_RETRY_DELAY_SECONDS = 5.0
 
 
 class ReplicateError(Exception):
@@ -64,19 +74,63 @@ def resolve_api_token(api_token: str | None = None) -> str:
 
 
 def _default_request_fn(
-    method: str, url: str, *, headers: dict[str, str], json_body: dict | None
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict | None,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> dict:
-    """Perform one JSON API call. Injection point for tests -- every
-    function below takes this as a parameter rather than importing httpx
-    directly, so no test ever needs the network."""
-    response = httpx.request(
-        method, url, headers=headers, json=json_body, timeout=_DEFAULT_TIMEOUT_SECONDS
-    )
-    if response.status_code >= 400:
-        raise ReplicateError(
-            f"Replicate {method} {url} failed with HTTP {response.status_code}: {response.text}"
-        )
-    return response.json()
+    """Perform one JSON API call, retrying throttling and transient server
+    errors. Injection point for tests -- every function below takes this as
+    a parameter rather than importing httpx directly, so no test ever needs
+    the network.
+
+    Waits for the duration Replicate itself names in `retry_after` rather
+    than guessing, since the whole point of its throttle response is that
+    it tells you when the window reopens.
+    """
+    for attempt in range(1, _MAX_TRANSPORT_RETRIES + 1):
+        try:
+            response = httpx.request(
+                method, url, headers=headers, json=json_body, timeout=_DEFAULT_TIMEOUT_SECONDS
+            )
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            # A transport failure RAISES rather than returning a status, so
+            # retrying status codes alone missed it entirely. Observed
+            # repeatedly as "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert
+            # bad record mac", which killed two images of a paid batch after
+            # the status-code retry was already in place.
+            if attempt == _MAX_TRANSPORT_RETRIES:
+                raise ReplicateError(f"Replicate {method} {url} failed: {exc}") from exc
+            sleep_fn(_FALLBACK_RETRY_DELAY_SECONDS)
+            continue
+        if response.status_code < 400:
+            return response.json()
+        if response.status_code not in _RETRYABLE_STATUSES or attempt == _MAX_TRANSPORT_RETRIES:
+            raise ReplicateError(
+                f"Replicate {method} {url} failed with HTTP {response.status_code}: "
+                f"{response.text}"
+            )
+        sleep_fn(_retry_delay(response))
+    raise AssertionError("unreachable")  # loop always returns or raises
+
+
+def _retry_delay(response: httpx.Response) -> float:
+    """How long to wait before retrying, preferring what the API said."""
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    try:
+        body_value = response.json().get("retry_after")
+    except Exception:  # noqa: BLE001 -- a non-JSON error body is not worth failing over
+        body_value = None
+    if isinstance(body_value, (int, float)):
+        return float(body_value)
+    return _FALLBACK_RETRY_DELAY_SECONDS
 
 
 def _default_download_fn(url: str) -> bytes:

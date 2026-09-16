@@ -1,10 +1,12 @@
 import base64
 
+import httpx
 import pytest
 
 from historical_video_ai.replicate_client import (
     API_BASE,
     ReplicateError,
+    _default_request_fn,
     download_output,
     file_to_data_uri,
     resolve_api_token,
@@ -134,3 +136,119 @@ def test_download_output_returns_content_and_rejects_an_empty_body():
 
     with pytest.raises(ReplicateError, match="was empty"):
         download_output("http://x/y", download_fn=lambda url: b"")
+
+
+# --- throttling and transient transport errors (ADR 0045) ---
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None, headers=None, text=""):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+        self.headers = headers or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def test_request_retries_a_throttle_and_waits_what_the_api_says(monkeypatch):
+    """Replicate drops to 6 requests/minute with a burst of 1 below $5 of
+    credit. A real run lost 6 of 10 images to that, and the API itself says
+    when the window reopens -- so wait that long rather than guessing."""
+    responses = iter(
+        [
+            _FakeResponse(429, {"retry_after": 3, "detail": "throttled"}),
+            _FakeResponse(429, {"retry_after": 2, "detail": "throttled"}),
+            _FakeResponse(200, {"id": "p1", "status": "succeeded"}),
+        ]
+    )
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+    )
+    slept = []
+
+    result = _default_request_fn(
+        "POST", "http://x", headers={}, json_body=None, sleep_fn=slept.append
+    )
+
+    assert result == {"id": "p1", "status": "succeeded"}
+    assert slept == [3.0, 2.0], "should wait exactly what the API asked for"
+
+
+def test_request_prefers_the_retry_after_header_over_the_body(monkeypatch):
+    responses = iter(
+        [
+            _FakeResponse(429, {"retry_after": 99}, headers={"retry-after": "4"}),
+            _FakeResponse(200, {"ok": True}),
+        ]
+    )
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+    )
+    slept = []
+
+    _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=slept.append)
+
+    assert slept == [4.0]
+
+
+def test_request_does_not_retry_a_client_error(monkeypatch):
+    """A 404 or a bad payload will fail identically forever -- retrying it
+    just delays the error."""
+    calls = {"n": 0}
+
+    def _once(*a, **k):
+        calls["n"] += 1
+        return _FakeResponse(404, text="no such model")
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _once)
+
+    with pytest.raises(ReplicateError, match="404"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
+    assert calls["n"] == 1
+
+
+def test_request_gives_up_after_the_retry_budget(monkeypatch):
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request",
+        lambda *a, **k: _FakeResponse(429, {"retry_after": 1}, text="throttled"),
+    )
+    with pytest.raises(ReplicateError, match="429"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
+
+
+def test_request_retries_a_transport_failure_not_just_a_status_code(monkeypatch):
+    """A transport failure raises rather than returning a status, so
+    retrying status codes alone missed it. Observed repeatedly as
+    "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert bad record mac", which
+    killed two images of a paid batch after the status-code retry was
+    already in place."""
+    calls = {"n": 0}
+
+    def _flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("bad record mac")
+        return _FakeResponse(200, {"id": "p1"})
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _flaky)
+    slept = []
+
+    result = _default_request_fn(
+        "POST", "http://x", headers={}, json_body=None, sleep_fn=slept.append
+    )
+
+    assert result == {"id": "p1"}
+    assert calls["n"] == 2
+    assert slept, "should have waited before retrying"
+
+
+def test_request_gives_up_on_a_persistent_transport_failure(monkeypatch):
+    def _always_fails(*a, **k):
+        raise httpx.ConnectError("bad record mac")
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _always_fails)
+
+    with pytest.raises(ReplicateError, match="bad record mac"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
