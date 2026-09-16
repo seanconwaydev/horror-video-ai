@@ -365,6 +365,16 @@ concrete terms (materials, fixed structures), not aesthetic ones.
 - A BEAT is exactly one moment/shot, never more -- do not describe \
 multiple sequential actions in one beat's `action` field. Every beat must \
 reference a `location_id` matching one of the Locations you define.
+- A Character's `face_build`, `hair` and `distinguishing_detail` describe \
+what that character permanently LOOKS LIKE -- never what they are doing. \
+Those fields are repeated in every single beat's prompt and baked into the \
+character's reference image, so a pose or behaviour written there ("stands \
+perfectly still with both arms straight at its sides", "always holds a \
+lantern") becomes an instruction the character can never escape in any \
+shot. Physical markers only: scars, piercings, glasses, build, hair, \
+distinctive features. Anything about posture, movement or habitual \
+behaviour belongs in a beat's `action` instead, where it can change from \
+shot to shot.
 - Every beat must list in `character_ids` EVERY character visible in that \
 shot, by id, including partially visible ones -- a figure in the \
 background, a silhouette in a doorway, a hand at the frame edge. Only \
@@ -579,6 +589,60 @@ def check_cinematography_is_not_a_style_claim(beats: list) -> None:
             )
 
 
+# Phrases that describe what a character DOES rather than what they look
+# like. Evidence-based and expected to be incomplete, in the same spirit as
+# every other pattern list here -- each entry comes from a real plan, not a
+# guess. The first four come from one run where a stalking figure's
+# `distinguishing_detail` read "Stands perfectly still with both arms
+# straight at its sides and its head tilted slightly to one shoulder",
+# which was then emitted into every beat prompt and left the figure unable
+# to do anything but stand there.
+_POSE_IN_IDENTITY_PATTERNS = (
+    "perfectly still",
+    "arms straight at",
+    "head tilted",
+    "hands at his side",
+    "hands at her side",
+    "arms at his side",
+    "arms at her side",
+)
+
+#: Sentence-initial verbs that make an identity field a behaviour
+#: description. Anchored to the start so a garment term like "a standing
+#: collar" or "a sitting-room" doesn't trip it.
+_POSE_LEADING_VERBS = ("stands", "sits", "holds", "leans", "walks", "moves", "keeps")
+
+
+def check_identity_fields_describe_appearance(characters: list) -> None:
+    """Raise ScenePlanningError if a Character's identity fields describe a
+    pose or behaviour instead of persistent appearance.
+
+    `face_build`, `hair` and `distinguishing_detail` are emitted verbatim
+    into every beat's prompt and are baked into the character's reference
+    image, so anything in them is repeated on every single frame. A pose
+    written there is not a description, it is an instruction the character
+    can never escape -- docs/decisions/0042.
+
+    Same class as docs/decisions/0029's motivating case, where a hand-edit
+    put "purple hair" into `face_build` and every beat inherited it.
+    """
+    for character in characters:
+        for field_name in ("face_build", "hair", "distinguishing_detail"):
+            value = getattr(character, field_name)
+            lowered = value.lower().lstrip()
+            found = [p for p in _POSE_IN_IDENTITY_PATTERNS if p in lowered]
+            if lowered.startswith(_POSE_LEADING_VERBS):
+                found.append(lowered.split()[0])
+            if found:
+                raise ScenePlanningError(
+                    f"Character {character.id!r}'s {field_name!r} describes a pose or "
+                    f"behaviour ({', '.join(sorted(set(found)))}) rather than persistent "
+                    f"appearance: {value!r}. That field is repeated in every beat's prompt "
+                    "and baked into the reference image, so a pose there is an instruction "
+                    "the character can never escape -- put it in a beat's action instead."
+                )
+
+
 def check_beat_character_references(beats: list, characters: list) -> None:
     """Raise ScenePlanningError if a beat names a character id that no
     Character defines, or names none at all.
@@ -717,6 +781,7 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
     check_beat_location_references(beats, locations)
     check_cinematography_is_not_a_style_claim(beats)
     check_beat_character_references(beats, characters)
+    check_identity_fields_describe_appearance(characters)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")
