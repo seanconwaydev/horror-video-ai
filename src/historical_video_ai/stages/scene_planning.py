@@ -56,6 +56,30 @@ class Location:
 
 
 @dataclass(frozen=True)
+class Staging:
+    """What ONE character is doing in one beat, and where they sit in frame.
+
+    Beats used to carry a single `action` string plus a flat list of
+    character ids (docs/decisions/0041). That gave the focal character a
+    verb and left every other character as staging metadata -- a position
+    and a fraction of the frame -- so the planner reliably wrote the
+    antagonist as scenery. Across a four-beat run its verb was "stands"
+    three times and "is" once, no beat gave it an action directed at
+    anyone, and the whole escalation was encoded as frame fraction
+    (finger-height -> a sixth -> a third -> a quarter), which rendered as
+    one motionless man at four zoom levels. See docs/decisions/0049.
+    """
+
+    character_id: str
+    #: What this character physically does, acting on someone or something.
+    #: A state ("stands", "is present") is what this field exists to prevent.
+    action: str
+    #: Where in the frame they sit and roughly how much of it they occupy.
+    #: Every character gets one, so nobody defaults to dead centre.
+    frame_position: str
+
+
+@dataclass(frozen=True)
 class Beat:
     """One shot: the 7-part fields (minus setting, which comes from the
     Location this beat points at) plus duration. `location_id` must match
@@ -63,18 +87,19 @@ class Beat:
 
     location_id: str
     subject: str
+    #: ONE sentence naming the event this shot is about. Per-character
+    #: physicality belongs in `staging`, not here (docs/decisions/0049).
     action: str
     camera: str
     lighting: str
     audio: str
     duration_seconds: str
-    #: Every character visible in this beat, by id -- not just the focal
-    #: one named in `subject`. Without it a beat had no way to say a second
-    #: character was present, so a planned antagonist could be given its own
-    #: reference image and then never appear in a single frame
-    #: (docs/decisions/0041). Defaults to empty so a plan captured before
-    #: this field existed still loads.
-    character_ids: list[str] = field(default_factory=list)
+    #: One entry per character visible in this beat -- not just the focal
+    #: one named in `subject`. Replaces the flat `character_ids` list from
+    #: docs/decisions/0041, which could say who was present but not what
+    #: they were doing (docs/decisions/0049). Defaults to empty so a plan
+    #: captured before this field existed still loads.
+    staging: list[Staging] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -232,17 +257,18 @@ object, a shape at the edge of vision), even when the beat's main action \
 is just the character moving through a space.
 - If that threat is an embodied character rather than an environmental \
 effect -- a person, a creature, a figure -- define it as a Character and \
-LIST ITS ID in `character_ids` on every beat where any part of it is \
+GIVE IT ITS OWN `staging` ENTRY on every beat where any part of it is \
 visible, however little. Describing it only in a beat's prose is not \
 enough: a real run defined a stalking figure, generated its reference \
 image, mentioned it once in a lighting field, and produced four beats with \
-no antagonist in any of them. Never rely on a vague \
-adjective like "barely visible" or "half-hidden" to control how prominent \
-the threat is -- an image model renders that as a bold, centered \
-silhouette unless given a literal constraint instead. State it \
-concretely: roughly what fraction of the frame it occupies, where in the \
-frame (a background corner, a frame edge, never centered), and what \
-specifically occludes it (a doorframe, furniture, deep unlit shadow).
+no antagonist in any of them. Its prominence is controlled by its \
+`frame_position`, never by a vague adjective like "barely visible" or \
+"half-hidden" -- an image model renders those as a bold, centered \
+silhouette. In `frame_position` state concretely roughly what fraction of \
+the frame it occupies, where in the frame (a background corner, a frame \
+edge, never centered), and what specifically occludes it (a doorframe, \
+furniture, deep unlit shadow). Its `action` is a separate question and \
+must still give it something to DO.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
 decaying, a sound growing louder), give EVERY beat its own explicit, \
@@ -374,13 +400,14 @@ shot. Physical markers only: scars, piercings, glasses, build, hair, \
 distinctive features. Anything about posture, movement or habitual \
 behaviour belongs in a beat's `action` instead, where it can change from \
 shot to shot.
-- Every beat must list in `character_ids` EVERY character visible in that \
-shot, by id, including partially visible ones -- a figure in the \
+- Every beat must give a `staging` entry to EVERY character visible in \
+that shot, including partially visible ones -- a figure in the \
 background, a silhouette in a doorway, a hand at the frame edge. Only \
-characters listed there can be drawn; a character you define but never \
-list in any beat will be given a reference image and then never appear in \
-a single frame. `subject` names which of them the shot is *about*; \
-`character_ids` says who is actually in it.
+characters staged there can be drawn; a character you define but never \
+stage in any beat will be given a reference image and then never appear \
+in a single frame. `subject` names which of them the shot is *about* and \
+should dominate the frame; `staging` says who is actually in it and what \
+each of them is doing.
 - A beat's `action`/`lighting`/`camera` text must be physically possible in \
 the Location it's assigned to -- if the scene's description mentions a \
 distinct space (a bedroom, a bathroom, a car), that space needs its own \
@@ -490,10 +517,31 @@ explicitly (e.g. "her feet rest flat on the floor in front of the low \
 stool," "her forearm rests on the counter's edge") rather than leaving \
 the spatial relationship implicit -- image models have a documented \
 tendency to merge a limb into nearby furniture with no clear boundary \
-between them when contact isn't specified precisely. When two characters \
-interact, give each a specific reaction to the other (a returned glance, \
-a mirrored gesture) so they read as one connected moment, not two \
-independently-posed figures that happen to share a frame.
+between them when contact isn't specified precisely.
+- EVERY character in a beat gets a `staging` entry, and every entry's \
+`action` must be a physical action done TO someone or something -- \
+reaching for a door handle, stepping between two pillars, turning away \
+from the noise, pressing a palm flat to the wall. "Stands", "is present", \
+"waits", "watches" and "is visible" are states, not actions; a character \
+given one of those is rendered upright, arms at sides, facing camera, \
+like a character-select screen. This applies to a background or \
+partially-hidden character exactly as much as to the focal one.
+- In EVERY beat with more than one character, at least one `staging` \
+entry must name what that character does BECAUSE OF another character in \
+the same beat -- a flinch away from them, a step that puts a pillar \
+between them, a hand that stops halfway to a pocket. Without this the two \
+read as independently-posed figures who happen to share a frame, which is \
+what a real run produced in all four of its beats.
+- If a character gets closer, more threatening, or more exposed as the \
+scene progresses, that change must show in the BODY -- a stoop, a reach, \
+weight shifted onto the front foot, a hand leaving a pocket. Never encode \
+an escalation only as a larger `frame_position`: a real run escalated a \
+stalker purely from "finger-height in frame" to "a quarter of the frame" \
+and got one motionless man rendered at four zoom levels.
+- Give EVERY character a `frame_position`, including the focal one. A \
+character with no stated position is rendered dead centre, which is the \
+dullest possible framing; say which side of the frame they sit in, and \
+let the subject sit off-centre unless centring them is the point.
 - If a Genre and/or Tone are given above, let them actually shape staging, \
 expression, and wardrobe choices -- a comedic/ironic tone reads through \
 confident, knowing expressions and poses (not just a funny premise \
@@ -516,8 +564,13 @@ this exact shape:
   ],
   "beats": [
     {{"location_id": "<must match a location id above>", "subject": "...",
-      "character_ids": ["<every character id visible in this beat>"],
-      "action": "...", "camera": "...", "lighting": "...",
+      "action": "<ONE sentence: the event this shot is about>",
+      "staging": [
+        {{"character_id": "<a character id above>",
+          "action": "<what THIS character physically does, acting on someone or something>",
+          "frame_position": "<where in frame, and roughly how much of it they occupy>"}}
+      ],
+      "camera": "...", "lighting": "...",
       "audio": "...", "duration_seconds": "..."}}
   ]
 }}
@@ -620,16 +673,22 @@ def check_beat_character_references(beats: list, characters: list) -> None:
         return  # nothing to check against; a plan with no cast is checked elsewhere
     known = {c.id for c in characters}
     for beat in beats:
-        if not beat.character_ids:
+        if not beat.staging:
             raise ScenePlanningError(
-                f"A beat at {beat.location_id!r} lists no character_ids -- every beat must "
-                "name every character visible in it, even if that is just one."
+                f"A beat at {beat.location_id!r} has an empty 'staging' -- every beat must "
+                "give every character visible in it an entry, even if that is just one."
             )
-        unknown = [cid for cid in beat.character_ids if cid not in known]
+        unknown = [s.character_id for s in beat.staging if s.character_id not in known]
         if unknown:
             raise ScenePlanningError(
                 f"A beat references character id(s) {unknown}, which don't match any defined "
                 f"character ({sorted(known)})."
+            )
+        seen = [s.character_id for s in beat.staging]
+        if len(seen) != len(set(seen)):
+            raise ScenePlanningError(
+                f"A beat at {beat.location_id!r} stages the same character twice: {seen}. "
+                "One entry per character -- put everything they do in that one entry."
             )
 
 
@@ -681,6 +740,40 @@ def _truncate_references_safely(plan: ScenePlan, max_references: int) -> ScenePl
     return ScenePlan(characters=characters, locations=locations, beats=plan.beats)
 
 
+def _parse_staging(item: dict, characters: list) -> list[Staging]:
+    """Parse one beat's `staging` list.
+
+    Falls back to a single entry for the first character, not for
+    `subject`: `subject` is not reliably an id -- real plans have used both
+    a bare id ("w1") and a description ("The influencer") there. The first
+    character is who a beat was rendered with before docs/decisions/0041,
+    so a planning model that ignores this field still yields a usable
+    single-character beat rather than failing the run.
+    """
+    raw = item.get("staging")
+    if not raw:
+        if not characters:
+            return []
+        return [Staging(character_id=characters[0].id, action=item.get("action", ""),
+                        frame_position="")]
+    if not isinstance(raw, list):
+        raise ScenePlanningError(f"A beat's 'staging' must be a list, got {raw!r}")
+    staging = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ScenePlanningError(
+                f"Each 'staging' entry must be an object with 'character_id', 'action' and "
+                f"'frame_position', got {entry!r}"
+            )
+        _require_str_fields(
+            entry, ["character_id", "action", "frame_position"], item_desc="A staging entry"
+        )
+        staging.append(
+            Staging(**{f: entry[f] for f in Staging.__dataclass_fields__})
+        )
+    return staging
+
+
 def _parse_scene_plan(raw_content: str) -> ScenePlan:
     data = parse_json_response(raw_content, ScenePlanningError, "Scene-planning response")
 
@@ -713,28 +806,10 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
              "duration_seconds"],
             item_desc="A beat",
         )
-        # Falls back to the first character, not to `subject`: `subject` is
-        # not reliably an id -- real plans have used both a bare id ("w1")
-        # and a description ("The influencer") in that field. The first
-        # character is exactly who a beat was rendered with before
-        # docs/decisions/0041, so this reproduces the old behaviour.
-        character_ids = item.get("character_ids") or (
-            [characters[0].id] if characters else []
-        )
-        if not isinstance(character_ids, list) or not all(
-            isinstance(cid, str) and cid for cid in character_ids
-        ):
-            raise ScenePlanningError(
-                f"A beat's 'character_ids' must be a list of non-empty id strings, got "
-                f"{item.get('character_ids')!r}"
-            )
-        # Falling back to [subject] rather than failing: a planning model
-        # that ignores the new field still produces a usable single-character
-        # beat, which is what every beat was before docs/decisions/0041.
         beats.append(
             Beat(
-                **{f: item[f] for f in Beat.__dataclass_fields__ if f != "character_ids"},
-                character_ids=character_ids,
+                **{f: item[f] for f in Beat.__dataclass_fields__ if f != "staging"},
+                staging=_parse_staging(item, characters),
             )
         )
     check_beat_location_references(beats, locations)
