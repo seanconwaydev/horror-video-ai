@@ -402,24 +402,49 @@ def _style_instruction(style: str) -> str:
 
 
 def build_character_sheet_prompt(character: Character, *, style: str = DEFAULT_STYLE) -> str:
-    """Build a neutral, non-narrative reference-sheet prompt for a
-    Character (docs/decisions/0023, 0024) -- deliberately not a story
-    moment, per the playbook's finding that a dedicated neutral reference
-    anchors identity better than reusing a busy narrative beat."""
+    """Build the identity reference every beat is conditioned on
+    (docs/decisions/0023, 0024, 0040).
+
+    This is an in-world frame, not a turnaround sheet, and that is the
+    whole point. Every beat is generated as an *edit* of this image, so
+    whatever it establishes as normal, the beats inherit. The previous
+    version specified a grey void, shadowless studio light, a centred
+    eye-level camera and a calm neutral expression -- and every beat then
+    had to fight all four to reach a dark room, one hard source, an
+    off-axis camera and visible fear.
+
+    A blind A/B measured it: the neutral sheet was chosen 0 times out of 9
+    on action, camera and mood, and this one 9 out of 9 (evals/, ADR 0040).
+
+    Two details that are load-bearing rather than decorative. The wardrobe
+    is stated once with explicit negatives, because listing a "signature"
+    and a "flexible" wardrobe made the model render a two-figure
+    turnaround -- and every beat was then conditioned on an image
+    containing two people. And the subject is described, not just named:
+    the beat's own SUBJECT line carries a character id, so this is where
+    who they are actually gets said.
+    """
     return (
         f"CHARACTER: {character.face_build}, {character.hair}.\n"
-        f"WARDROBE (signature): {character.wardrobe_signature}.\n"
-        f"WARDROBE (flexible): {character.wardrobe_flexible}.\n"
         f"DISTINGUISHING DETAIL: {character.distinguishing_detail}.\n\n"
-        "SUBJECT: The character described above, alone.\n"
-        "ACTION: Standing in a simple, neutral, relaxed pose, facing "
-        "slightly off-camera (three-quarter angle), calm neutral "
-        "expression -- this is a character reference sheet, not a story "
-        "moment.\n"
-        "SETTING: A plain, softly out-of-focus neutral backdrop -- no "
-        "specific location, nothing narrative.\n"
-        "CAMERA: Medium-full shot, eye-level, centered.\n"
-        "LIGHTING: Soft, even, shadowless studio-quality light.\n"
+        "WARDROBE -- EXACT. The character wears precisely this and nothing "
+        f"else: {character.wardrobe_signature}. Do not substitute, restyle, "
+        "recolour, add layers, lengthen sleeves, or change the fabric, even "
+        "if the pose or setting would suggest different clothing.\n\n"
+        "SUBJECT: The character described above, alone. Exactly ONE person "
+        "in frame -- not a turnaround, not a costume sheet, no second "
+        "figure, no inset panel, no alternate outfit shown alongside.\n"
+        "ACTION: Caught mid-movement in an unguarded moment, weight "
+        "off-centre, expression alert and uneasy rather than composed. The "
+        "face and wardrobe must read clearly, but this must not look like a "
+        "posed portrait.\n"
+        "SETTING: A dark, unremarkable interior, deliberately vague -- a "
+        "real space with depth, not a backdrop.\n"
+        "CAMERA: Three-quarter view from slightly below eye level, subject "
+        "off-centre in frame.\n"
+        "LIGHTING: One hard, directional source from low and to one side, "
+        "throwing a defined shadow across the far side of the face and the "
+        "surface behind.\n"
         f"STYLE: {_style_instruction(style)} No on-screen text, no logos, "
         "no watermark."
     )

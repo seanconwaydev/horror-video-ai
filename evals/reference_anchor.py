@@ -196,11 +196,18 @@ def main() -> None:
     arms = {name: ARMS[name] for name in args.arms.split(",")}
 
     character_sheets = len({a["character_ref"] for a in arms.values() if a["character_ref"]})
-    shared_locations = len(locations) if any(a["location_ref"] for a in arms.values()) else 0
+    shared_locations = (
+        0
+        if args.reuse_locations
+        else len(locations)
+        if any(a["location_ref"] for a in arms.values())
+        else 0
+    )
     total = character_sheets + shared_locations + len(arms) * len(beats)
     print(
         f"{len(arms)} arm(s) x {len(beats)} beats + {character_sheets} character sheet(s) "
         f"+ {shared_locations} shared location reference(s) = {total} images"
+        + (f" (reusing locations from {args.reuse_locations})" if args.reuse_locations else "")
     )
     for name, arm in arms.items():
         print(f"  {name:9} character_ref={arm['character_ref']!s:8} location_ref={arm['location_ref']}")
