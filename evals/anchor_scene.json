@@ -1,0 +1,74 @@
+{
+  "_note": "Frozen from a real run (run_20260916-003118) whose beats 1 and 2 were rejected repeatedly for pose and orientation errors that all pulled toward the character sheet's own standing, camera-facing, eye-level pose. Known failing cases, which is exactly what this experiment needs.",
+  "scene": {
+    "time": "present day",
+    "place": "a narrow house at night",
+    "description": "a woman wakes to a sound from downstairs and goes to look",
+    "genre": "horror",
+    "tone": "dread, escalating"
+  },
+  "plan": {
+    "characters": [
+      {
+        "id": "wren",
+        "face_build": "Mid-20s, athletic build, angular jaw with a narrow chin, pale skin, faint freckles scattered across the bridge of her nose, dark eyes set deep.",
+        "hair": "Short dark brown pixie cut, cropped close at the nape, flattened and slightly sweat-damp on the right side from sleeping on it.",
+        "wardrobe_signature": "Oversized heather-grey cotton t-shirt, black jersey sleep shorts, bare feet.",
+        "wardrobe_flexible": "A charcoal zip-up hoodie she could pull on over the t-shirt, sleeves shoved to the elbows; thin white ankle socks instead of bare feet if the floor is cold.",
+        "distinguishing_detail": "A small brushed-silver ear cuff clamped on her left ear, catching light when her head turns."
+      }
+    ],
+    "locations": [
+      {
+        "id": "bedroom",
+        "architecture": "Narrow upstairs bedroom roughly three metres by four; pale painted plasterboard walls, varnished pine floorboards, low white skirting, one sash window on the street wall, and a white-painted panelled door that sits a couple of centimetres clear of the floor, leaving a straight gap at the bottom.",
+        "fixed_props": "A low double bed with a dark metal frame against the left wall, a rumpled duvet and one pillow, a wooden nightstand with a small unlit lamp, a radiator under the sash window, a pair of slippers by the door, a folded blanket at the foot of the bed.",
+        "ambient_light": "The room is unlit; the landing lamp on the other side of the door is switched on, and a cold streetlight comes through the sash window, but neither reaches the middle of the room."
+      },
+      {
+        "id": "staircase",
+        "architecture": "A steep enclosed staircase between the ground floor and the upstairs landing: ten wooden treads with open risers, painted plaster walls on the left and over the stairwell, and an open side on the right closed off by a turned-spindle banister with a dark newel post at the top step. The treads are narrow, and the whole flight turns slightly at a half-landing halfway down.",
+        "fixed_props": "The banister with turned wooden spindles and the dark newel post at the top step, a framed picture hung on the stairwell wall, a loose runner rug at the top of the stairs, a small curtained window at the half-landing, a worn handrail bracket.",
+        "ambient_light": "No ceiling light anywhere on the stairs; the only illumination is the cold light coming up from the ground floor below, low and directional, leaving the upper treads and landing in flat darkness."
+      },
+      {
+        "id": "hallway",
+        "architecture": "Ground-floor hallway about one metre wide and six metres long, running in a straight line from the front door to the kitchen at the far end; painted plasterboard walls, scuffed varnished floorboards, a stripped pine doorframe at the kitchen end with the door standing half open, and a closed living-room door on the left about halfway down.",
+        "fixed_props": "A row of brass coat hooks with two heavy coats hanging on the right wall, a wooden shoe rack beside the front door, a round mirror on the left wall, a stripped pine door hung open at the kitchen end with light behind it.",
+        "ambient_light": "The kitchen light at the far end is on and throws a hard wedge of light down the hallway; there is no hall ceiling light, so the near end by the front door stays dark."
+      }
+    ],
+    "beats": [
+      {
+        "location_id": "bedroom",
+        "subject": "wren",
+        "action": "Wren is flat on her back under the duvet with only her head turned toward the door, eyes snapped wide open, brows pinched and mouth slightly parted around a breath she is holding, jaw locked with the effort of listening. Her right hand grips the mattress edge beside her hip, knuckles pale, and she has not yet sat up. In the thin bar of light under the door a small dark occlusion interrupts the glow, roughly the width of two feet, sitting at the very bottom edge of the frame and partly hidden behind the door's own shadow line.",
+        "camera": "Wide 24mm from a low position on the floorboards in the far corner beside the radiator, looking back across the room toward the door; Wren lies in the right mid-ground in full profile so her face reads against the pale wall, the bed frame crossing the lower frame, the lit gap under the door small at the left edge.",
+        "lighting": "The only hard source in the frame is the landing lamp outside, throwing one sharp-edged bar of light under the door across the floorboards; the dark foot-sized shape breaking the middle of that bar is the only shadow in the room, and the streetlight through the sash window behind the camera is too weak to make a second edge.",
+        "cinematography": "24mm, deep focus, cool blue-grey grade with crushed blacks, fine 35mm grain, slight handheld drift.",
+        "audio": "One low wooden creak from below, a faint house-settling tick, then the thin sound of her held breath.",
+        "duration_seconds": "4"
+      },
+      {
+        "location_id": "staircase",
+        "subject": "wren",
+        "action": "Wren is frozen three treads down from the top step, seen from behind at a three-quarter angle, one bare foot suspended above the next tread and her weight still on the back leg, her left hand clamped white-knuckled around the newel post. Her head is craned forward and down into the stairwell, eyes wide and wet, mouth pressed shut, chin tucked, and the ear cuff glints as she tilts her ear toward the sound. She is leaning her shoulder off the wall so she can peer past the banister without touching it.",
+        "camera": "35mm from high on the landing behind and above her, looking down the flight over her shoulder; her back and shoulders fill the right half of the frame, her face only partly visible in three-quarter profile, while the lower treads and the stairwell wall fill the left.",
+        "lighting": "The only hard source is the cold light from the ground floor below, throwing one sharp-edged silhouette diagonally up the stairwell wall from the bottom tread. That shadow is elongated and thin-limbed, its shoulder joint kinked too high for a standing person, occupying about a fifth of the frame low on the left, its legs cut off behind the foreground banister spindles and the newel post; Wren and the landing above her stay in flat darkness.",
+        "cinematography": "35mm, shallow focus on her hand and the newel post with the wall behind it softer, deep blacks, cool desaturated grade, 35mm grain.",
+        "audio": "Four slow scrapes of something dragging across the ground-floor boards, then a sharp intake of breath close to the mic.",
+        "duration_seconds": "4"
+      },
+      {
+        "location_id": "hallway",
+        "subject": "wren",
+        "action": "Wren stands frozen in the middle of the hallway, back pressed flat against the right-hand plaster wall, both palms flat on the wall on either side of her shoulders, three steps in from the foot of the stairs, leaning out just far enough to see down the hall. Her head is turned hard toward the kitchen end, face in full profile: eyes stretched wide, brows pulled up, mouth open around a breath she has not let out, chin lifted in raw terror. She is entirely still except for her fingers pressing harder into the plaster.",
+        "camera": "28mm from the near end of the hallway beside the shoe rack by the front door, low to the floor, looking straight down the length of the hall; Wren's profile and shoulder occupy the right third mid-hall with the coats hanging above her, and the kitchen doorway sits off-centre in the left third of the frame, never at the middle.",
+        "lighting": "The only hard source is the kitchen light behind the open door at the far end, throwing a single sharp wedge of it down the floorboards toward camera. Standing inside that doorframe is a solid black silhouette with no interior detail, taller than the door itself with shoulders too narrow and one arm hanging past knee level \u2014 roughly a third of the frame height, entirely inside the left third, its right side cut off by the stripped pine doorframe and the half-open door. Wren is lit only by the thin spill along the wall beside her.",
+        "cinematography": "28mm, deep focus down the hall with a heavy vignette at the edges, desaturated grade with a faint green cast, coarse grain.",
+        "audio": "A long, low exhale that is not hers, then complete silence except for the hum of a fridge.",
+        "duration_seconds": "5"
+      }
+    ]
+  }
+}
