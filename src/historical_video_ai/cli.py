@@ -32,7 +32,9 @@ Flags:
   to test a hand-written prompt against an already-approved image.
 - `--yes`: non-interactive -- auto-confirms every prompt and auto-accepts
   an "uncertain" fact-check flag, but stops the run on a "contradicted"
-  one rather than auto-accepting it (docs/decisions/0017, 0019).
+  one rather than auto-accepting it (docs/decisions/0017, 0019). Note
+  that --yes is a deliberately secondary mode: the interactive path is
+  where design effort goes (docs/decisions/0043).
 
 Every --video-gen-from scene runs a free, advisory moderation check
 (docs/decisions/0038, stages/moderation.py) before the paid video-
@@ -704,7 +706,7 @@ def _safe_path_component(value: str) -> str:
     return cleaned or "unnamed"
 
 
-def _next_archive_path(out_dir: Path, prefix: str) -> Path:
+def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") -> Path:
     """First unused `<prefix>_<n>_rejected.png` in `out_dir`.
 
     Deliberately not derived from the retry loop's own attempt counter.
@@ -721,10 +723,13 @@ def _next_archive_path(out_dir: Path, prefix: str) -> Path:
     Each attempt's own record in the run log carries its real image path,
     so nothing depends on the two agreeing.
     """
+    # Globs on the index rather than the full name: the same index must not
+    # be reused under a different suffix, or a superseded image would
+    # overwrite a rejected one with the same number.
     n = 1
-    while (candidate := out_dir / f"{prefix}_{n}_rejected.png").exists():
+    while any(out_dir.glob(f"{prefix}_{n}_*.png")):
         n += 1
-    return candidate
+    return out_dir / f"{prefix}_{n}_{suffix}.png"
 
 
 def _generate_image_with_review(
@@ -736,7 +741,7 @@ def _generate_image_with_review(
     out_dir: Path,
     archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
-    on_rejected: Callable[[str, int], str] | None = None,
+    on_reviewed: Callable[[str | None, int], str] | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
     PrevizResult from the concerns accumulated so far -- a closure over
@@ -745,7 +750,7 @@ def _generate_image_with_review(
     then have an independent pass review the actual image against the
     scene (docs/decisions/0009). On rejection, regenerates -- now with
     every prior rejection reason handed to `generate_fn` too (see below),
-    not a truly blind identical retry -- unless `on_rejected` says to
+    not a truly blind identical retry -- unless `on_reviewed` says to
     stop, capped at _MAX_PREVIZ_ATTEMPTS regardless. Shared by both
     generation paths -- only how the image itself gets made differs
     between them.
@@ -763,7 +768,7 @@ def _generate_image_with_review(
     concern text already exists from the review that just ran).
 
     Returns (accepted PrevizResult, attempt log), or (None, attempt log)
-    if every attempt was rejected or `on_rejected` stopped early. A
+    if the human kept nothing, or `on_reviewed` stopped early. A
     rejected attempt's image is archived as `<archive_prefix>_<n>_rejected.png`
     rather than overwritten.
 
@@ -772,21 +777,21 @@ def _generate_image_with_review(
     which can itself fail. Without this, a review-stage crash left a real,
     already-paid-for image on disk with no record of it in the log.
 
-    `on_rejected`, if given, is called with (concern, attempt) after
-    *every* rejection, including the final automatic attempt, and its
-    return value picks one of three outcomes. "accept" keeps *this*
-    attempt's image as the final result despite the reviewer's rejection
-    -- a human's own "good enough for me" judgment doesn't always match
-    the reviewer's, and previously there was no way to act on that short
-    of editing the beat and hoping for a different roll. "stop" ends the
-    retry loop with no accepted image, same outcome as exhausting every
-    attempt. Anything else keeps regenerating -- now with the accumulated
-    concerns folded in per the note above, though that's still no
-    guarantee: a concern baked into something `generate_fn` can't act on
-    (e.g. an anachronistic detail on a Character, structurally unfixable
-    by rewording one beat's action text) can still fail repeatedly, so
-    "stop"/"accept" exist for a human to intervene before more money gets
-    spent on attempts still likely to fail.
+    `on_reviewed`, if given, is called after EVERY review -- not only
+    after a rejection -- with (concern or None, attempt), and its return
+    value picks one of three outcomes: "accept" keeps this attempt's
+    image, "stop" ends the loop with nothing kept, anything else
+    regenerates with the accumulated concerns folded in.
+
+    Asking on every review, rather than letting the reviewer's verdict
+    decide whether to ask at all, is docs/decisions/0043. previz_review
+    was measured ranking four arms in exact reverse of blind human
+    judgement, and rejecting 88% of images; letting it choose the default
+    action spent money retrying images a human would have kept, and never
+    offered the choice on images a human would have rerolled.
+
+    With no callback the reviewer's verdict is followed, which is what
+    --yes does.
     """
     attempts: list[dict] = []
     previous_concerns: list[str] = []
@@ -812,37 +817,56 @@ def _generate_image_with_review(
         )
 
         if review.accepted:
-            print("Accepted.")
-            attempts.append({"attempt": attempt, "accepted": True, "concern": None})
-            return previz_result, attempts
+            print("Review: no concerns.")
+        else:
+            print(f"Review concern: {review.concern}")
 
-        print(f"Rejected: {review.concern}")
-        decision = on_rejected(review.concern, attempt) if on_rejected is not None else "continue"
+        # Asked after EVERY review, not only after a rejection
+        # (docs/decisions/0043). The reviewer's verdict is shown as
+        # information and no longer decides anything on its own: it was
+        # measured ranking four arms in exact reverse of blind human
+        # judgement, and rejecting 88% of images, so letting it pick the
+        # default action cost real money on images a human would have kept.
+        decision = (
+            on_reviewed(review.concern if not review.accepted else None, attempt)
+            if on_reviewed is not None
+            else ("accept" if review.accepted else "continue")
+        )
 
         if decision == "accept":
-            print("Accepted despite rejection (human override).")
             attempts.append(
-                {"attempt": attempt, "accepted": True, "concern": review.concern, "override": True}
+                {
+                    "attempt": attempt,
+                    "accepted": True,
+                    "concern": review.concern,
+                    "review_accepted": review.accepted,
+                }
             )
             return previz_result, attempts
 
-        archived_path = _next_archive_path(out_dir, archive_prefix)
+        # Archived whichever way the review went: a human can now retry an
+        # image the reviewer was happy with, and that image must not be
+        # silently overwritten by the next attempt.
+        suffix = "rejected" if not review.accepted else "superseded"
+        archived_path = _next_archive_path(out_dir, archive_prefix, suffix=suffix)
         previz_result.image_path.rename(archived_path)
         attempts.append(
             {
                 "attempt": attempt,
                 "accepted": False,
                 "concern": review.concern,
+                "review_accepted": review.accepted,
                 "image_path": str(archived_path),
             }
         )
-        previous_concerns.append(review.concern)
+        if review.concern:
+            previous_concerns.append(review.concern)
         if decision == "stop":
             break
         if attempt < _MAX_PREVIZ_ATTEMPTS:
             print("Regenerating...")
 
-    print(f"\nGiving up after {len(attempts)} rejected attempt(s).")
+    print(f"\nNo image kept for this beat after {len(attempts)} attempt(s).")
     return None, attempts
 
 
@@ -1574,40 +1598,40 @@ def _generate_beats_with_choices(
             beat_was_edited = False
             last_concern: str | None = None
 
-            def _on_rejected(concern: str, attempt: int, i: int = i) -> str:
-                # Fires on every rejection, including the last automatic
-                # one -- gives a human the chance to break out of a
-                # guaranteed-to-keep-failing blind retry (e.g. an
-                # anachronistic detail baked into the beat or shared
-                # Character text) instead of burning the remaining
-                # attempts on it. Enter/blank preserves today's behavior
-                # exactly: keep regenerating blind.
+            def _on_reviewed(concern: str | None, attempt: int, i: int = i) -> str:
+                """One prompt after every review, whatever the verdict.
+
+                The reviewer's opinion is shown above this as information
+                and decides nothing on its own (docs/decisions/0043): it
+                was measured ranking four arms in exact reverse of blind
+                human judgement and rejecting 88% of images, so letting it
+                choose the default action spent money on images a human
+                would have kept, and skipped the question entirely on ones
+                a human would have rerolled.
+                """
                 nonlocal beat, beat_was_edited, last_concern
                 if auto_yes:
-                    # No human to ask, but an identical rejection reason
-                    # twice in a row is still a strong, cheap (no model
-                    # call) signal that the cause is baked into the
-                    # prompt rather than bad luck -- give up rather than
-                    # spend the remaining attempt on a guaranteed repeat.
-                    # This is a naive proxy, not real judgment of whether
-                    # a rejection is structural: it only catches a
-                    # near-verbatim repeat, and a differently-worded
-                    # critique of the same root cause slips past it.
-                    # Genuinely deciding "is this doomed" -- and deciding
-                    # whether to edit vs. give up vs. keep rolling -- is
-                    # exactly the kind of per-stage judgment call that
-                    # eventually needs a real model in the loop alongside
-                    # full human review and --yes, not just this heuristic.
+                    # Unattended, there is no human to ask. Follow the
+                    # reviewer, since something has to decide -- but stop on
+                    # a repeated concern rather than spend the remaining
+                    # attempts on a near-certain repeat. Deliberately the
+                    # weaker path now: --yes is a secondary mode, and its
+                    # gate is the component measured as anti-correlated.
+                    if concern is None:
+                        return "accept"
                     is_repeat = last_concern is not None and concern == last_concern
                     last_concern = concern
                     return "stop" if is_repeat else "continue"
+
                 choice = None
-                while choice not in ("", "e", "f", "a", "g"):
+                while choice not in ("a", "r", "e", "f", "g"):
                     choice = input(
-                        "(Enter) keep auto-retrying / (e)dit this beat and retry / "
-                        "(f)eedback: add a short note and retry / "
-                        "(a)ccept this image anyway / (g)ive up on this beat: "
+                        f"  Attempt {attempt}/{_MAX_PREVIZ_ATTEMPTS} -- "
+                        "(a)ccept / (r)etry / (e)dit the beat / "
+                        "(f)eedback then retry / (g)ive up: "
                     ).strip().lower()
+                if choice == "a":
+                    return "accept"
                 if choice == "e":
                     print(f"\nBeat {i}:")
                     beat = _edit_item_fields(beat, fields=_BEAT_QUICK_EDIT_FIELDS)
@@ -1625,12 +1649,6 @@ def _generate_beats_with_choices(
                     beat = dataclasses.replace(beat, action=f"{beat.action} {note}")
                     beat_was_edited = True
                     return "stop"
-                if choice == "a":
-                    # The reviewer's rejection doesn't have to be the last
-                    # word -- a human's own "good enough for me" judgment
-                    # overrides it, same as previz_review's own verdict
-                    # would have if it had accepted this attempt.
-                    return "accept"
                 if choice == "g":
                     return "stop"
                 return "continue"
@@ -1688,7 +1706,7 @@ def _generate_beats_with_choices(
                 },
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
-                on_rejected=_on_rejected,
+                on_reviewed=_on_reviewed,
             )
 
             if previz_result is None:
@@ -1704,56 +1722,27 @@ def _generate_beats_with_choices(
                 )
                 break  # every automatic attempt was rejected, or the human gave up on this beat
 
-            if attempts and attempts[-1].get("override"):
-                # The human already made this exact call at the rejection
-                # prompt ((a)ccept this image anyway) -- asking
-                # accept/reroll/edit again immediately after is the same
-                # question a second time, not a real second checkpoint.
-                print("Beat accepted (human override at rejection).")
-                _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
-                _record(
-                    {
-                        "index": i,
-                        "beat": dataclasses.asdict(beat),
-                        "image_path": str(previz_result.image_path),
-                        "prompt_used": previz_result.prompt_used,
-                        "attempts": attempts,
-                    }
-                )
-                break
-
-            if auto_yes:
-                choice = "a"
-            else:
-                choice = ""
-                while choice not in ("a", "r", "e"):
-                    choice = input(
-                        "(a)ccept / (r)eroll / (e)dit this beat? [a/r/e]: "
-                    ).strip().lower()
-
-            if choice == "a":
-                _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
-                _record(
-                    {
-                        "index": i,
-                        "beat": dataclasses.asdict(beat),
-                        "image_path": str(previz_result.image_path),
-                        # The actual prompt sent to the image model for the
-                        # accepted attempt -- video generation (the
-                        # --video-gen-from follow-up to docs/decisions/0024)
-                        # needs this alongside the image itself, the same
-                        # way the old single-image flow paired
-                        # previz_image_path with previz_prompt_used.
-                        "prompt_used": previz_result.prompt_used,
-                        "attempts": attempts,
-                    }
-                )
-                break
-            if choice == "r":
-                continue
-            # choice == "e"
-            print(f"\nBeat {i}:")
-            beat = _edit_item_fields(beat, fields=_BEAT_QUICK_EDIT_FIELDS)
+            # A returned result means the human already chose to keep it at
+            # the single review prompt (docs/decisions/0043). Asking
+            # accept/reroll/edit again here was the same question twice.
+            print("Beat accepted.")
+            _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
+            _record(
+                {
+                    "index": i,
+                    "beat": dataclasses.asdict(beat),
+                    "image_path": str(previz_result.image_path),
+                    # The actual prompt sent to the image model for the
+                    # accepted attempt -- video generation (the
+                    # --video-gen-from follow-up to docs/decisions/0024)
+                    # needs this alongside the image itself, the same way
+                    # the old single-image flow paired previz_image_path
+                    # with previz_prompt_used.
+                    "prompt_used": previz_result.prompt_used,
+                    "attempts": attempts,
+                }
+            )
+            break
 
     return beat_results
 

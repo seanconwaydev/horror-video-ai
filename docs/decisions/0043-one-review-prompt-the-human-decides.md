@@ -1,0 +1,41 @@
+# 43. One review prompt, asked every time; previz_review informs but no longer decides
+
+Date: 2026-09-16
+
+Status: Accepted
+
+Supersedes the two-prompt review flow introduced by [0009](./0009-previz-image-review.md) and extended by [0029](./0029-on-rejection-edit-and-retry.md).
+
+## Context
+
+Every generated beat image went through `previz_review`, and its verdict chose which of two different prompts a human then saw:
+
+- **Accepted** → `(a)ccept / (r)eroll / (e)dit this beat? [a/r/e]`
+- **Rejected** → `(Enter) keep auto-retrying / (e)dit / (f)eedback / (a)ccept anyway / (g)ive up`
+
+So the reviewer was doing two jobs. It surfaced a concern, and it set the default action. Measurement says it is mixed at the first and actively harmful at the second.
+
+Two controlled experiments this session scored four and then three arms of generated images, blind, by human forced choice. previz_review ranked them **in exact reverse of that judgement** -- it rated highest the arm chosen zero times out of nine, twice. A repeat run confirmed this is not noise: only 2 of 12 images got an inconsistent verdict on identical input, so the disagreement is systematic. It also rejects roughly **88% of everything**, because it compares images against instructions like "wide 24mm from a low position on the floorboards in the far corner beside the radiator" and returns a binary verdict with no notion of severity. On one real run it rejected four beats over a **missing tote bag** while saying nothing about the scene's antagonist being absent entirely.
+
+Letting a component with those properties choose the default cost real money in both directions. On a rejection, the cheapest keystroke -- Enter -- was the one that spent money regenerating. On an acceptance, an image the human might have rerolled was presented as settled.
+
+Two further changes make this the right moment. The project owner has stopped using `--yes` and now runs every pipeline invocation by hand, judging each beat; and has adopted a protocol of driving those prompts as if shipping the video, which makes their accept/reject/give-up choices trustworthy quality data. An automated gate in front of a human who is already looking, which disagrees with that human systematically, is mostly a tax.
+
+## Decision
+
+1. **One prompt after every review**, whatever the verdict: `(a)ccept / (r)etry / (e)dit the beat / (f)eedback then retry / (g)ive up`, prefixed with the attempt number.
+2. **The reviewer's verdict becomes a line of text** above it -- "Review: no concerns." or "Review concern: ..." -- and decides nothing on its own.
+3. **No default.** Blank input is re-prompted rather than meaning "spend more money". Every attempt past the first is an explicit choice.
+4. **`on_rejected` becomes `on_reviewed`**, called after every review with `(concern or None, attempt)`.
+5. **A superseded image is archived too.** A human can now retry an image the reviewer accepted, and that image must not be silently overwritten -- archived as `_superseded` rather than `_rejected`, since the distinction is real.
+6. **The second prompt is deleted.** Asking accept/reroll/edit again after the human already chose to keep the image was the same question twice.
+
+## Consequences
+
+**`--yes` loses its quality gate in practice.** With no callback the reviewer's verdict is still followed, so unattended runs behave as before -- but that gate is the component measured as anti-correlated, so it is worth little. This is accepted deliberately: `--yes` is now a secondary mode, and the interactive path is where design effort goes.
+
+**Interactive runs need one keystroke per beat that they did not need before**, on beats the reviewer would have accepted. That is the point rather than a cost: those were beats the human never got asked about.
+
+**previz_review's future is still open.** This decision removes its authority without deciding whether to fix, rescope or delete it. The options identified and not chosen: score adherence on a scale so a near-miss is not equal to a total miss; scope it to subject, action and mood and stop policing camera geometry it cannot usefully judge; or drop it from the loop entirely. There is now a cheap way to decide, since the human's choices are trustworthy data -- comparing the reviewer's verdict against them over a few real runs costs nothing extra.
+
+**The retry loop's value is still unmeasured.** It is no longer blind -- [PR #50](./0029-on-rejection-edit-and-retry.md) feeds each concern into the next attempt, and the reviewer is told what to re-check -- but a real run still burned three informed attempts on one beat and got worse. Whether retrying earns its cost at all is worth knowing, and the owner's stated preference is not to rely on "just try it again" as a strategy regardless.

@@ -679,7 +679,9 @@ def test_generate_previz_with_review_accepts_on_first_attempt(tmp_path):
 
     assert result is not None
     assert result.image_path == tmp_path / "previz.png"
-    assert attempts == [{"attempt": 1, "accepted": True, "concern": None}]
+    assert attempts == [
+        {"attempt": 1, "accepted": True, "concern": None, "review_accepted": True}
+    ]
 
 
 def test_generate_previz_with_review_retries_then_accepts(tmp_path):
@@ -1012,7 +1014,7 @@ def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected
     # Blank input at the on-rejection prompt means "keep auto-retrying" --
     # this exercises the same all-3-attempts-rejected path as before that
     # hook existed, just with the human declining to intervene each time.
-    monkeypatch.setattr("builtins.input", lambda _: "")
+    monkeypatch.setattr("builtins.input", lambda _: "r")  # retry every time
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
     kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")] * 3)}
@@ -1035,9 +1037,10 @@ def test_generate_beats_with_choices_folds_rejection_reason_into_next_attempts_p
     # same prompt and zero new information is strictly worse than folding
     # that concern back in automatically -- this should now happen on
     # every retry, not just when a human manually intervenes.
-    # Blank at the on-rejection prompt (keep auto-retrying), then "a" at
-    # the post-acceptance accept/reroll/edit confirm.
-    responses = iter(["", "a"])
+    # (r)etry at the review prompt, then (a)ccept the second attempt.
+    # There is one prompt after every review now (docs/decisions/0043), and
+    # no blank default that spends money.
+    responses = iter(["r", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     captured_prompts = []
@@ -1823,7 +1826,8 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     """A (r)eroll re-enters the same beat's loop. It used to reprint the
     original '=== beat i/N: <action> ===' header, which read as a new beat
     being generated rather than the same one starting over."""
-    responses = iter(["r", "a"])
+    # An (e)dit restarts the cycle; a plain (r)etry now stays inside it.
+    responses = iter(["e", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -1927,3 +1931,66 @@ def test_ids_used_as_directory_names_cannot_escape_the_run_folder(raw_id, expect
     safe = _safe_path_component(raw_id)
     assert safe == expected
     assert "/" not in safe and os.sep not in safe
+
+
+# --- one review prompt, asked every time (ADR 0043) ---
+
+
+def test_human_is_asked_even_when_the_review_accepts(tmp_path, monkeypatch, capsys):
+    """previz_review was measured ranking four arms in exact reverse of
+    blind human judgement. Letting its verdict decide whether to ask meant
+    an image it liked was never offered for rerolling, and an image it
+    disliked spent money retrying by default."""
+    responses = iter(["r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    # Both attempts ACCEPTED by the reviewer -- the human still gets asked,
+    # and still chooses to retry the first one.
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["image_path"] is not None
+    assert len(results[0]["attempts"]) == 2, "the human's retry of an accepted image was ignored"
+    out = capsys.readouterr().out
+    assert "Review: no concerns." in out
+
+
+def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, monkeypatch):
+    """A human can now retry an image the reviewer was happy with, so that
+    image has to be archived like any other superseded attempt rather than
+    silently overwritten by the next one."""
+    responses = iter(["r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    superseded = list((tmp_path / "beat_1").glob("*_superseded.png"))
+    assert len(superseded) == 1, f"expected the retried image to be kept, found {superseded}"
+
+
+def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
+    """Enter used to mean "keep auto-retrying", so the cheapest keystroke
+    was the one that spent money. Blank input is now simply re-prompted."""
+    responses = iter(["", "   ", "g"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
+
+    results = _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    # Two blanks were re-prompted rather than triggering a retry, so only
+    # one image was ever generated before the human gave up.
+    assert results[0]["image_path"] is None
+    assert len(results[0]["attempts"]) == 1
