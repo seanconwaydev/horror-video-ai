@@ -114,8 +114,11 @@ Status block, which turned up ten the original list had missed, including
 partial and implementation-only supersessions. This does not violate ADR
 0001, whose write-once rule protects the reasoning.
 
-**This is now a convention with no enforcement.** A new ADR that
-supersedes another still has to be written to update both ends by hand.
+`tests/test_adr_supersession.py` now enforces this: an ADR whose Status
+block declares it supersedes, amends or voids another fails unless that
+other ADR's Status block links back. It reads 19 forward edges across the
+set today. Only Status blocks are checked -- an ADR discussing a
+supersession in its Context prose isn't making the claim this enforces.
 
 ### 7. Doc links were unchecked — fixed
 
