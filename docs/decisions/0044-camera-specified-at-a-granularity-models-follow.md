@@ -42,8 +42,12 @@ Specifying where the camera stands in the world is explicitly forbidden, with th
 
 ## Consequences
 
-**This does not make camera direction work.** It stops the planner from specifying camera in a language the model has already demonstrated it ignores, which removes a guaranteed source of rejections. Whether the model follows camera direction *at all*, in any vocabulary, is a separate and still-open question -- `evals/camera_obedience.py` exists to answer it, using specs whose obedience is unmistakable at a glance and asking only yes or no.
+**This does not, on its own, make camera direction work** -- but an earlier draft of this ADR went further and suggested camera might not be promptable at all. That was wrong, and the project owner caught it.
 
-If that test finds no model obeys any camera spec, then camera adherence is not a prompting problem, and the options are conditioning that encodes geometry directly (depth or pose control, already researched in `failure-taxonomy.md`) or accepting that composition is chosen by the reference image and dropping the pretence that a beat controls it.
+This project's own style A/B (`evals/results/20260915-225950`) produced images that obeyed their camera specs plainly: "high angle looking down at her on the floor" produced exactly that. Two things differed from the pipeline. Those prompts were ~80 words with a 9-word camera line, against the pipeline's ~450 with 30+ words of world geometry. And crucially they called `image_generation` with **no reference images at all**, where the pipeline calls `image_edit` conditioned on two or three.
+
+So the live hypothesis is not "models ignore camera". It is that **reference-image conditioning overrides camera direction**, with prompt bloat as a likely second factor. The anchor experiment already pointed here and it was not connected at the time: its no-reference arm won camera picks while the shipped reference arm won none.
+
+`evals/camera_obedience.py` therefore tests the conditioning, not just the model -- the same unmistakable camera specs, generated with and without references, so the decisive variable is isolated. If references are the cause, the options are conditioning that encodes geometry directly (depth or pose control, already researched in `failure-taxonomy.md`), weakening or dropping reference conditioning for composition while keeping it for identity, or accepting that the reference chooses the shot.
 
 **Some genuine expressive range is given up.** "Camera beside the boot of the neighbouring car" describes a real shot a human cinematographer could execute. The pipeline cannot execute it, so writing it down only produced a failed comparison -- but the vocabulary is now genuinely coarser than a storyboard would normally be, and that is a real cost, not a free win.

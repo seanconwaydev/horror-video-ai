@@ -1,20 +1,25 @@
-"""Does any image model follow a camera instruction at all?
+"""Does reference-image conditioning override camera direction?
 
 A real run specified "high wide shot from a ceiling corner... looking down
 its full length" and got an eye-level shot three attempts running, with the
-reviewer correctly reporting the miss each time. The instruction was
-already positive, already in the CAMERA field, and already first in the
-prompt. Repeating it differently is unlikely to help if the model simply
-does not act on camera direction.
+reviewer correctly reporting the miss each time.
 
-That is a yes/no question, not a preference one, so this does not ask which
-image is nicer. It uses camera specs whose obedience is unmistakable from a
-glance -- straight down from above, or from the floor looking up, cannot be
-confused with each other -- and asks only whether each image did what it
-was told.
+The obvious conclusion -- that models ignore camera direction -- is wrong.
+This project's own style A/B produced images that obeyed their camera specs
+plainly: "high angle looking down at her on the floor" produced exactly
+that. Those prompts differed from the pipeline's in two ways. They were
+~80 words with a 9-word camera line rather than ~450 with 30+ words of
+world geometry, and they called plain text-to-image with NO reference
+images, where the pipeline conditions every beat on two or three.
 
-Everything except the camera line is held constant, so a failure cannot be
-blamed on the subject or the setting.
+So the variable under test here is the conditioning, not the model. The
+same camera specs are generated with and without references, so whichever
+way it comes out, the cause is isolated rather than inferred.
+
+Specs are chosen to be unmistakable at a glance -- straight down from above
+cannot be confused with up from the floor -- and the question is yes/no,
+not which image is nicer. Everything except the camera line and the
+references is held constant.
 
 Usage:
     uv run python evals/camera_obedience.py --dry-run
@@ -75,15 +80,27 @@ CAMERA_SPECS = {
 }
 
 
-def _generate_gemini(model: str, prompt: str) -> bytes:
-    response = litellm.image_generation(model=model, prompt=prompt, size="720x1280")
+def _generate_gemini(model: str, prompt: str, reference: Path | None = None) -> bytes:
+    """Plain text-to-image, or the pipeline's image_edit path when a
+    reference is given. That difference is the whole experiment."""
+    if reference is not None:
+        response = litellm.image_edit(
+            model=model, prompt=prompt, image=[reference.read_bytes()]
+        )
+    else:
+        response = litellm.image_generation(model=model, prompt=prompt, size="720x1280")
     data = getattr(response, "data", None) or []
     if not data:
         raise RuntimeError("empty data list (silent refusal)")
     return base64.b64decode(data[0].b64_json)
 
 
-def _generate_replicate(model: str, prompt: str) -> bytes:
+def _generate_replicate(model: str, prompt: str, reference: Path | None = None) -> bytes:
+    if reference is not None:
+        raise RuntimeError(
+            "reference conditioning is only wired for the Gemini path here -- the "
+            "comparison that matters is against the pipeline's own model"
+        )
     prediction = run_prediction(
         model.removeprefix("replicate/"),
         {
@@ -124,13 +141,28 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="print the plan, spend nothing")
     parser.add_argument("--mock", action="store_true", help="run end to end with fake images")
-    parser.add_argument("--models", default=",".join(MODELS))
+    parser.add_argument("--models", default="gemini-2.5-flash-image")
+    parser.add_argument(
+        "--reference",
+        type=Path,
+        help="a character reference image to condition on, e.g. from a previous run's "
+        "character_*/reference.png. Given one, each spec is generated BOTH with and "
+        "without it, which is the comparison this exists to make.",
+    )
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
     models = {k: MODELS[k] for k in args.models.split(",")}
-    total = len(models) * len(CAMERA_SPECS)
-    print(f"{len(models)} model(s) x {len(CAMERA_SPECS)} camera spec(s) = {total} images")
+    n_conditions = 2 if args.reference else 1
+    total = len(models) * len(CAMERA_SPECS) * n_conditions
+    print(
+        f"{len(models)} model(s) x {n_conditions} condition(s) x "
+        f"{len(CAMERA_SPECS)} camera spec(s) = {total} images"
+    )
+    if args.reference:
+        print(f"  conditioning reference: {args.reference}")
+    else:
+        print("  text-to-image only -- pass --reference to compare against the pipeline's path")
     for name in models:
         print(f"  {name}")
     for spec in CAMERA_SPECS:
@@ -144,21 +176,31 @@ def main() -> None:
     run_dir = EVALS_DIR / "results" / f"camera-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     run_dir.mkdir(parents=True)
 
+    # Conditions, not models, are what this compares. With a reference
+    # given, each spec runs both ways; without one, it is text-to-image only.
+    conditions = ["no_reference"] + (["with_reference"] if args.reference else [])
     rng = random.Random(args.seed)
-    labels = [f"m{n}" for n in range(1, len(models) + 1)]
+    labels = [f"c{n}" for n in range(1, len(conditions) * len(models) + 1)]
     rng.shuffle(labels)
-    key = dict(zip(labels, models, strict=True))
+    key = {
+        label: f"{model_name}/{condition}"
+        for label, (model_name, condition) in zip(
+            labels, [(m, c) for m in models for c in conditions], strict=True
+        )
+    }
 
     manifest = []
     for spec_name, camera in CAMERA_SPECS.items():
-        for label, model_name in key.items():
+        for label, cell in key.items():
+            model_name, condition = cell.split("/")
             spec = models[model_name]
             prompt = f"{BODY}\n{camera}"
+            reference = args.reference if condition == "with_reference" else None
             try:
                 data = (
                     base64.b64decode(_TINY_PNG_B64)
                     if args.mock
-                    else spec["generate"](spec["model"], prompt)
+                    else spec["generate"](spec["model"], prompt, reference)
                 )
             except Exception as exc:  # noqa: BLE001 -- one bad cell shouldn't end the sweep
                 print(f"  FAILED {spec_name}/{label}: {exc}")
@@ -196,8 +238,9 @@ def main() -> None:
 
     print(f"\nImages in {run_dir}")
     print(f"Score in {run_dir / 'SCORING.md'} -- one yes/no per image.")
-    print("\nIf every model fails every spec, camera direction is not promptable")
-    print("and no amount of rewording the CAMERA field will change that.")
+    print("\nIf the no-reference cells obey and the with-reference cells do not,")
+    print("the reference is overriding camera direction -- and the fix is in the")
+    print("conditioning, not in how the CAMERA field is worded.")
 
 
 if __name__ == "__main__":
