@@ -4,7 +4,7 @@ Date: 2026-09-16
 
 ## Status
 
-Accepted. Supersedes [0009](0009-previz-independent-review.md)'s flow and
+Accepted. Supersedes [0009](0009-previz-image-review.md)'s flow and
 closes out the narrow scope [0006](0006-narrow-v1-scope-single-image.md)
 set.
 
@@ -79,6 +79,6 @@ lightweight path in practice; a plan with one beat is the rest of it.
 updated in the same change. It also carried two other stale claims found
 while checking: that video generation goes through
 `litellm.video_generation()` (it has called Replicate directly since
-[0037](0037-horror-motion-comic-wan.md)) and that video generation is
+[0037](0037-horror-motion-comic-shorts-wan-via-replicate.md)) and that video generation is
 still deferred. A wider sweep for this kind of documentation rot is
 recorded as an open question in `docs/architecture.md`.
