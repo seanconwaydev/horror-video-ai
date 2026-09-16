@@ -8,10 +8,12 @@ from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
+    Beat,
     ScenePlanningError,
     _random_character_trait_hint,
     _resolve_composition_mode,
     _resolve_threat_mode,
+    check_cinematography_is_not_a_style_claim,
     run_scene_planning_stage,
 )
 
@@ -53,7 +55,7 @@ def _valid_payload(**overrides) -> dict:
                 "action": "checks her phone",
                 "camera": "medium shot",
                 "lighting": "bright midday sun",
-                "style": "photorealistic",
+                "cinematography": "35mm, shallow depth of field",
                 "audio": "street ambience",
                 "duration_seconds": "3",
             }
@@ -61,6 +63,21 @@ def _valid_payload(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def _beat(**overrides) -> Beat:
+    fields = {
+        "location_id": "street",
+        "subject": "The influencer",
+        "action": "checks her phone",
+        "camera": "medium shot",
+        "lighting": "bright midday sun",
+        "cinematography": "35mm, shallow depth of field",
+        "audio": "street ambience",
+        "duration_seconds": "3",
+    }
+    fields.update(overrides)
+    return Beat(**fields)
 
 
 def _fake_completion(content: str):
@@ -693,3 +710,49 @@ def test_run_scene_planning_stage_uses_staged_composition_rule_by_default():
     prompt = captured["messages"][0]["content"]
     assert 'the animation principle of "staging"' in prompt
     assert "Commit fully to a strange, asymmetric, or chaotic composition" not in prompt
+
+
+# --- cinematography must not claim an art style (docs/decisions/0039) ---
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "photorealistic, 35mm",
+        "shot like a CARTOON",
+        "cel-shaded look, shallow depth of field",
+        "35mm, deep focus, fine grain, photograph-like grade",
+    ],
+)
+def test_check_cinematography_rejects_art_style_claims(text):
+    """The planning prompt already forbids this and a real run did it
+    anyway, which is why it's a parse failure now rather than an
+    instruction (docs/decisions/0039)."""
+    beat = _beat(cinematography=text)
+    with pytest.raises(ScenePlanningError, match="art-style claim"):
+        check_cinematography_is_not_a_style_claim([beat])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "35mm, shallow depth of field",
+        "wide lens, heavy grain, cold blue grade",
+        "long lens, compressed background, warm highlights",
+    ],
+)
+def test_check_cinematography_allows_genuine_lens_and_grade_notes(text):
+    check_cinematography_is_not_a_style_claim([_beat(cinematography=text)])
+
+
+def test_parse_scene_plan_rejects_a_style_claim_in_cinematography():
+    payload = _valid_payload()
+    payload["beats"][0]["cinematography"] = "photorealistic, 35mm"
+
+    def _completion(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+        )
+
+    with pytest.raises(ScenePlanningError, match="art-style claim"):
+        run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)

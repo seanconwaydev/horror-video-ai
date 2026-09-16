@@ -8,6 +8,9 @@ import pytest
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.previz import (
+    _STYLE_INSTRUCTIONS,
+    DEFAULT_STYLE,
+    STYLE_PRESETS,
     PrevizError,
     build_character_sheet_prompt,
     build_location_reference_prompt,
@@ -61,9 +64,10 @@ def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
 
 
 def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
-    # See docs/decisions/0011: requests an aspect ratio close to Sora-2's
-    # target size so video_generation only needs a barely-perceptible
-    # resize, not a large content-losing crop.
+    # 9:16 portrait for this project's Shorts-only format
+    # (docs/decisions/0002). This used to be driven by Sora's pixel-exact
+    # reference-image requirement; docs/decisions/0038 removed that
+    # coupling, so previz now owns the choice.
     captured = {}
 
     def _image_fn(**kwargs):
@@ -408,7 +412,7 @@ def _beat() -> Beat:
         action="checks her phone, puzzled",
         camera="medium shot, three-quarter angle",
         lighting="bright midday sun",
-        style="photorealistic",
+        cinematography="35mm, shallow depth of field",
         audio="street ambience",
         duration_seconds="3",
     )
@@ -429,17 +433,30 @@ def test_build_location_reference_prompt_includes_all_location_fields():
     assert "location reference, not a character shot" in prompt
 
 
-def test_build_character_sheet_prompt_defaults_to_photorealistic():
-    # docs/decisions/0033: single authoritative style source.
+def test_build_character_sheet_prompt_defaults_to_the_default_preset():
+    # docs/decisions/0033, 0039: one authoritative style source, and the
+    # default is a committed preset rather than a hedged catch-all.
     prompt = build_character_sheet_prompt(_character())
-    assert "Photorealistic" in prompt
-    assert "NOT 3D-rendered" in prompt
+    assert _STYLE_INSTRUCTIONS[DEFAULT_STYLE] in prompt
 
 
-def test_build_character_sheet_prompt_honors_stylized_style():
-    prompt = build_character_sheet_prompt(_character(), style="stylized")
-    assert "stylized/cartoon" in prompt
-    assert "Explicitly NOT photorealistic" in prompt
+def test_build_character_sheet_prompt_honors_a_named_preset():
+    prompt = build_character_sheet_prompt(_character(), style="painterly")
+    assert "painterly illustration" in prompt
+    assert "NOT photorealistic" in prompt
+
+
+@pytest.mark.parametrize("name", sorted(STYLE_PRESETS))
+def test_every_style_preset_is_committed_not_hedged(name):
+    """Regression test for docs/decisions/0039. The old `stylized` entry was
+    ~100 words that offered several directions, disclaimed each, and said
+    consistency was "not required or expected" -- it lost 5-0 on style in a
+    blind A/B. Every preset must state one direction and rule others out."""
+    text = _STYLE_INSTRUCTIONS[name]
+    assert len(text.split()) <= 45, f"{name} is long enough to be hedging"
+    assert "NOT" in text or "NO " in text, f"{name} states no negative constraint"
+    for hedge in ("among several", "equally valid", "not required", "loosely interpreted"):
+        assert hedge not in text, f"{name} contains hedging language: {hedge!r}"
 
 
 def test_build_character_sheet_prompt_honors_semi_realistic_style():
@@ -448,8 +465,8 @@ def test_build_character_sheet_prompt_honors_semi_realistic_style():
 
 
 def test_build_location_reference_prompt_honors_style():
-    prompt = build_location_reference_prompt(_location(), style="stylized")
-    assert "stylized/cartoon" in prompt
+    prompt = build_location_reference_prompt(_location(), style="cel-shaded")
+    assert "Cel-shaded" in prompt
 
 
 def test_build_character_sheet_prompt_raises_on_unknown_style():
@@ -473,21 +490,27 @@ def test_run_beat_image_stage_writes_image_and_prompt_includes_beat_fields(tmp_p
     assert "light brown wavy" in result.prompt_used
 
 
-def test_run_beat_image_stage_uses_style_as_overriding_requirement(tmp_path):
-    # docs/decisions/0033: beat.style is kept (cinematography notes), but
-    # the run's authoritative style always appears too, as an override.
+def test_run_beat_image_stage_states_style_exactly_once(tmp_path):
+    """docs/decisions/0039. This previously emitted the beat's own style
+    text as a STYLE line and then an "OVERRIDING STYLE REQUIREMENT" line
+    contradicting it, shipping the conflict for the model to adjudicate.
+    STYLE must now appear once, sourced only from the run's preset, with
+    the beat's lens/grade notes attached to CAMERA instead."""
     result = run_beat_image_stage(
         _beat(),
         character=_character(),
         location=_location(),
-        style="stylized",
+        style="cel-shaded",
         image_fn=_fake_image_fn(_TINY_PNG_B64),
         output_dir=tmp_path,
     )
 
-    assert "photorealistic" in result.prompt_used  # beat.style's own text, unchanged
-    assert "OVERRIDING STYLE REQUIREMENT" in result.prompt_used
-    assert "stylized/cartoon" in result.prompt_used
+    assert result.prompt_used.count("STYLE:") == 1
+    assert "OVERRIDING STYLE REQUIREMENT" not in result.prompt_used
+    assert _STYLE_INSTRUCTIONS["cel-shaded"] in result.prompt_used
+    # The beat's own lens/grade notes survive, attached to CAMERA.
+    assert "35mm, shallow depth of field" in result.prompt_used
+    assert result.prompt_used.index("CAMERA:") < result.prompt_used.index("STYLE:")
 
 
 def test_run_beat_image_stage_omits_character_block_when_none_given(tmp_path):

@@ -66,7 +66,7 @@ class Beat:
     action: str
     camera: str
     lighting: str
-    style: str
+    cinematography: str
     audio: str
     duration_seconds: str
 
@@ -425,11 +425,12 @@ explicitly state in `action` or `camera` that the screen face is NOT \
 visible to camera -- we see its back or edge instead. Image models \
 default to rendering a screen's face toward the viewer regardless of the \
 described geometry unless told the opposite outright.
-- `style` is for per-beat cinematography notes only (lens choice, depth of \
-field, film grain, color grade) -- always include "no on-screen text/UI/\
-logos". The overall realism level (photorealistic, semi-realistic, or \
-stylized) is set once for the whole run elsewhere and always overrides \
-whatever `style` says here, so do not make realism claims in this field.
+- `cinematography` is for per-beat lens and grade notes ONLY: lens choice, \
+depth of field, film grain, colour grade. It must NOT describe the art \
+style or realism level -- do not write "photorealistic", "cartoon", \
+"anime", "illustration", "3D render", "stylized" or similar here. The \
+run's art style is chosen once elsewhere and is the only thing that sets \
+it; a realism claim in this field is rejected outright, not overridden.
 - Keep the camera on one consistent side of the "line of action" across \
 consecutive beats at the same location (the 180-degree rule) -- if a \
 character is moving left-to-right or two characters face each other \
@@ -480,7 +481,7 @@ this exact shape:
   ],
   "beats": [
     {{"location_id": "<must match a location id above>", "subject": "...",
-      "action": "...", "camera": "...", "lighting": "...", "style": "...",
+      "action": "...", "camera": "...", "lighting": "...", "cinematography": "...",
       "audio": "...", "duration_seconds": "..."}}
   ]
 }}
@@ -506,6 +507,54 @@ def check_unique_ids(items: list, *, label: str) -> None:
     if len(ids) != len(set(ids)):
         dupes = sorted({i for i in ids if ids.count(i) > 1})
         raise ScenePlanningError(f"Duplicate {label} id(s): {dupes}")
+
+
+# Vocabulary that describes an art style or realism level rather than a
+# lens or a grade. A beat may not claim one: the run's single chosen style
+# preset is the only thing allowed to set it (docs/decisions/0039).
+_STYLE_CLAIM_WORDS = (
+    "photorealistic",
+    "photoreal",
+    "photograph",
+    "cartoon",
+    "anime",
+    "illustration",
+    "illustrated",
+    "3d render",
+    "3d-render",
+    "cgi",
+    "stylized",
+    "cel-shaded",
+    "cel shaded",
+    "painterly",
+    "comic",
+)
+
+
+def check_cinematography_is_not_a_style_claim(beats: list) -> None:
+    """Raise ScenePlanningError if any beat's `cinematography` describes an
+    art style or realism level instead of lens/grade notes.
+
+    A prompt rule already tells the planner not to do this, and the planner
+    did it anyway -- a real run emitted "35mm, deep focus, fine grain, cold
+    blue-black grade" into what was then called `style`, which previz
+    rendered as a STYLE line competing with the run's actual chosen style.
+    An instruction the model can ignore is the weakest possible guarantee,
+    so this makes the claim fail to parse instead (docs/decisions/0039).
+
+    Also re-run after human edits, like the other checks here, since a
+    hand-edit can introduce exactly what the planner was stopped from
+    writing (same reasoning as docs/decisions/0028).
+    """
+    for beat in beats:
+        text = beat.cinematography.lower()
+        found = sorted({w for w in _STYLE_CLAIM_WORDS if w in text})
+        if found:
+            raise ScenePlanningError(
+                f"A beat's 'cinematography' field makes an art-style claim ({', '.join(found)}): "
+                f"{beat.cinematography!r}. That field is for lens and grade notes only -- the "
+                "run's style preset is the single source for art style (docs/decisions/0039)."
+            )
 
 
 def check_beat_location_references(beats: list, locations: list) -> None:
@@ -583,11 +632,13 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
     for item in data.get("beats", []):
         _require_str_fields(
             item,
-            ["location_id", "subject", "action", "camera", "lighting", "style", "audio", "duration_seconds"],
+            ["location_id", "subject", "action", "camera", "lighting", "cinematography", "audio",
+             "duration_seconds"],
             item_desc="A beat",
         )
         beats.append(Beat(**{f: item[f] for f in Beat.__dataclass_fields__}))
     check_beat_location_references(beats, locations)
+    check_cinematography_is_not_a_style_claim(beats)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")

@@ -763,7 +763,7 @@ def _beat(location_id="street", action="checks her phone") -> Beat:
         action=action,
         camera="medium shot",
         lighting="bright midday sun",
-        style="photorealistic",
+        cinematography="35mm, shallow depth of field",
         audio="street ambience",
         duration_seconds="3",
     )
@@ -841,7 +841,7 @@ def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
 
 
 def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path, monkeypatch):
-    # docs/decisions/0033
+    # docs/decisions/0033, 0039
     monkeypatch.setattr("builtins.input", lambda _: "y")
     captured_prompts = []
 
@@ -854,11 +854,11 @@ def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _capturing_image_fn},
         out_dir=tmp_path,
-        style="stylized",
+        style="cel-shaded",
     )
 
     assert len(captured_prompts) == 2
-    assert all("stylized/cartoon" in p for p in captured_prompts)
+    assert all("Cel-shaded" in p for p in captured_prompts)
 
 
 def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypatch):
@@ -1305,9 +1305,9 @@ def _write_previz_run_log(run_dir, *, image_path=None, prompt="A prompt from pre
     run_dir.mkdir(parents=True, exist_ok=True)
     if image_path is None:
         image_path = run_dir / "previz.png"
-        # A real PNG already at Sora's target size -- video_generation
-        # genuinely opens and resizes this with Pillow now, so arbitrary
-        # bytes no longer work here.
+        # A real 9:16 PNG standing in for a previz output. The video
+        # stage no longer opens it (docs/decisions/0038), but the run log
+        # it's referenced from is read by code that does.
         Image.new("RGB", (720, 1280), color="blue").save(image_path, format="PNG")
     log = {"previz_image_path": str(image_path), "previz_prompt_used": prompt}
     (run_dir / "run_log.json").write_text(json.dumps(log))
@@ -1474,7 +1474,7 @@ def test_run_video_generation_only_generates_one_video_per_beat(tmp_path):
     run_dir = tmp_path / "run_new"
     _write_multi_beat_run_log(run_dir)
 
-    _run_video_generation_only([run_dir], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([run_dir], mock=True, video_model="replicate/owner/model")
 
     log = json.loads((run_dir / "run_log.json").read_text())
     assert len(log["previz_beats"][0]["videos"]) == 1
@@ -1492,7 +1492,7 @@ def test_run_video_generation_only_writes_video_into_source_run_dir(tmp_path):
     _write_previz_run_log(source_a, prompt="Scene A's prompt.")
     _write_previz_run_log(source_b, prompt="Scene B's prompt.")
 
-    _run_video_generation_only([source_a, source_b], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([source_a, source_b], mock=True, video_model="replicate/owner/model")
 
     videos_a = list(source_a.glob("video_*.mp4"))
     videos_b = list(source_b.glob("video_*.mp4"))
@@ -1510,13 +1510,13 @@ def test_run_video_generation_only_appends_to_existing_run_log(tmp_path):
     _write_previz_run_log(source_a, prompt="Scene A's prompt.")
     original_log = json.loads((source_a / "run_log.json").read_text())
 
-    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([source_a], mock=True, video_model="replicate/owner/model")
 
     log = json.loads((source_a / "run_log.json").read_text())
     # Everything previz/research/fact-check already wrote is still there.
     assert log["previz_prompt_used"] == original_log["previz_prompt_used"]
     assert len(log["videos"]) == 1
-    assert log["videos"][0]["video_generation_model"] == "openai/sora-2"
+    assert log["videos"][0]["video_generation_model"] == "replicate/owner/model"
     assert Path(log["videos"][0]["video_path"]).parent == source_a
 
 
@@ -1524,7 +1524,7 @@ def test_run_video_generation_only_records_prompt_used_per_video(tmp_path):
     source_a = tmp_path / "source_run_a"
     _write_previz_run_log(source_a, prompt="Scene A's prompt.")
 
-    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([source_a], mock=True, video_model="replicate/owner/model")
 
     log = json.loads((source_a / "run_log.json").read_text())
     assert log["videos"][0]["prompt_used"] == "Scene A's prompt."
@@ -1539,7 +1539,7 @@ def test_run_video_generation_only_video_prompt_overrides_saved_prompt(tmp_path)
     _run_video_generation_only(
         [source_a],
         mock=True,
-        video_model="openai/sora-2",
+        video_model="replicate/owner/model",
         video_prompt="A hand-written, timecoded video prompt.",
     )
 
@@ -1554,10 +1554,6 @@ def test_check_video_prompt_practices_flags_missing_character_block():
     found = _check_video_prompt_practices("Just a plain description with no structure.")
     assert any("CHARACTER" in w for w in found)
 
-
-def test_check_video_prompt_practices_flags_missing_audio():
-    found = _check_video_prompt_practices("CHARACTER: Someone\nAction: walks.")
-    assert any("Audio" in w for w in found)
 
 
 def test_check_video_prompt_practices_flags_too_many_beats():
@@ -1579,18 +1575,19 @@ def test_check_video_prompt_practices_flags_too_many_beats_with_en_dash_timecode
     assert any("beats" in w for w in found)
 
 
-def test_check_video_prompt_practices_flags_risky_wording():
-    prompt = "CHARACTER: Someone\nAudio: footsteps.\nAction: prepares to attack with a weapon."
-    found = _check_video_prompt_practices(prompt)
-    assert any("attack" in w and "weapon" in w for w in found)
 
 
-def test_check_video_prompt_practices_flags_inflected_risky_wording():
-    # Regression test: an exact-word match let inflected forms of the same
-    # risk words through undetected.
-    prompt = "CHARACTER: Someone\nAudio: footsteps.\nAction: soldiers attacking with weapons."
-    found = _check_video_prompt_practices(prompt)
-    assert any("attack" in w and "weapon" in w for w in found)
+def test_check_video_prompt_practices_does_not_flag_horror_vocabulary():
+    """Regression test for docs/decisions/0038. These checks used to warn
+    about words that had tripped Sora's moderation -- "attack", "weapon",
+    "blood" and similar -- which steered prompts away from exactly the
+    vocabulary this project's own genre needs. The video model those
+    warnings protected against is gone, and so are they."""
+    prompt = (
+        "CHARACTER: Someone\n"
+        "(0-3s) Action: a shape attacks from the dark, a weapon raised, blood on the wall."
+    )
+    assert _check_video_prompt_practices(prompt) == []
 
 
 def test_check_video_prompt_practices_returns_nothing_for_a_well_formed_prompt():
@@ -1613,7 +1610,7 @@ def test_run_video_generation_only_prints_practice_warnings_but_still_generates(
     _run_video_generation_only(
         [source_a],
         mock=True,
-        video_model="openai/sora-2",
+        video_model="replicate/owner/model",
         video_prompt="No structure at all here.",
     )
 
@@ -1630,8 +1627,8 @@ def test_run_video_generation_only_accumulates_multiple_video_attempts(tmp_path)
     source_a = tmp_path / "source_run_a"
     _write_previz_run_log(source_a, prompt="Scene A's prompt.")
 
-    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
-    _run_video_generation_only([source_a], mock=True, video_model="openai/sora-2")
+    _run_video_generation_only([source_a], mock=True, video_model="replicate/owner/model")
+    _run_video_generation_only([source_a], mock=True, video_model="replicate/owner/model")
 
     assert len(list(source_a.glob("video_*.mp4"))) == 2
     log = json.loads((source_a / "run_log.json").read_text())

@@ -1,6 +1,6 @@
 # YouTube monetization policy — research
 
-Last updated: 2026-08-12
+Last updated: 2026-09-15
 
 This is primary-source research, not analysis or a decision — see [decisions/](../decisions) for how the pipeline responds to what's documented here.
 
@@ -41,3 +41,27 @@ Full ad monetization requires 1,000 subscribers and either 4,000 watch hours in 
 ## Video length rules
 
 YouTube's Shorts max length is 3 minutes (raised from 60 seconds in October 2024), but the best-performing range is roughly 30–60 seconds, with 50–60 second Shorts substantially outperforming anything under 10 seconds. Mid-roll ad eligibility for long-form video requires a minimum of 8 minutes.
+
+## Violence, horror, and visual realism
+
+Sources: YouTube's "Advertiser-friendly content guidelines" (support.google.com/youtube/answer/6162278) and "Disclosing use of altered or synthetic content" (support.google.com/youtube/answer/14328491), both fetched 2026-09-15.
+
+Researched after this project committed to horror ([decisions/0037](../decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md)), to check a specific worry: that photorealistic horror might be flagged more harshly than stylized horror. The answer splits across two different policies that pull in different directions.
+
+### The violence policy does not care about visual style
+
+The advertiser-friendly guidelines distinguish **real-world** violence from **dramatized** violence, not photorealistic from stylized. "Dramatized content depicting non-graphic violence or graphic violence" is monetizable, explicitly including "fighting violence excerpts from an action movie (such as scripted content) where injuries are mostly indiscernible." Real graphic imagery — actual dead bodies outside an educational context — gets no ads. Context (news, educational, artistic, documentary) is stated as materially important.
+
+An AI-generated horror short is dramatized fiction whether it is rendered photorealistically or as a cartoon, so on this axis the choice of visual style is not the thing being judged. One caveat worth stating as unverified: the policy language assumes a reviewer can tell fiction from real footage. Whether an *automated* first-pass classifier reliably makes that distinction on photorealistic AI video is not addressed by any source found, and should be treated as an open risk rather than a documented one.
+
+### The synthetic-content disclosure policy cares a great deal about visual style
+
+This is where realism has a real, documented cost. Creators must disclose content that is "realistic" — meaning "content a viewer could easily mistake for a real person, place, scene, or event" — when it is generated or meaningfully altered with AI. Disclosed realistic content carries a label, and "for photorealistic AI content, a label in the video player may also appear."
+
+Content that is "clearly unrealistic, animated, includes special effects, or has used generative AI for production assistance" is explicitly **exempt** from the disclosure requirement.
+
+YouTube states that disclosure itself "won't limit a video's audience or impact its eligibility to earn money," so this is not a monetization penalty. But it is a real operational difference: photorealistic output creates a per-upload disclosure obligation and a viewer-facing label, and YouTube "may add a label even when a creator hasn't disclosed it." Stylized output avoids that category entirely.
+
+### Mapped to the pipeline
+
+Neither policy forbids photorealistic horror. The practical asymmetry is that stylized output sits outside the synthetic-content disclosure regime, while photorealistic output sits inside it. That is a point in favour of stylized as a *default*, not an argument against ever choosing realism — which is consistent with treating style as a per-video decision rather than a global one.
