@@ -1329,7 +1329,7 @@ def _generate_scene_references(
     previz_model: str,
     image_kwargs: dict,
     out_dir: Path,
-    style: str = "photorealistic",
+    style: str = DEFAULT_STYLE,
     auto_yes: bool = False,
 ) -> tuple[dict[str, Path], dict[str, Path]]:
     """Generate one canonical reference image per Character and per
@@ -1398,7 +1398,7 @@ def _generate_beats_with_choices(
     image_kwargs: dict,
     review_kwargs: dict,
     out_dir: Path,
-    style: str = "photorealistic",
+    style: str = DEFAULT_STYLE,
     requires_grounding: bool = True,
     auto_yes: bool = False,
 ) -> list[dict]:
