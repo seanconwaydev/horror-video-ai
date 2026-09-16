@@ -66,7 +66,6 @@ class Beat:
     action: str
     camera: str
     lighting: str
-    cinematography: str
     audio: str
     duration_seconds: str
     #: Every character visible in this beat, by id -- not just the focal
@@ -465,12 +464,7 @@ explicitly state in `action` or `camera` that the screen face is NOT \
 visible to camera -- we see its back or edge instead. Image models \
 default to rendering a screen's face toward the viewer regardless of the \
 described geometry unless told the opposite outright.
-- `cinematography` is for per-beat lens and grade notes ONLY: lens choice, \
-depth of field, film grain, colour grade. It must NOT describe the art \
-style or realism level -- do not write "photorealistic", "cartoon", \
-"anime", "illustration", "3D render", "stylized" or similar here. The \
-run's art style is chosen once elsewhere and is the only thing that sets \
-it; a realism claim in this field is rejected outright, not overridden.
+
 - Keep SCREEN DIRECTION consistent across consecutive beats at the same \
 location -- if the character moves or faces toward the left of frame in \
 one beat, keep that in the next unless something in the story turns them \
@@ -523,7 +517,7 @@ this exact shape:
   "beats": [
     {{"location_id": "<must match a location id above>", "subject": "...",
       "character_ids": ["<every character id visible in this beat>"],
-      "action": "...", "camera": "...", "lighting": "...", "cinematography": "...",
+      "action": "...", "camera": "...", "lighting": "...",
       "audio": "...", "duration_seconds": "..."}}
   ]
 }}
@@ -551,62 +545,6 @@ def check_unique_ids(items: list, *, label: str) -> None:
         raise ScenePlanningError(f"Duplicate {label} id(s): {dupes}")
 
 
-# Vocabulary that describes an art style or realism level rather than a
-# lens or a grade. A beat may not claim one: the run's single chosen style
-# preset is the only thing allowed to set it (docs/decisions/0039).
-_STYLE_CLAIM_WORDS = (
-    "photorealistic",
-    "photoreal",
-    "photograph",
-    "cartoon",
-    "anime",
-    "illustration",
-    "illustrated",
-    "3d render",
-    "3d-render",
-    "cgi",
-    "stylized",
-    "cel-shaded",
-    "cel shaded",
-    "painterly",
-    "comic",
-)
-
-
-def check_cinematography_is_not_a_style_claim(beats: list) -> None:
-    """Raise ScenePlanningError if any beat's `cinematography` describes an
-    art style or realism level instead of lens/grade notes.
-
-    A prompt rule already tells the planner not to do this, and the planner
-    did it anyway -- a real run emitted "35mm, deep focus, fine grain, cold
-    blue-black grade" into what was then called `style`, which previz
-    rendered as a STYLE line competing with the run's actual chosen style.
-    An instruction the model can ignore is the weakest possible guarantee,
-    so this makes the claim fail to parse instead (docs/decisions/0039).
-
-    Also re-run after human edits, like the other checks here, since a
-    hand-edit can introduce exactly what the planner was stopped from
-    writing (same reasoning as docs/decisions/0028).
-    """
-    for beat in beats:
-        text = beat.cinematography.lower()
-        found = sorted({w for w in _STYLE_CLAIM_WORDS if w in text})
-        if found:
-            raise ScenePlanningError(
-                f"A beat's 'cinematography' field makes an art-style claim ({', '.join(found)}): "
-                f"{beat.cinematography!r}. That field is for lens and grade notes only -- the "
-                "run's style preset is the single source for art style (docs/decisions/0039)."
-            )
-
-
-# Phrases that describe what a character DOES rather than what they look
-# like. Evidence-based and expected to be incomplete, in the same spirit as
-# every other pattern list here -- each entry comes from a real plan, not a
-# guess. The first four come from one run where a stalking figure's
-# `distinguishing_detail` read "Stands perfectly still with both arms
-# straight at its sides and its head tilted slightly to one shoulder",
-# which was then emitted into every beat prompt and left the figure unable
-# to do anything but stand there.
 _POSE_IN_IDENTITY_PATTERNS = (
     "perfectly still",
     "arms straight at",
@@ -760,7 +698,7 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
     for item in data.get("beats", []):
         _require_str_fields(
             item,
-            ["location_id", "subject", "action", "camera", "lighting", "cinematography", "audio",
+            ["location_id", "subject", "action", "camera", "lighting", "audio",
              "duration_seconds"],
             item_desc="A beat",
         )
@@ -789,7 +727,6 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
             )
         )
     check_beat_location_references(beats, locations)
-    check_cinematography_is_not_a_style_claim(beats)
     check_beat_character_references(beats, characters)
     check_identity_fields_describe_appearance(characters)
 

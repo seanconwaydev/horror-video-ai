@@ -413,7 +413,6 @@ def _beat(**overrides) -> Beat:
         "action": "checks her phone, puzzled",
         "camera": "medium shot, three-quarter angle",
         "lighting": "bright midday sun",
-        "cinematography": "35mm, shallow depth of field",
         "audio": "street ambience",
         "duration_seconds": "3",
     }
@@ -541,9 +540,12 @@ def test_run_beat_image_stage_states_style_exactly_once(tmp_path):
     assert result.prompt_used.count("STYLE:") == 1
     assert "OVERRIDING STYLE REQUIREMENT" not in result.prompt_used
     assert _STYLE_INSTRUCTIONS["cel-shaded"] in result.prompt_used
-    # The beat's own lens/grade notes survive, attached to CAMERA.
-    assert "35mm, shallow depth of field" in result.prompt_used
     assert result.prompt_used.index("CAMERA:") < result.prompt_used.index("STYLE:")
+    # docs/decisions/0045: the beat's lens/grade notes are gone entirely --
+    # they were a second style source contradicting the STYLE line, and they
+    # made up ~75% of the CAMERA line they were attached to.
+    assert "35mm grain" not in result.prompt_used
+    assert "depth of field" not in result.prompt_used
 
 
 def test_run_beat_image_stage_omits_character_block_when_none_given(tmp_path):
