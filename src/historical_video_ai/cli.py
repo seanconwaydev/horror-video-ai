@@ -176,9 +176,15 @@ def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
                     "location_id": "mock-location",
                     "subject": "[MOCK]",
                     "action": "[MOCK]",
+                    "staging": [
+                        {
+                            "character_id": "mock-character",
+                            "action": "[MOCK]",
+                            "frame_position": "[MOCK]",
+                        }
+                    ],
                     "camera": "[MOCK]",
                     "lighting": "[MOCK]",
-                    "cinematography": "[MOCK]",
                     "audio": "[MOCK]",
                     "duration_seconds": "4",
                 }
@@ -343,7 +349,17 @@ def _resolve_flags(
 
 def _print_item_fields(item: object) -> None:
     for f in dataclasses.fields(item):
-        print(f"  {f.name}: {getattr(item, f.name)}")
+        value = getattr(item, f.name)
+        # staging is a list of dataclasses; its repr is unreadable in a
+        # review prompt, and this is the field a human most needs to read
+        # (docs/decisions/0049).
+        if f.name == "staging" and value:
+            print("  staging:")
+            for s in value:
+                print(f"    - {s.character_id}: {s.action}")
+                print(f"      in frame: {s.frame_position}")
+            continue
+        print(f"  {f.name}: {value}")
 
 
 # A Beat has 8 fields, but a human editing one is almost always reacting
@@ -352,7 +368,7 @@ def _print_item_fields(item: object) -> None:
 # location_id, which shouldn't change here without the revalidation
 # decisions/0028 requires for a real structural edit) was real, reported
 # friction. These three are what actually drives what gets rendered.
-_BEAT_QUICK_EDIT_FIELDS = ("action", "camera", "lighting")
+_BEAT_QUICK_EDIT_FIELDS = ("staging", "action", "camera", "lighting")
 
 
 def _beat_with_review_corrections(beat: Beat, previous_concerns: list[str]) -> Beat:
@@ -386,6 +402,28 @@ def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) ->
     field_names = fields if fields is not None else [f.name for f in dataclasses.fields(item)]
     for name in field_names:
         current = getattr(item, name)
+        # staging is a list of dataclasses, so walk into it rather than
+        # asking for a literal repr back. It is also where a beat's most
+        # editable content now lives (docs/decisions/0049).
+        if name == "staging":
+            edited = [
+                dataclasses.replace(
+                    s,
+                    **{
+                        k: v
+                        for k, v in (
+                            ("action", input(f"  {s.character_id} action [{s.action}]: ").strip()),
+                            ("frame_position",
+                             input(f"  {s.character_id} in frame [{s.frame_position}]: ").strip()),
+                        )
+                        if v
+                    },
+                )
+                for s in current
+            ]
+            if edited != list(current):
+                updates[name] = edited
+            continue
         new_value = input(f"  {name} [{current}]: ").strip()
         if new_value:
             updates[name] = new_value
@@ -1649,9 +1687,10 @@ def _generate_beats_with_choices(
 
     for i, beat in enumerate(scene_plan.beats, start=1):
         # Every character the beat says is present, not just the scene's
-        # first one (docs/decisions/0041). A beat that names nobody falls
-        # back to the first character, which is what every beat got before.
-        beat_character_ids = beat.character_ids or (
+        # first one (docs/decisions/0041, now via staging -- 0049). A beat
+        # that stages nobody falls back to the first character, which is
+        # what every beat got before.
+        beat_character_ids = [s.character_id for s in beat.staging] or (
             [scene_plan.characters[0].id] if scene_plan.characters else []
         )
         beat_characters = [
