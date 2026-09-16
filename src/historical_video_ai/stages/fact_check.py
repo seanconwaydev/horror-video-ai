@@ -78,7 +78,7 @@ class FactCheckResult:
     rather than correct (docs/decisions/0025) -- carried forward so
     previz_review knows not to re-flag that specific, already-acknowledged
     thing as a new problem (docs/decisions/0026), unlike `premise_conflict`
-    itself, which is cleared once acknowledged so run_previz_stage's own
+    itself, which is cleared once acknowledged so the downstream stage's own
     hard-refuse check is satisfied.
     """
 

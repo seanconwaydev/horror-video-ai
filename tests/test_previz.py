@@ -7,7 +7,7 @@ import litellm
 import pytest
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
+from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import (
     _STYLE_INSTRUCTIONS,
     DEFAULT_STYLE,
@@ -17,7 +17,6 @@ from historical_video_ai.stages.previz import (
     build_location_reference_prompt,
     run_beat_image_stage,
     run_previz_review_stage,
-    run_previz_stage,
     run_reference_image_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet
@@ -51,20 +50,7 @@ def _fake_image_fn(b64_json: str):
     return _image_fn
 
 
-def test_run_previz_stage_writes_image_and_returns_prompt(tmp_path):
-    result = run_previz_stage(
-        _fact_check_result(),
-        model="gemini/gemini-2.5-flash-image",
-        image_fn=_fake_image_fn(_TINY_PNG_B64),
-        output_dir=tmp_path,
-    )
-
-    assert result.image_path.exists()
-    assert result.image_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic bytes
-    assert "Kitty Hawk" in result.prompt_used
-
-
-def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
+def test_beat_image_requests_a_video_aspect_ratio_hint(tmp_path):
     # 9:16 portrait for this project's Shorts-only format
     # (docs/decisions/0002). This used to be driven by Sora's pixel-exact
     # reference-image requirement; docs/decisions/0038 removed that
@@ -75,8 +61,8 @@ def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
         captured.update(kwargs)
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
-    run_previz_stage(
-        _fact_check_result(),
+    run_beat_image_stage(
+        _beat(),
         model="gemini/gemini-2.5-flash-image",
         image_fn=_image_fn,
         output_dir=tmp_path,
@@ -85,81 +71,20 @@ def test_run_previz_stage_requests_a_video_aspect_ratio_hint(tmp_path):
     assert captured["size"] == "720x1280"
 
 
-def test_run_previz_stage_includes_all_fact_sheet_claims_unfiltered(tmp_path):
-    # previz trusts fact_sheet.claims as already resolved -- flags no
-    # longer cause any auto-exclusion here (see cli.py's _resolve_flags,
-    # which is where a human now decides to accept/cut/soften a flagged
-    # claim before it ever reaches this stage).
-    flags = [
-        ClaimFlag(
-            claim_text="This claim will be contradicted.",
-            concern="Doesn't hold up.",
-            severity="contradicted",
-        )
-    ]
-
-    result = run_previz_stage(
-        _fact_check_result(flags),
-        model="gemini/gemini-2.5-flash-image",
-        image_fn=_fake_image_fn(_TINY_PNG_B64),
-        output_dir=tmp_path,
-    )
-
-    assert "This claim will be contradicted." in result.prompt_used
-    assert "undeveloped in 1903" in result.prompt_used
-
-
-def test_run_previz_stage_prompt_warns_against_claims_from_other_eras(tmp_path):
-    # Regression test: a real run depicting Giza in 1991-1993 included a
-    # true, correctly-cited research claim about a *recent* LED lighting
-    # upgrade at the pyramids -- with no signal that it didn't apply to the
-    # depicted moment, the image model rendered modern wall lamps into the
-    # scene three times in a row (all three real reviews rejected it for
-    # exactly this anachronism). The prompt must now tell the model claims
-    # can describe other eras and only the stated Time should be depicted.
-    result = run_previz_stage(
-        _fact_check_result(),
-        model="gemini/gemini-2.5-flash-image",
-        image_fn=_fake_image_fn(_TINY_PNG_B64),
-        output_dir=tmp_path,
-    )
-
-    assert "December 1903" in result.prompt_used
-    assert "other times" in result.prompt_used
-
-
-def test_run_previz_stage_refuses_unresolved_premise_conflict(tmp_path):
-    result_with_conflict = FactCheckResult(
-        fact_sheet=_fact_check_result().fact_sheet,
-        premise_conflict=PremiseConflict(
-            explanation="Nothing like this existed at this time and place.",
-            suggested_alternative=None,
-        ),
-    )
-
-    with pytest.raises(PrevizError, match="historically impossible"):
-        run_previz_stage(
-            result_with_conflict,
-            model="gemini/gemini-2.5-flash-image",
-            image_fn=_fake_image_fn(_TINY_PNG_B64),
-            output_dir=tmp_path,
-        )
-
-
-def test_run_previz_stage_raises_when_no_image_data(tmp_path):
+def test_beat_image_raises_when_no_image_data(tmp_path):
     def _empty_image_fn(**kwargs):
         return SimpleNamespace(data=[])
 
     with pytest.raises(PrevizError, match="no image data"):
-        run_previz_stage(
-            _fact_check_result(),
+        run_beat_image_stage(
+            _beat(),
             model="gemini/gemini-2.5-flash-image",
             image_fn=_empty_image_fn,
             output_dir=tmp_path,
         )
 
 
-def test_run_previz_stage_hints_at_moderation_for_empty_data_list(tmp_path):
+def test_beat_image_hints_at_moderation_for_empty_data_list(tmp_path):
     # A present-but-empty `data` list (a successful call, zero images) is
     # distinct from a malformed response object -- worth a specific,
     # actionable hint rather than a bare "no image data" message, since a
@@ -169,27 +94,27 @@ def test_run_previz_stage_hints_at_moderation_for_empty_data_list(tmp_path):
         return SimpleNamespace(data=[])
 
     with pytest.raises(PrevizError, match="silently refused"):
-        run_previz_stage(
-            _fact_check_result(),
+        run_beat_image_stage(
+            _beat(),
             model="gemini/gemini-2.5-flash-image",
             image_fn=_empty_image_fn,
             output_dir=tmp_path,
         )
 
 
-def test_run_previz_stage_resolves_model_from_config_when_not_passed(tmp_path):
+def test_beat_image_resolves_model_from_config_when_not_passed(tmp_path):
     captured = {}
 
     def _image_fn(**kwargs):
         captured["model"] = kwargs["model"]
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
-    run_previz_stage(_fact_check_result(), image_fn=_image_fn, output_dir=tmp_path)
+    run_beat_image_stage(_beat(), image_fn=_image_fn, output_dir=tmp_path)
 
     assert captured["model"] == get_stage_model("previz")
 
 
-def test_run_previz_stage_retries_on_transient_error_then_succeeds(tmp_path):
+def test_beat_image_retries_on_transient_error_then_succeeds(tmp_path):
     calls = {"n": 0}
 
     def _flaky_image_fn(**kwargs):
@@ -201,8 +126,8 @@ def test_run_previz_stage_retries_on_transient_error_then_succeeds(tmp_path):
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
     retries_seen = []
-    result = run_previz_stage(
-        _fact_check_result(),
+    result = run_beat_image_stage(
+        _beat(),
         image_fn=_flaky_image_fn,
         output_dir=tmp_path,
         sleep_fn=lambda _seconds: None,
@@ -214,22 +139,22 @@ def test_run_previz_stage_retries_on_transient_error_then_succeeds(tmp_path):
     assert retries_seen == [(1, "ServiceUnavailableError"), (2, "ServiceUnavailableError")]
 
 
-def test_run_previz_stage_raises_after_exhausting_transient_retries(tmp_path):
+def test_beat_image_raises_after_exhausting_transient_retries(tmp_path):
     def _always_503(**kwargs):
         raise litellm.exceptions.ServiceUnavailableError(
             message="simulated 503", llm_provider="gemini", model="gemini-2.5-flash-image"
         )
 
     with pytest.raises(litellm.exceptions.ServiceUnavailableError):
-        run_previz_stage(
-            _fact_check_result(),
+        run_beat_image_stage(
+            _beat(),
             image_fn=_always_503,
             output_dir=tmp_path,
             sleep_fn=lambda _seconds: None,
         )
 
 
-def test_run_previz_stage_does_not_retry_non_transient_errors(tmp_path):
+def test_beat_image_does_not_retry_non_transient_errors(tmp_path):
     # A real content rejection or bad request will fail the identical way
     # on a retry -- only errors judged transient get retried.
     calls = {"n": 0}
@@ -241,8 +166,8 @@ def test_run_previz_stage_does_not_retry_non_transient_errors(tmp_path):
         )
 
     with pytest.raises(litellm.exceptions.AuthenticationError):
-        run_previz_stage(
-            _fact_check_result(),
+        run_beat_image_stage(
+            _beat(),
             image_fn=_auth_error,
             output_dir=tmp_path,
             sleep_fn=lambda _seconds: None,
@@ -259,31 +184,7 @@ def _write_reference_png(tmp_path, name="reference.png"):
     return path
 
 
-def test_run_previz_stage_uses_edit_fn_when_character_reference_given(tmp_path):
-    character_ref = _write_reference_png(tmp_path, "character.png")
-    captured = {}
-
-    def _edit_fn(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
-
-    def _exploding_image_fn(**kwargs):
-        raise AssertionError("plain image_fn should not be called when a reference is given")
-
-    result = run_previz_stage(
-        _fact_check_result(),
-        image_fn=_exploding_image_fn,
-        edit_fn=_edit_fn,
-        character_reference=character_ref,
-        output_dir=tmp_path,
-    )
-
-    assert result.image_path.exists()
-    assert captured["image"] == character_ref.read_bytes()
-    assert isinstance(captured["image"], bytes)  # raw bytes, not a Path (litellm's real bug)
-
-
-def test_run_previz_stage_sends_both_references_as_a_list_when_both_given(tmp_path):
+def test_beat_image_sends_both_references_as_a_list_when_both_given(tmp_path):
     character_ref = _write_reference_png(tmp_path, "character.png")
     location_ref = _write_reference_png(tmp_path, "location.png")
     captured = {}
@@ -292,10 +193,10 @@ def test_run_previz_stage_sends_both_references_as_a_list_when_both_given(tmp_pa
         captured.update(kwargs)
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
-    run_previz_stage(
-        _fact_check_result(),
+    run_beat_image_stage(
+        _beat(),
         edit_fn=_edit_fn,
-        character_reference=character_ref,
+        character_references=[character_ref],
         location_reference=location_ref,
         output_dir=tmp_path,
     )
@@ -303,7 +204,7 @@ def test_run_previz_stage_sends_both_references_as_a_list_when_both_given(tmp_pa
     assert captured["image"] == [character_ref.read_bytes(), location_ref.read_bytes()]
 
 
-def test_run_previz_stage_retries_edit_fn_on_transient_error_then_succeeds(tmp_path):
+def test_beat_image_retries_edit_fn_on_transient_error_then_succeeds(tmp_path):
     character_ref = _write_reference_png(tmp_path, "character.png")
     calls = {"n": 0}
 
@@ -315,10 +216,10 @@ def test_run_previz_stage_retries_edit_fn_on_transient_error_then_succeeds(tmp_p
             )
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
-    result = run_previz_stage(
-        _fact_check_result(),
+    result = run_beat_image_stage(
+        _beat(),
         edit_fn=_flaky_edit_fn,
-        character_reference=character_ref,
+        character_references=[character_ref],
         output_dir=tmp_path,
         sleep_fn=lambda _seconds: None,
     )
