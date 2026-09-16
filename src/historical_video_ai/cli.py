@@ -692,6 +692,29 @@ def _resolve_premise_conflict(
     return new_fact_sheet, new_fact_check_result, "corrected"
 
 
+def _next_archive_path(out_dir: Path, prefix: str) -> Path:
+    """First unused `<prefix>_<n>_rejected.png` in `out_dir`.
+
+    Deliberately not derived from the retry loop's own attempt counter.
+    A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
+    *fresh* `_generate_image_with_review` call against the same directory
+    -- its counter restarts at 1, so deriving the name from it reused
+    `<prefix>_1_rejected.png`, and `Path.rename` replaces the destination
+    silently on POSIX. That destroyed the earlier cycle's already-paid-for
+    images with no warning, found in a real run.
+
+    The index is therefore a monotonic count of rejected images kept for
+    this beat, not the "attempt N/3" shown while generating -- those are
+    genuinely different things once a beat has had more than one cycle.
+    Each attempt's own record in the run log carries its real image path,
+    so nothing depends on the two agreeing.
+    """
+    n = 1
+    while (candidate := out_dir / f"{prefix}_{n}_rejected.png").exists():
+        n += 1
+    return candidate
+
+
 def _generate_image_with_review(
     generate_fn: Callable[[list[str]], PrevizResult],
     fact_check_result: FactCheckResult,
@@ -791,7 +814,7 @@ def _generate_image_with_review(
             )
             return previz_result, attempts
 
-        archived_path = out_dir / f"{archive_prefix}_{attempt}_rejected.png"
+        archived_path = _next_archive_path(out_dir, archive_prefix)
         previz_result.image_path.rename(archived_path)
         attempts.append(
             {
@@ -1401,6 +1424,7 @@ def _generate_beats_with_choices(
     style: str = DEFAULT_STYLE,
     requires_grounding: bool = True,
     auto_yes: bool = False,
+    on_beat_complete: Callable[[list[dict]], None] | None = None,
 ) -> list[dict]:
     """Generate each beat's image (docs/decisions/0024). `style`
     (docs/decisions/0033) is the run's single authoritative realism-level
@@ -1442,13 +1466,38 @@ def _generate_beats_with_choices(
     locations_by_id = {loc.id: loc for loc in scene_plan.locations}
 
     beat_results = []
+
+    def _record(entry: dict) -> None:
+        """Append a finished beat and persist immediately.
+
+        Persisting per beat rather than once at the end: a real run was
+        interrupted partway through and its log recorded zero beats,
+        despite two having been accepted and paid for. The images
+        survived; the metadata pairing them with their prompts -- which is
+        what --video-gen-from needs later -- did not.
+        """
+        beat_results.append(entry)
+        if on_beat_complete is not None:
+            on_beat_complete(beat_results)
+
     for i, beat in enumerate(scene_plan.beats, start=1):
         location = locations_by_id.get(beat.location_id)
         location_ref = location_refs.get(beat.location_id)
         beat_out_dir = out_dir / f"beat_{i}"
 
+        cycle = 0
         while True:
-            print(f"\n=== beat {i}/{len(scene_plan.beats)}: {beat.action} ===")
+            cycle += 1
+            if cycle == 1:
+                print(f"\n=== beat {i}/{len(scene_plan.beats)}: {beat.action} ===")
+            else:
+                # A (r)eroll or an (e)dit-and-retry re-enters this loop for
+                # the SAME beat. Reprinting the original header made that
+                # read as a new beat being generated, which it isn't.
+                print(
+                    f"\n=== beat {i}/{len(scene_plan.beats)} -- restarting, "
+                    f"attempt cycle {cycle} ==="
+                )
             attempt_n = 0
             beat_was_edited = False
             last_concern: str | None = None
@@ -1571,7 +1620,7 @@ def _generate_beats_with_choices(
             if previz_result is None:
                 if beat_was_edited:
                     continue  # human edited the beat -- restart a fresh attempt cycle
-                beat_results.append(
+                _record(
                     {
                         "index": i,
                         "beat": dataclasses.asdict(beat),
@@ -1588,7 +1637,7 @@ def _generate_beats_with_choices(
                 # question a second time, not a real second checkpoint.
                 print("Beat accepted (human override at rejection).")
                 _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
-                beat_results.append(
+                _record(
                     {
                         "index": i,
                         "beat": dataclasses.asdict(beat),
@@ -1610,7 +1659,7 @@ def _generate_beats_with_choices(
 
             if choice == "a":
                 _link_beat_into_gallery(out_dir, i, str(previz_result.image_path))
-                beat_results.append(
+                _record(
                     {
                         "index": i,
                         "beat": dataclasses.asdict(beat),
@@ -2091,6 +2140,12 @@ def main() -> None:
     log["location_references"] = {k: str(v) for k, v in location_refs.items()}
     _write_log(out_dir, log)
 
+    def _persist_beats(results: list[dict]) -> None:
+        """Write the log after every finished beat, so an interrupted run
+        still has a record of what it already produced and paid for."""
+        log["previz_beats"] = results
+        _write_log(out_dir, log)
+
     beat_results = _generate_beats_with_choices(
         scene_plan,
         fact_check_result,
@@ -2104,9 +2159,9 @@ def main() -> None:
         style=args.style,
         requires_grounding=requires_grounding,
         auto_yes=args.yes,
+        on_beat_complete=_persist_beats,
     )
-    log["previz_beats"] = beat_results
-    _write_log(out_dir, log)
+    _persist_beats(beat_results)
     # Gallery is already fully populated by this point -- each beat was
     # linked in immediately on acceptance (_link_beat_into_gallery), not
     # batched here at the end.
