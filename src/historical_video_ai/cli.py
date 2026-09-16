@@ -82,7 +82,6 @@ from historical_video_ai.stages.scene_planning import (
     ScenePlan,
     ScenePlanningError,
     check_beat_location_references,
-    check_cinematography_is_not_a_style_claim,
     check_unique_ids,
     run_scene_planning_stage,
 )
@@ -482,11 +481,6 @@ def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
             )
             try:
                 check_beat_location_references([reviewed_beat], reviewed_locations)
-                # Re-checked after a human edit for the same reason as the
-                # location reference above (docs/decisions/0028): a
-                # hand-edit can reintroduce exactly the art-style claim the
-                # planner was stopped from writing.
-                check_cinematography_is_not_a_style_claim([reviewed_beat])
             except ScenePlanningError as exc:
                 print(f"\n{exc}")
                 if auto_yes:

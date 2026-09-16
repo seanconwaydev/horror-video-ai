@@ -771,7 +771,6 @@ def _beat(location_id="street", action="checks her phone") -> Beat:
         action=action,
         camera="medium shot",
         lighting="bright midday sun",
-        cinematography="35mm, shallow depth of field",
         audio="street ambience",
         duration_seconds="3",
     )

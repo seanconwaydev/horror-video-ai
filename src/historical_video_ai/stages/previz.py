@@ -510,7 +510,7 @@ def _build_beat_prompt(
     parts.append(f"ACTION: {beat.action}")
     if location is not None:
         parts.append(f"SETTING: {location.architecture}. Fixed props: {location.fixed_props}.")
-    parts.append(f"CAMERA: {beat.camera.rstrip('.')}. {beat.cinematography}".rstrip())
+    parts.append(f"CAMERA: {beat.camera}")
     parts.append(f"LIGHTING: {beat.lighting}")
     parts.append(f"STYLE: {_style_instruction(style)}")
     parts.append("No on-screen text, no UI, no logos, no watermark.")
