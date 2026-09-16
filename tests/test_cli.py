@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
+    _MAX_PREVIZ_ATTEMPTS,
     _beat_gallery_dir,
     _check_video_prompt_practices,
     _confirm,
@@ -1008,23 +1009,53 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     assert results[0]["beat"]["action"] == "smiles warmly"
 
 
-def test_generate_beats_with_choices_gives_up_when_every_review_attempt_rejected(
-    tmp_path, monkeypatch
-):
-    # Blank input at the on-rejection prompt means "keep auto-retrying" --
-    # this exercises the same all-3-attempts-rejected path as before that
-    # hook existed, just with the human declining to intervene each time.
-    monkeypatch.setattr("builtins.input", lambda _: "r")  # retry every time
+def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch):
+    """The cap exists to stop an UNATTENDED run regenerating forever. Once
+    every attempt is an explicit human choice, refusing one that was just
+    asked for is wrong -- choosing (r)etry on the last allowed attempt
+    silently behaved as a give-up, reported from a real run:
+
+        Attempt 3/3 -- ... / (r)etry carrying 3 review concerns / ...: r
+        No image kept for this beat after 3 attempt(s).
+    """
+    # Four retries -- one more than _MAX_PREVIZ_ATTEMPTS -- then accept.
+    responses = iter(["r", "r", "r", "r", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")] * 3)}
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion([(False, "Wrong.")] * 4 + [(True, None)])
+    }
 
     results = _generate_beats_with_choices(
         scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
     )
 
+    assert results[0]["image_path"] is not None, "the 5th attempt was refused"
+    assert len(results[0]["attempts"]) == 5
+
+
+def test_an_unattended_run_still_stops_at_the_attempt_cap(tmp_path):
+    """--yes has no human to ask, so the ceiling still applies there."""
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {
+        "completion_fn": _fake_review_completion(
+            [(False, "One."), (False, "Two."), (False, "Three.")]
+        )
+    }
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        **kwargs,
+    )
+
     assert results[0]["image_path"] is None
-    assert len(results[0]["attempts"]) == 3
+    assert len(results[0]["attempts"]) <= _MAX_PREVIZ_ATTEMPTS
 
 
 def test_generate_beats_with_choices_folds_rejection_reason_into_next_attempts_prompt(

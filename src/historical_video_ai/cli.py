@@ -743,6 +743,7 @@ def _generate_image_with_review(
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_reviewed: Callable[[str | None, int], str] | None = None,
     initial_concerns: list[str] | None = None,
+    max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
     PrevizResult from the concerns accumulated so far -- a closure over
@@ -800,7 +801,14 @@ def _generate_image_with_review(
     # thrown away at that boundary -- so adding a note of your own silently
     # discarded everything the reviewer had said (docs/decisions/0043).
     previous_concerns: list[str] = list(initial_concerns or [])
-    for attempt in range(1, _MAX_PREVIZ_ATTEMPTS + 1):
+    # `max_attempts=None` means no ceiling. The cap exists to stop an
+    # UNATTENDED run regenerating forever; once every attempt is an
+    # explicit human choice (docs/decisions/0043) it stops being a guard
+    # and becomes a refusal to do what was just asked for. Choosing
+    # (r)etry on the last allowed attempt silently behaved as a give-up.
+    attempt = 0
+    while max_attempts is None or attempt < max_attempts:
+        attempt += 1
         previz_result = generate_fn(previous_concerns)
         print(f"Image saved to {previz_result.image_path}")
         if on_image_generated is not None:
@@ -868,7 +876,7 @@ def _generate_image_with_review(
             previous_concerns.append(review.concern)
         if decision == "stop":
             break
-        if attempt < _MAX_PREVIZ_ATTEMPTS:
+        if max_attempts is None or attempt < max_attempts:
             print("Regenerating...")
 
     print(f"\nNo image kept for this beat after {len(attempts)} attempt(s).")
@@ -1658,8 +1666,11 @@ def _generate_beats_with_choices(
                 )
                 choice = None
                 while choice not in ("a", "r", "e", "f", "g"):
+                    # No "/3": interactively there is no ceiling, so a
+                    # denominator would promise a limit that isn't there.
+                    # The running count is the cost signal instead.
                     choice = input(
-                        f"  Attempt {attempt}/{_MAX_PREVIZ_ATTEMPTS} -- (a)ccept / "
+                        f"  Attempt {attempt} -- (a)ccept / "
                         f"{retry_label} / (e)dit the beat / "
                         "(f)eedback then retry / (g)ive up: "
                     ).strip().lower()
@@ -1705,9 +1716,10 @@ def _generate_beats_with_choices(
             ) -> PrevizResult:
                 nonlocal attempt_n
                 attempt_n += 1
+                cap = f"/{_MAX_PREVIZ_ATTEMPTS}" if auto_yes else ""
                 print(
                     f"--- beat image (model: {previz_model}, "
-                    f"attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---"
+                    f"attempt {attempt_n}{cap}) ---"
                 )
                 return run_beat_image_stage(
                     _beat_with_review_corrections(beat, previous_concerns),
@@ -1741,6 +1753,7 @@ def _generate_beats_with_choices(
                 archive_prefix=f"beat{i}_attempt",
                 on_reviewed=_on_reviewed,
                 initial_concerns=carried_concerns,
+                max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
             )
 
             if previz_result is None:
