@@ -555,40 +555,51 @@ _POSE_IN_IDENTITY_PATTERNS = (
     "arms at her side",
 )
 
-#: Sentence-initial verbs that make an identity field a behaviour
+#: Sentence-initial verbs that usually make an identity field a behaviour
 #: description. Anchored to the start so a garment term like "a standing
-#: collar" or "a sitting-room" doesn't trip it.
+#: collar" doesn't trip it. Deliberately over-eager -- "stands a full head
+#: taller" is height, not posture, and trips this. That is affordable
+#: because the result is a printed warning, not a failed run (0048).
 _POSE_LEADING_VERBS = ("stands", "sits", "holds", "leans", "walks", "moves", "keeps")
 
 
-def check_identity_fields_describe_appearance(characters: list) -> None:
-    """Raise ScenePlanningError if a Character's identity fields describe a
-    pose or behaviour instead of persistent appearance.
+def identity_field_pose_warnings(characters: list) -> list[str]:
+    """Warn where a Character's identity fields look like they describe a
+    pose or behaviour rather than persistent appearance.
 
     `face_build`, `hair` and `distinguishing_detail` are emitted verbatim
-    into every beat's prompt and are baked into the character's reference
-    image, so anything in them is repeated on every single frame. A pose
-    written there is not a description, it is an instruction the character
-    can never escape -- docs/decisions/0042.
+    into every beat's prompt and baked into the reference image, so a pose
+    written there is repeated on every frame and the character can never
+    escape it -- docs/decisions/0042, which was prompted by a stalking
+    figure whose `distinguishing_detail` read "Stands perfectly still with
+    both arms straight at its sides and its head tilted slightly to one
+    shoulder".
 
-    Same class as docs/decisions/0029's motivating case, where a hand-edit
-    put "purple hair" into `face_build` and every beat inherited it.
+    **Warns rather than raises** (docs/decisions/0048). This is a keyword
+    heuristic, and the first thing it did on a real run was reject
+    "stands a full head taller than an ordinary adult" -- a description of
+    height, not posture -- killing the run after a paid planning call and
+    before the human could edit anything. Worse, phrases like "head
+    tilted" are legitimate permanent traits for exactly the uncanny
+    characters this project generates. A heuristic this fallible belongs
+    in front of the human who is already reviewing every character, not in
+    front of the parser.
     """
+    warnings = []
     for character in characters:
         for field_name in ("face_build", "hair", "distinguishing_detail"):
             value = getattr(character, field_name)
-            lowered = value.lower().lstrip()
-            found = [p for p in _POSE_IN_IDENTITY_PATTERNS if p in lowered]
-            if lowered.startswith(_POSE_LEADING_VERBS):
-                found.append(lowered.split()[0])
+            lowered = value.lower()
+            found = sorted({p for p in _POSE_IN_IDENTITY_PATTERNS if p in lowered})
+            found += [v for v in _POSE_LEADING_VERBS if lowered.startswith(v)]
             if found:
-                raise ScenePlanningError(
-                    f"Character {character.id!r}'s {field_name!r} describes a pose or "
-                    f"behaviour ({', '.join(sorted(set(found)))}) rather than persistent "
-                    f"appearance: {value!r}. That field is repeated in every beat's prompt "
-                    "and baked into the reference image, so a pose there is an instruction "
-                    "the character can never escape -- put it in a beat's action instead."
+                warnings.append(
+                    f"Character {character.id!r}'s {field_name!r} may describe a pose rather "
+                    f"than appearance ({', '.join(found)}): {value!r}. That field repeats in "
+                    "every beat's prompt, so a pose there is one the character can never "
+                    "escape -- consider moving it to a beat's action."
                 )
+    return warnings
 
 
 def check_beat_character_references(beats: list, characters: list) -> None:
@@ -728,7 +739,6 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
         )
     check_beat_location_references(beats, locations)
     check_beat_character_references(beats, characters)
-    check_identity_fields_describe_appearance(characters)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")

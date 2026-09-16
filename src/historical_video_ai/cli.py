@@ -83,6 +83,7 @@ from historical_video_ai.stages.scene_planning import (
     ScenePlanningError,
     check_beat_location_references,
     check_unique_ids,
+    identity_field_pose_warnings,
     run_scene_planning_stage,
 )
 from historical_video_ai.stages.video_generation import (
@@ -466,9 +467,14 @@ def _review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
     at all.
     """
     print("\n--- scene plan review (docs/decisions/0023) ---")
+    for warning in identity_field_pose_warnings(plan.characters):
+        print(f"\nheads up: {warning}")
     reviewed_characters = _review_list_with_unique_ids(
         plan.characters, item_label="Character", auto_yes=auto_yes
     )
+    still_posed = identity_field_pose_warnings(reviewed_characters)
+    if still_posed and not auto_yes:
+        print(f"\n{len(still_posed)} identity field(s) still look like a pose; continuing anyway.")
     reviewed_locations = _review_list_with_unique_ids(
         plan.locations, item_label="Location", auto_yes=auto_yes
     )
