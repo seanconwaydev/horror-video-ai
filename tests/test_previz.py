@@ -937,3 +937,39 @@ def test_previz_review_is_told_the_beats_lighting_not_just_its_action(tmp_path):
     sent = json.dumps(captured["messages"])
     assert "solid black silhouette" in sent, "reviewer was not told what the beat's lighting plans"
     assert "28mm from the near end" in sent, "reviewer was not told the beat's planned camera"
+
+
+def test_previz_review_retries_a_transient_error(tmp_path):
+    """The image calls have had transient-retry since docs/decisions/0016;
+    the review call never did, so one network blip killed an entire run
+    after its images were already generated and paid for. Observed twice in
+    one session as an SSL failure surfacing as InternalServerError -- which
+    was already in the transient set, so only this call site was missing.
+    """
+    calls = {"n": 0}
+    retries = []
+
+    def _flaky_completion(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise litellm.exceptions.InternalServerError(
+                message="bad record mac", llm_provider="anthropic", model="claude-sonnet-5"
+            )
+        content = json.dumps({"accepted": True, "concern": None})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    image = tmp_path / "previz.png"
+    image.write_bytes(base64.b64decode(_TINY_PNG_B64))
+
+    review = run_previz_review_stage(
+        image,
+        _fact_check_result(),
+        completion_fn=_flaky_completion,
+        model="anthropic/claude-sonnet-5",
+        sleep_fn=lambda _s: None,
+        on_transient_retry=lambda n, exc: retries.append(n),
+    )
+
+    assert review.accepted is True
+    assert calls["n"] == 2, "the review call should have been retried once"
+    assert retries == [1]

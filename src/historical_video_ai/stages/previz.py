@@ -610,6 +610,8 @@ def run_previz_review_stage(
     previous_concerns: list[str] | None = None,
     model: str | None = None,
     completion_fn: Callable = litellm.completion,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizReview:
     """Independently review a previz-generated image against the scene it
     was supposed to depict -- an adversarial check on the actual image, not
@@ -742,7 +744,17 @@ def run_previz_review_stage(
             previous_concerns_block=previous_concerns_block,
         )
 
-    response = completion_fn(
+    # Same transient-retry treatment the image calls have had since
+    # docs/decisions/0016. It was never applied here, so a single network
+    # blip on the review call killed an entire run -- after its images had
+    # already been generated and paid for. Observed twice in one session,
+    # as an SSL "bad record mac" surfacing as litellm.InternalServerError,
+    # which was already in the transient set; only this call site was
+    # missing.
+    response = _call_with_transient_retry(
+        completion_fn,
+        sleep_fn=sleep_fn,
+        on_transient_retry=on_transient_retry,
         model=resolved_model,
         messages=[
             {
