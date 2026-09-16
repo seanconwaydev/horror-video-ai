@@ -1727,7 +1727,13 @@ def _generate_beats_with_choices(
             else:
                 choice = ""
                 while choice not in ("a", "r", "e"):
+                    # Labelled with why it's being asked. This prompt and
+                    # the five-option one after a rejection look unrelated,
+                    # and which one appears depends on the review verdict --
+                    # which was reported as a bug when the two were seen
+                    # back to back.
                     choice = input(
+                        "Review accepted this image. "
                         "(a)ccept / (r)eroll / (e)dit this beat? [a/r/e]: "
                     ).strip().lower()
 
