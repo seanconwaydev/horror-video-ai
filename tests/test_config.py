@@ -91,3 +91,26 @@ def test_real_project_config_is_valid():
             f"Stage '{stage_name}' model '{config.model}' should be in "
             "'<provider>/<model-name>' format"
         )
+
+
+@pytest.mark.parametrize(
+    ("body", "match"),
+    [
+        ("- a\n- b\n", "must be a mapping"),
+        ("just a string\n", "must be a mapping"),
+        ("research:\n  model:\n", "invalid 'model'"),
+        ("research:\n  model: 42\n", "invalid 'model'"),
+        ('research:\n  model: ""\n', "invalid 'model'"),
+        ("research:\n  model: '   '\n", "invalid 'model'"),
+    ],
+)
+def test_malformed_config_raises_config_error_not_a_bare_crash(tmp_path, body, match):
+    """A YAML list or scalar used to reach `.items()` and crash with a bare
+    AttributeError. Worse, a stage written as `model:` with nothing after
+    it parses to None and passed validation entirely -- key presence was
+    checked but the value never was -- so the failure surfaced much later
+    and much further away, inside the provider call."""
+    path = tmp_path / "models.yaml"
+    path.write_text(body)
+    with pytest.raises(ConfigError, match=match):
+        load_stage_configs(path)

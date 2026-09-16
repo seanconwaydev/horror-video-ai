@@ -692,6 +692,18 @@ def _resolve_premise_conflict(
     return new_fact_sheet, new_fact_check_result, "corrected"
 
 
+def _safe_path_component(value: str) -> str:
+    """Make a scene-plan id safe to use as a directory name.
+
+    Ids come from a planning model and can be changed by hand at review
+    time, so they are not guaranteed to be single path components. An id
+    containing a separator -- "a/../../evil" being the worst shape --
+    resolved outside the run directory entirely.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")
+    return cleaned or "unnamed"
+
+
 def _next_archive_path(out_dir: Path, prefix: str) -> Path:
     """First unused `<prefix>_<n>_rejected.png` in `out_dir`.
 
@@ -936,9 +948,24 @@ def _run_dir(slug: str | None = None) -> Path:
     sanitize it itself, so callers building one from free text must slugify
     it first."""
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    dir_name = f"run_{run_id}_{slug}" if slug else f"run_{run_id}"
-    d = _project_root() / "outputs" / dir_name
-    d.mkdir(parents=True, exist_ok=True)
+    base = f"run_{run_id}_{slug}" if slug else f"run_{run_id}"
+    outputs = _project_root() / "outputs"
+
+    # Second precision alone is not unique: re-running the same command
+    # right after a failed attempt -- routine while iterating -- lands in
+    # the same second with the same slug, and `exist_ok=True` then let the
+    # second run write its images and log straight over the first one's.
+    # A numeric suffix keeps the readable name while making a collision
+    # impossible. (video_generation.py already reached for microsecond
+    # precision against this same hazard; this keeps folder names legible
+    # instead.)
+    dir_name, n = base, 1
+    while (outputs / dir_name).exists():
+        n += 1
+        dir_name = f"{base}-{n}"
+
+    d = outputs / dir_name
+    d.mkdir(parents=True)
     return d
 
 
@@ -1041,6 +1068,32 @@ class VideoGenTarget:
     beat_index: int | None
 
 
+def _resolve_recorded_path(recorded: str, run_dir: Path) -> Path:
+    """Resolve a path recorded in a run log, tolerating a moved outputs/.
+
+    Run logs store absolute paths, so they embed wherever the project
+    happened to live when the run executed. Moving or copying a run folder
+    -- or handing one to someone else -- breaks every reference in it, even
+    though the files are sitting right beside the log. The gallery
+    symlinks were deliberately made relative for exactly this reason
+    (`_link_beat_into_gallery`); the log was not.
+
+    The portion of a recorded path after the run directory's own name is
+    still correct relative to wherever that directory is now, so fall back
+    to that. Returns the original path unchanged if neither resolves, so
+    the caller's error message still names what it actually looked for.
+    """
+    path = Path(recorded)
+    if path.exists():
+        return path
+    parts = path.parts
+    if run_dir.name in parts:
+        candidate = run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
+        if candidate.exists():
+            return candidate
+    return path
+
+
 def _load_video_gen_targets(
     run_dir: Path, *, prompt_override: str | None = None
 ) -> list[VideoGenTarget]:
@@ -1089,7 +1142,7 @@ def _load_video_gen_targets(
                 "'prompt_used' -- pass --video-prompt, or point --video-gen-from at a run "
                 "generated after docs/decisions/0024 started recording it."
             )
-        image_path = Path(beat_result["image_path"])
+        image_path = _resolve_recorded_path(beat_result["image_path"], run_dir)
         if not image_path.exists():
             raise FileNotFoundError(
                 f"Beat {index}'s image referenced by {log_path} no longer exists: {image_path}"
@@ -1160,7 +1213,7 @@ def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) ->
             "--video-gen-from at a run that finished previz successfully."
         )
 
-    image_path = Path(image_path_str)
+    image_path = _resolve_recorded_path(image_path_str, run_dir)
     if not image_path.exists():
         raise FileNotFoundError(
             f"Previz image referenced by {log_path} no longer exists: {image_path}"
@@ -1375,7 +1428,7 @@ def _generate_scene_references(
             result = run_reference_image_stage(
                 prompt,
                 model=previz_model,
-                output_dir=out_dir / f"character_{character.id}",
+                output_dir=out_dir / f"character_{_safe_path_component(character.id)}",
                 on_transient_retry=lambda n, exc: print(
                     f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
                 ),
@@ -1385,7 +1438,13 @@ def _generate_scene_references(
             if _confirm("Accept this reference?", auto_yes=auto_yes):
                 character_refs[character.id] = result.image_path
                 break
-            print("Regenerating...")
+            # Archive rather than let the next attempt overwrite it.
+            # References wrote to a fixed "reference.png", so every
+            # rejected one was destroyed with no way to compare or go
+            # back -- while beats had archived their rejects all along.
+            archived = _next_archive_path(result.image_path.parent, "reference_attempt")
+            result.image_path.rename(archived)
+            print(f"Previous attempt kept at {archived.name}. Regenerating...")
 
     location_refs: dict[str, Path] = {}
     for i, location in enumerate(scene_plan.locations, start=1):
@@ -1395,7 +1454,7 @@ def _generate_scene_references(
             result = run_reference_image_stage(
                 prompt,
                 model=previz_model,
-                output_dir=out_dir / f"location_{location.id}",
+                output_dir=out_dir / f"location_{_safe_path_component(location.id)}",
                 on_transient_retry=lambda n, exc: print(
                     f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
                 ),
@@ -1405,7 +1464,9 @@ def _generate_scene_references(
             if _confirm("Accept this reference?", auto_yes=auto_yes):
                 location_refs[location.id] = result.image_path
                 break
-            print("Regenerating...")
+            archived = _next_archive_path(result.image_path.parent, "reference_attempt")
+            result.image_path.rename(archived)
+            print(f"Previous attempt kept at {archived.name}. Regenerating...")
 
     return character_refs, location_refs
 

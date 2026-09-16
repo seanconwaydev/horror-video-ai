@@ -37,14 +37,30 @@ def strip_markdown_json_fence(raw: str) -> str:
     return match.group(1).strip() if match else raw
 
 
-def parse_json_response(raw_content: str, error_cls: type[Exception], context: str) -> object:
+def parse_json_response(
+    raw_content: str | None, error_cls: type[Exception], context: str
+) -> object:
     """Strip a markdown fence if present, then `json.loads` the result --
     the try/strip/parse/except shape every stage repeats after asking a
     model to "respond with ONLY a JSON object". Raises
     `error_cls(f"{context} was not valid JSON: {exc}")` on failure, so each
     stage keeps its own exception type and message wording while sharing
     the actual parsing step.
+
+    Empty or absent content raises `error_cls` too. `message.content` is
+    None on a refusal, a filtered response, or a turn that returned only
+    tool calls, and every caller passes it straight through -- without
+    this they all crashed with a bare "'NoneType' object has no attribute
+    'strip'", which says nothing about what actually happened. Same
+    diagnosability fix already made on the image path for an empty `data`
+    list.
     """
+    if not raw_content or not raw_content.strip():
+        raise error_cls(
+            f"{context} was empty -- the model returned no content at all. That usually "
+            "means the request was refused or filtered rather than answered, so try "
+            "rephrasing before assuming this is a bug."
+        )
     try:
         return json.loads(strip_markdown_json_fence(raw_content))
     except json.JSONDecodeError as exc:

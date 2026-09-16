@@ -52,13 +52,32 @@ def load_stage_configs(path: Path = DEFAULT_CONFIG_PATH) -> dict[str, StageConfi
     if not raw:
         raise ConfigError(f"Model config file is empty: {path}")
 
+    if not isinstance(raw, dict):
+        # A YAML list or bare scalar used to reach `.items()` and crash
+        # with a bare AttributeError, which says nothing about the file
+        # being the problem.
+        raise ConfigError(
+            f"Model config file must be a mapping of stage name to settings, "
+            f"got {type(raw).__name__}: {path}"
+        )
+
     configs: dict[str, StageConfig] = {}
     for stage_name, settings in raw.items():
-        if not settings or "model" not in settings:
+        if not isinstance(settings, dict) or "model" not in settings:
             raise ConfigError(
                 f"Stage '{stage_name}' is missing a 'model' entry in {path}"
             )
-        configs[stage_name] = StageConfig(model=settings["model"])
+        model = settings["model"]
+        # Key presence is not enough. A stage written as "model:" with
+        # nothing after it parses to None and used to sail through, so the
+        # failure surfaced much later and much further away -- inside the
+        # provider call, as a confusing error about a null model name.
+        if not isinstance(model, str) or not model.strip():
+            raise ConfigError(
+                f"Stage '{stage_name}' has an invalid 'model' in {path}: expected a "
+                f"non-empty '<provider>/<model-name>' string, got {model!r}"
+            )
+        configs[stage_name] = StageConfig(model=model)
 
     return configs
 
