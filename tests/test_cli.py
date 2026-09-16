@@ -1776,7 +1776,9 @@ def _rejecting_generate_fn(out_dir, image_name="previz.png"):
         counter["n"] += 1
         path = out_dir / image_name
         path.write_bytes(f"image bytes {counter['n']}".encode())
-        return PrevizResult(image_path=path, prompt_used=f"prompt {counter['n']}")
+        # A list, since docs/decisions/0046 made every generate_fn return
+        # candidates rather than a single result.
+        return [PrevizResult(image_path=path, prompt_used=f"prompt {counter['n']}")]
 
     return _generate
 
@@ -2097,3 +2099,98 @@ def test_the_retry_option_is_plain_when_the_review_had_no_concerns(tmp_path, mon
 
     assert "(r)etry /" in prompts_shown[0]
     assert "carrying" not in prompts_shown[0]
+
+
+# --- best-of-N candidate selection (ADR 0046) ---
+
+
+def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
+    """A real run already spent 1.8 images per beat sequentially, discarding
+    each before the next existed. These cost the same and are shown
+    together, so none is thrown away unseen."""
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: "2" if "Keep which" in prompt else "a"
+    )
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        candidates=3,
+        **kwargs,
+    )
+
+    kept = sorted(p.name for p in (tmp_path / "beat_1").glob("candidate_*.png"))
+    assert len(kept) == 3, f"every generated candidate should survive, found {kept}"
+    assert results[0]["image_path"].endswith("candidate_1_2.png"), "the chosen one is the beat's"
+
+
+def test_rejecting_every_candidate_rejects_the_attempt_not_the_beat(tmp_path, monkeypatch):
+    """"None of them" is a verdict on this attempt. The loop should then
+    offer the usual choices rather than silently abandoning the beat."""
+    responses = iter(["n", "g"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        candidates=2,
+        **kwargs,
+    )
+
+    assert results[0]["image_path"] is None
+    assert results[0]["attempts"][0]["concern"] == "human rejected every candidate"
+    # Both are still on disk -- they were paid for.
+    assert len(list((tmp_path / "beat_1").glob("candidate_*.png"))) == 2
+
+
+def test_one_candidate_is_the_previous_behaviour(tmp_path, monkeypatch):
+    """The default must not change what an existing run does: one image,
+    named previz.png, and no selection prompt."""
+    prompts_shown = []
+
+    def _capturing_input(prompt):
+        prompts_shown.append(prompt)
+        return "a"
+
+    monkeypatch.setattr("builtins.input", _capturing_input)
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    _generate_beats_with_choices(
+        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert (tmp_path / "beat_1" / "previz.png").exists()
+    assert not list((tmp_path / "beat_1").glob("candidate_*.png"))
+    assert not any("Keep which" in p for p in prompts_shown)
+
+
+def test_unattended_runs_take_the_first_candidate(tmp_path):
+    """--yes has nobody to ask. Taking the first is arbitrary, and is at
+    least honest about being arbitrary."""
+    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
+
+    results = _generate_beats_with_choices(
+        scene_plan,
+        _fact_check_result_for_previz(),
+        character_refs={},
+        location_refs={},
+        auto_yes=True,
+        candidates=2,
+        **kwargs,
+    )
+
+    assert results[0]["image_path"].endswith("candidate_1_1.png")
