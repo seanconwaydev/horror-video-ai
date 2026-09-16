@@ -5,7 +5,7 @@ Date: 2026-09-16
 ## Status
 
 Accepted. Supersedes the `character_ids` field introduced by
-[0041](0041-beats-list-every-character-present.md).
+[0041](0041-beats-name-every-character-present.md).
 
 ## Context
 

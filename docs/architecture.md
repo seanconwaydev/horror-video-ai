@@ -61,7 +61,7 @@ The highlighted box (Previz) is the spend gate: everything before it is text or 
 ## Open questions (not yet decided)
 
 **Video generation model.** Resolved for now: Wan via Replicate
-([decisions/0037](./decisions/0037-horror-motion-comic-wan.md)), which replaced the
+([decisions/0037](./decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md)), which replaced the
 `openai/sora-2` placeholder before the Videos API was removed on 2026-09-24. It is still
 a placeholder in the sense that no rigorous quality comparison has been run; Veo, Kling
 and Runway remain untried.
@@ -83,11 +83,12 @@ fit and adds no new image provider.
 **Documentation and instruction rot.** Several decisions have outlived the premise that
 justified them, and the pattern is now frequent enough to be worth a deliberate sweep
 rather than case-by-case discovery: a dead model constant survived a month past
-[0037](./decisions/0037-horror-motion-comic-wan.md); reference conditioning outlived its
+[0037](./decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md); reference conditioning outlived its
 premise until [0050](./decisions/0050-no-reference-images-by-default.md); the entire
 single-image previz flow stayed reachable-looking, tests and all, until
 [0051](./decisions/0051-remove-the-single-image-previz-flow.md); and `CLAUDE.md` claimed
-video generation went through litellm long after it stopped doing so. Two things to check
+video generation went through litellm long after it stopped doing so. The findings so far, and the method, are written up in
+[playbook/repo-audit-brief.md](./playbook/repo-audit-brief.md). Two things to check
 across the whole repo, not just where a bug points: every doc claim against the code that
 implements it, and every prompt rule in `scene_planning.py`/`previz.py` against whether it
 is still earning its place. For the prompt rules specifically, the question is not only
