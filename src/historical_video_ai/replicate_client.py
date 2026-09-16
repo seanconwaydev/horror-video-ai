@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import ssl
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -90,9 +91,20 @@ def _default_request_fn(
     it tells you when the window reopens.
     """
     for attempt in range(1, _MAX_TRANSPORT_RETRIES + 1):
-        response = httpx.request(
-            method, url, headers=headers, json=json_body, timeout=_DEFAULT_TIMEOUT_SECONDS
-        )
+        try:
+            response = httpx.request(
+                method, url, headers=headers, json=json_body, timeout=_DEFAULT_TIMEOUT_SECONDS
+            )
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            # A transport failure RAISES rather than returning a status, so
+            # retrying status codes alone missed it entirely. Observed
+            # repeatedly as "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert
+            # bad record mac", which killed two images of a paid batch after
+            # the status-code retry was already in place.
+            if attempt == _MAX_TRANSPORT_RETRIES:
+                raise ReplicateError(f"Replicate {method} {url} failed: {exc}") from exc
+            sleep_fn(_FALLBACK_RETRY_DELAY_SECONDS)
+            continue
         if response.status_code < 400:
             return response.json()
         if response.status_code not in _RETRYABLE_STATUSES or attempt == _MAX_TRANSPORT_RETRIES:

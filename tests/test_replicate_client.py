@@ -1,5 +1,6 @@
 import base64
 
+import httpx
 import pytest
 
 from historical_video_ai.replicate_client import (
@@ -214,4 +215,40 @@ def test_request_gives_up_after_the_retry_budget(monkeypatch):
         lambda *a, **k: _FakeResponse(429, {"retry_after": 1}, text="throttled"),
     )
     with pytest.raises(ReplicateError, match="429"):
+        _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
+
+
+def test_request_retries_a_transport_failure_not_just_a_status_code(monkeypatch):
+    """A transport failure raises rather than returning a status, so
+    retrying status codes alone missed it. Observed repeatedly as
+    "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert bad record mac", which
+    killed two images of a paid batch after the status-code retry was
+    already in place."""
+    calls = {"n": 0}
+
+    def _flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("bad record mac")
+        return _FakeResponse(200, {"id": "p1"})
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _flaky)
+    slept = []
+
+    result = _default_request_fn(
+        "POST", "http://x", headers={}, json_body=None, sleep_fn=slept.append
+    )
+
+    assert result == {"id": "p1"}
+    assert calls["n"] == 2
+    assert slept, "should have waited before retrying"
+
+
+def test_request_gives_up_on_a_persistent_transport_failure(monkeypatch):
+    def _always_fails(*a, **k):
+        raise httpx.ConnectError("bad record mac")
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _always_fails)
+
+    with pytest.raises(ReplicateError, match="bad record mac"):
         _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
