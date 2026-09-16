@@ -825,8 +825,10 @@ def test_genuine_appearance_descriptions_are_allowed(overrides):
         "Stands perfectly still with both arms straight at its sides.",
         # The exact string from the real run that this ADR is about: a
         # description of height the heuristic reads as a posture verb.
-        "stands a full head taller than an ordinary adult, with wrists so "
-        "thin the glove leather hangs loose and bunched at the cuff",
+        (
+            "stands a full head taller than an ordinary adult, with wrists so "
+            "thin the glove leather hangs loose and bunched at the cuff"
+        ),
     ],
 )
 def test_a_posed_identity_field_does_not_fail_the_parse(detail):
