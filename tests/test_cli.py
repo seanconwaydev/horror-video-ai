@@ -2261,6 +2261,19 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     assert "white crop top" in seen[0]["prompt"]
 
 
+def test_references_default_to_none(monkeypatch):
+    """docs/decisions/0050: a measured run held style, camera variety and
+    the location's fixed props with no references, so paying for them --
+    in money and in pinned composition -- is no longer the default."""
+    import sys
+
+    from historical_video_ai.cli import _build_arg_parser
+
+    monkeypatch.setattr(sys, "argv", ["historical-video-ai"])
+    args = _build_arg_parser().parse_args([])
+    assert args.references == "none"
+
+
 def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
     """staging is a list of dataclasses; the editor must prompt per
     character rather than asking for a repr back (docs/decisions/0049)."""

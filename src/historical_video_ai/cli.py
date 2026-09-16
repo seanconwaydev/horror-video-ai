@@ -1950,7 +1950,9 @@ def _link_beat_into_gallery(out_dir: Path, index: int, image_path: str) -> None:
     link.symlink_to(os.path.relpath(source, start=gallery_dir))
 
 
-def main() -> None:
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """The CLI's argument parser, split out of main() so flag defaults
+    are testable without running a pipeline (docs/decisions/0050)."""
     parser = argparse.ArgumentParser(
         description="Run the research -> fact-check -> previz pipeline for one scene."
     )
@@ -2065,15 +2067,14 @@ def main() -> None:
     parser.add_argument(
         "--references",
         choices=["both", "location", "character", "none"],
-        default="both",
+        default="none",
         help=(
-            "Which reference images to condition beats on (docs/decisions/0024, 0047). "
-            "'both' is the previous behaviour. 'none' generates no references at all and "
-            "relies on the character and location text already present in every beat "
-            "prompt. The middle options exist because the two references may not be "
-            "earning their keep equally: a location reference was introduced to stop "
-            "cross-beat setting drift, and a character reference to hold identity, but "
-            "both also pin composition."
+            "Which reference images to condition beats on (docs/decisions/0024, 0047, "
+            "0050). Defaults to 'none': a measured run held style, camera variety and "
+            "the location's fixed props with no references at all, so they were being "
+            "paid for twice over -- in money, and in the composition they pin. 'both' "
+            "is the pre-0050 behaviour; the middle options condition on one or the "
+            "other."
         ),
     )
     parser.add_argument(
@@ -2133,6 +2134,11 @@ def main() -> None:
             "re-verification pass."
         ),
     )
+    return parser
+
+
+def main() -> None:
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     if not args.mock:
