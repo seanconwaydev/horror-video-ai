@@ -699,7 +699,24 @@ def test_image_review_loop_accepts_on_first_attempt(tmp_path):
     assert result is not None
     assert result.image_path == tmp_path / "previz.png"
     assert attempts == [
-        {"attempt": 1, "accepted": True, "concern": None, "review_accepted": True}
+        {
+            "attempt": 1,
+            "accepted": True,
+            "concern": None,
+            "review_accepted": True,
+            # Single-candidate attempts have no choice to record.
+            "human_choice": None,
+            # The exact prompt is the label's input: _build_beat_prompt
+            # changes over time, so a beat's fields can't reconstruct it
+            # after the fact (docs/decisions/0053).
+            "candidates": [
+                {
+                    "path": str(tmp_path / "previz.png"),
+                    "prompt_used": "a prompt",
+                    "kept": True,
+                }
+            ],
+        }
     ]
 
 
@@ -1270,11 +1287,16 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     )
 
     assert results[0]["image_path"] is not None
-    # The restarted attempt cycle is a fresh _generate_image_with_review
-    # call -- only its own attempt log is recorded, not the discarded
-    # first cycle's single rejected attempt.
-    assert len(results[0]["attempts"]) == 1
-    assert results[0]["attempts"][0]["accepted"] is True
+    # Both cycles are recorded. The restarted cycle is a fresh
+    # _generate_image_with_review call, and its own attempt log used to be
+    # the only one kept -- so choosing (e)dit silently discarded the
+    # rejected attempt that prompted the edit, which is the judgement
+    # worth keeping (docs/decisions/0053).
+    attempts = results[0]["attempts"]
+    assert [a["cycle"] for a in attempts] == [1, 2]
+    assert [a["accepted"] for a in attempts] == [False, True]
+    # The human's action at the first cycle's prompt is the label.
+    assert attempts[0]["human_action"] == "e"
 
 
 def test_generate_beats_with_choices_stops_early_under_auto_yes_on_repeated_concern(tmp_path):

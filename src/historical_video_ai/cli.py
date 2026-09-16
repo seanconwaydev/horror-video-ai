@@ -50,7 +50,7 @@ import dataclasses
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,6 +77,7 @@ from historical_video_ai.stages.previz import (
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
 from historical_video_ai.stages.scene_planning import (
     Beat,
+    Character,
     Location,
     ScenePlan,
     ScenePlanningError,
@@ -743,7 +744,28 @@ def _safe_path_component(value: str) -> str:
     return cleaned or "unnamed"
 
 
-def _choose_candidate(candidates: list[PrevizResult], *, auto_yes: bool) -> PrevizResult | None:
+def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
+    """The plan text a candidate image is being judged against.
+
+    Shown at the candidate prompt rather than only at scene-plan review,
+    which by then is hundreds of lines up the scrollback
+    (docs/decisions/0053). Camera and staging specifically: those are what
+    an image most visibly honours or ignores, and checking them was the
+    judgement the interface made hardest to perform.
+    """
+    by_id = {c.id: c for c in characters}
+    lines = [f"Judging against -- beat: {beat.action}", f"  camera: {beat.camera}"]
+    for staged in beat.staging:
+        name = by_id[staged.character_id].id if staged.character_id in by_id else staged.character_id
+        lines.append(f"  {name} doing: {staged.action}")
+        if staged.frame_position:
+            lines.append(f"  {name} in frame: {staged.frame_position}")
+    return "\n".join(lines)
+
+
+def _choose_candidate(
+    candidates: list[PrevizResult], *, auto_yes: bool, context: str | None = None
+) -> PrevizResult | None:
     """Ask which of several candidate images to keep, or None to reject all.
 
     Generating one image per attempt meant a single roll of a
@@ -761,6 +783,12 @@ def _choose_candidate(candidates: list[PrevizResult], *, auto_yes: bool) -> Prev
         return candidates[0]
 
     folder = candidates[0].image_path.parent
+    # What the image is being judged against, repeated here on purpose.
+    # It was last printed at scene-plan review, hundreds of lines of
+    # generation output ago, so checking whether the render honoured the
+    # plan meant scrolling back every time (docs/decisions/0053).
+    if context:
+        print(f"\n{context}")
     print(f"\n{len(candidates)} candidates in {folder}:")
     for n, candidate in enumerate(candidates, start=1):
         print(f"  {n}. {candidate.image_path.name}")
@@ -816,6 +844,7 @@ def _generate_image_with_review(
     initial_concerns: list[str] | None = None,
     choose_auto: bool = False,
     max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
+    context: str | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
     PrevizResult from the concerns accumulated so far -- a closure over
@@ -886,8 +915,26 @@ def _generate_image_with_review(
             if on_image_generated is not None:
                 on_image_generated(candidate)
 
+        def _candidate_records(
+            kept: PrevizResult | None,
+            # Bound as a default rather than closed over, same as the
+            # beat loop's own captures -- this is redefined every
+            # iteration and ruff correctly flags the bare closure (B023).
+            candidates: list[PrevizResult] = candidates,
+        ) -> list[dict]:
+            return [
+                {
+                    "path": str(c.image_path),
+                    "prompt_used": c.prompt_used,
+                    "kept": kept is not None and c.image_path == kept.image_path,
+                }
+                for c in candidates
+            ]
+
         if len(candidates) > 1:
-            chosen = _choose_candidate(candidates, auto_yes=choose_auto)
+            chosen = _choose_candidate(
+                candidates, auto_yes=choose_auto, context=context
+            )
             if chosen is None:
                 # Rejecting every candidate is a rejection of the attempt,
                 # not of the beat -- the loop offers the usual choices next.
@@ -897,7 +944,8 @@ def _generate_image_with_review(
                         "attempt": attempt,
                         "accepted": False,
                         "concern": "human rejected every candidate",
-                        "candidates": [str(c.image_path) for c in candidates],
+                        "human_choice": "none",
+                        "candidates": _candidate_records(None),
                     }
                 )
                 decision = (
@@ -909,8 +957,10 @@ def _generate_image_with_review(
                     break
                 continue
             previz_result = chosen
+            human_choice = str(candidates.index(chosen) + 1)
         else:
             previz_result = candidates[0]
+            human_choice = None
 
         print(f"--- previz review (model: {review_model}) ---")
         review = run_previz_review_stage(
@@ -951,6 +1001,8 @@ def _generate_image_with_review(
                     "accepted": True,
                     "concern": review.concern,
                     "review_accepted": review.accepted,
+                    "human_choice": human_choice,
+                    "candidates": _candidate_records(previz_result),
                 }
             )
             return previz_result, attempts
@@ -968,6 +1020,13 @@ def _generate_image_with_review(
                 "concern": review.concern,
                 "review_accepted": review.accepted,
                 "image_path": str(archived_path),
+                "human_choice": human_choice,
+                # The chosen candidate moved; record where it actually is
+                # now, or the label points at a path that no longer exists.
+                "candidates": [
+                    {**c, "path": str(archived_path) if c["kept"] else c["path"]}
+                    for c in _candidate_records(previz_result)
+                ],
             }
         )
         if review.concern:
@@ -1653,6 +1712,15 @@ def _generate_beats_with_choices(
         # (f)eedback starts a new call, and the reviewer's concerns must
         # survive that (docs/decisions/0043).
         carried_concerns: list[str] = []
+        # Spans cycles for the same reason carried_concerns does. Each
+        # _generate_image_with_review call returns only its own attempts,
+        # and the previous binding used to be thrown away at an (e)dit or
+        # (f)eedback boundary (docs/decisions/0053).
+        all_attempts: list[dict] = []
+        # What the human did at each attempt's prompt, keyed by cycle and
+        # attempt number -- the judgement itself, as opposed to what was
+        # generated.
+        human_actions: dict[tuple[int, int], dict] = {}
         cycle = 0
         while True:
             cycle += 1
@@ -1678,6 +1746,8 @@ def _generate_beats_with_choices(
                 # (ruff B023). It is mutated in place, not rebound,
                 # so the caller sees every append.
                 carried_concerns: list[str] = carried_concerns,
+                cycle: int = cycle,
+                human_actions: dict = human_actions,
             ) -> str:
                 """One prompt after every review, whatever the verdict.
 
@@ -1728,6 +1798,7 @@ def _generate_beats_with_choices(
                         f"{retry_label} / (e)dit the beat / "
                         "(f)eedback then retry / (g)ive up: "
                     ).strip().lower()
+                human_actions[(cycle, attempt)] = {"human_action": choice}
                 if choice == "a":
                     return "accept"
                 if choice == "e":
@@ -1744,6 +1815,10 @@ def _generate_beats_with_choices(
                     note = ""
                     while not note:
                         note = input("  Feedback (appended to the beat's action): ").strip()
+                    # A human-authored correction naming exactly what the
+                    # render got wrong -- the highest-value text in the
+                    # whole loop and previously unrecorded.
+                    human_actions[(cycle, attempt)]["feedback"] = note
                     beat = dataclasses.replace(beat, action=f"{beat.action} {note}")
                     beat_was_edited = True
                     return "stop"
@@ -1803,6 +1878,7 @@ def _generate_beats_with_choices(
                     for n in range(1, candidates + 1)
                 ]
 
+            beat_context = _beat_review_context(beat, beat_characters)
             previz_result, attempts = _generate_image_with_review(
                 _generate,
                 fact_check_result,
@@ -1822,7 +1898,16 @@ def _generate_beats_with_choices(
                 initial_concerns=carried_concerns,
                 choose_auto=auto_yes,
                 max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
+                context=beat_context,
             )
+            for record in attempts:
+                all_attempts.append(
+                    {
+                        "cycle": cycle,
+                        **record,
+                        **human_actions.get((cycle, record["attempt"]), {}),
+                    }
+                )
 
             if previz_result is None:
                 if beat_was_edited:
@@ -1832,7 +1917,7 @@ def _generate_beats_with_choices(
                         "index": i,
                         "beat": dataclasses.asdict(beat),
                         "image_path": None,
-                        "attempts": attempts,
+                        "attempts": all_attempts,
                     }
                 )
                 break  # every automatic attempt was rejected, or the human gave up on this beat
@@ -1854,7 +1939,7 @@ def _generate_beats_with_choices(
                     # the old single-image flow paired previz_image_path
                     # with previz_prompt_used.
                     "prompt_used": previz_result.prompt_used,
-                    "attempts": attempts,
+                    "attempts": all_attempts,
                 }
             )
             break
