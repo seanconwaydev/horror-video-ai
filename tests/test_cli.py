@@ -1,5 +1,7 @@
 import json
+import os
 import re
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +29,7 @@ from historical_video_ai.cli import (
     _run_dir,
     _run_research_and_fact_check,
     _run_video_generation_only,
+    _safe_path_component,
     _slugify,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
@@ -1833,3 +1836,94 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     out = capsys.readouterr().out
     assert out.count("=== beat 1/1:") == 1, "the full beat header should appear only once"
     assert "restarting, attempt cycle 2" in out
+
+
+# --- recorded paths must survive a moved outputs/ tree ---
+
+
+def test_video_gen_targets_resolve_after_the_run_folder_is_moved(tmp_path):
+    """Run logs record absolute paths, so they embed wherever the project
+    lived when the run executed. Moving or copying a run folder -- or
+    sharing one -- used to break every reference in it, even though the
+    images sit right beside the log."""
+    original = tmp_path / "old_home" / "outputs" / "run_20260101-000000_scene"
+    (original / "beat_1").mkdir(parents=True)
+    image = original / "beat_1" / "previz.png"
+    image.write_bytes(b"png")
+    (original / "run_log.json").write_text(
+        json.dumps(
+            {
+                "previz_beats": [
+                    {
+                        "index": 1,
+                        "image_path": str(image),
+                        "prompt_used": "a prompt",
+                    }
+                ]
+            }
+        )
+    )
+
+    moved = tmp_path / "new_home" / "outputs" / "run_20260101-000000_scene"
+    moved.parent.mkdir(parents=True)
+    shutil.move(str(original), str(moved))
+
+    targets = _load_video_gen_targets(moved)
+
+    assert len(targets) == 1
+    assert targets[0].image_path == moved / "beat_1" / "previz.png"
+    assert targets[0].image_path.exists()
+
+
+def test_run_dir_never_reuses_an_existing_directory(tmp_path, monkeypatch):
+    """Second precision alone is not unique. Re-running the same command
+    right after a failed attempt lands in the same second with the same
+    slug, and `exist_ok=True` let the second run write straight over the
+    first one's images and log."""
+    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+
+    first = _run_dir("same-scene")
+    (first / "previz.png").write_bytes(b"first run's image")
+    second = _run_dir("same-scene")
+
+    assert second != first, "a second run in the same second reused the first run's directory"
+    assert (first / "previz.png").read_bytes() == b"first run's image"
+
+
+def test_rejected_reference_images_are_kept_not_overwritten(tmp_path, monkeypatch):
+    """References wrote to a fixed "reference.png", so rejecting one and
+    regenerating destroyed it -- while beats had archived their rejected
+    attempts all along. Every rejected reference in a real session of UX
+    testing was lost this way."""
+    responses = iter(["n", "n", "y"])  # reject twice, accept the third
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    counter = {"n": 0}
+
+    def _image_fn(**kwargs):
+        counter["n"] += 1
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
+
+    character_refs, _ = _generate_scene_references(
+        ScenePlan(characters=[_character()], locations=[], beats=[]),
+        previz_model="gemini/gemini-2.5-flash-image",
+        image_kwargs={"image_fn": _image_fn},
+        out_dir=tmp_path,
+    )
+
+    ref_dir = next(iter(character_refs.values())).parent
+    kept = sorted(p.name for p in ref_dir.glob("reference_attempt_*.png"))
+    assert kept == ["reference_attempt_1_rejected.png", "reference_attempt_2_rejected.png"]
+    assert (ref_dir / "reference.png").exists()
+
+
+@pytest.mark.parametrize(
+    ("raw_id", "expected"),
+    [("hallway", "hallway"), ("a/../../evil", "a-..-..-evil"), ("../x", "x"), ("///", "unnamed")],
+)
+def test_ids_used_as_directory_names_cannot_escape_the_run_folder(raw_id, expected):
+    """Ids come from a planning model and can be edited by hand, so they
+    are not guaranteed to be single path components. "a/../../evil"
+    resolved outside the run directory entirely."""
+    safe = _safe_path_component(raw_id)
+    assert safe == expected
+    assert "/" not in safe and os.sep not in safe
