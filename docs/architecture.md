@@ -60,9 +60,44 @@ The highlighted box (Previz) is the spend gate: everything before it is text or 
 
 ## Open questions (not yet decided)
 
-**Video generation model.** Needs to support image-to-video conditioning (see the Previz stage). `openai/sora-2` is the current v1 placeholder ([decisions/0010](./decisions/0010-video-generation-model-and-standalone-stage.md)) — not a rigorously compared decision, same status as previz's own image model below. Veo (Google, via Vertex AI) is the next candidate to actually compare it against; Kling and Runway remain untried. **Deadline, not just a someday comparison:** confirmed directly against OpenAI's own deprecations page (2026-09-01) — `sora-2`, `sora-2-pro`, and the whole Videos API are being removed from the API on **2026-09-24**, with no OpenAI-recommended replacement listed. `video_generation.py` must move off Sora before then; deliberately not prioritized ahead of other in-progress work (Sean's call), but this needs to happen before the shutdown date, not whenever convenient.
+**Video generation model.** Resolved for now: Wan via Replicate
+([decisions/0037](./decisions/0037-horror-motion-comic-wan.md)), which replaced the
+`openai/sora-2` placeholder before the Videos API was removed on 2026-09-24. It is still
+a placeholder in the sense that no rigorous quality comparison has been run; Veo, Kling
+and Runway remain untried.
 
-Now a stronger reason to specifically evaluate Runway when this comparison happens, not just leave it as one untried option among several: `docs/playbook/failure-taxonomy.md`'s same-location-beat-repetitiveness entry found that Runway Gen-4/4.5 has *native* prompt-driven camera-movement control (dolly/pan, explicit camera parameters, ~$0.05-0.15/sec base + camera-control surcharge) — a real, first-party feature for exactly the "camera coverage within one continuous shot" problem this project has been fighting at the previz-image level. Worth weighing whether that problem is better solved at the video-generation stage (one good previz keyframe per location, camera movement handled natively by the video model) rather than by generating multiple independent previz images per location and hoping they read as coherent coverage. Raw multi-ControlNet conditioning (depth + camera pose) was also researched as an alternative specifically at the previz-image level -- requires a new provider (not Gemini/OpenAI; e.g. Flux via Replicate, ~$0.03-0.05/image, comparable to current previz cost) -- but the video-stage-native-camera-control angle looks like the more direct fit and doesn't require adding a new image-generation provider at all.
+Runway is the one worth evaluating specifically rather than leaving as one option among
+several: `docs/playbook/failure-taxonomy.md`'s same-location-beat-repetitiveness entry
+found that Runway Gen-4/4.5 has *native* prompt-driven camera-movement control
+(dolly/pan, explicit camera parameters, ~$0.05-0.15/sec base + camera-control surcharge)
+— a first-party feature for exactly the "camera coverage within one continuous shot"
+problem this project has fought at the previz-image level. Worth weighing whether that
+problem is better solved at the video stage (one good previz keyframe per location,
+camera movement native to the video model) rather than by generating multiple
+independent previz images per location and hoping they read as coherent coverage. Raw
+multi-ControlNet conditioning (depth + camera pose) was researched as an alternative at
+the previz-image level — requires a new provider (Flux via Replicate, ~$0.03-0.05/image,
+comparable to current previz cost) — but the video-stage angle looks like the more direct
+fit and adds no new image provider.
+
+**Documentation and instruction rot.** Several decisions have outlived the premise that
+justified them, and the pattern is now frequent enough to be worth a deliberate sweep
+rather than case-by-case discovery: a dead model constant survived a month past
+[0037](./decisions/0037-horror-motion-comic-wan.md); reference conditioning outlived its
+premise until [0050](./decisions/0050-no-reference-images-by-default.md); the entire
+single-image previz flow stayed reachable-looking, tests and all, until
+[0051](./decisions/0051-remove-the-single-image-previz-flow.md); and `CLAUDE.md` claimed
+video generation went through litellm long after it stopped doing so. Two things to check
+across the whole repo, not just where a bug points: every doc claim against the code that
+implements it, and every prompt rule in `scene_planning.py`/`previz.py` against whether it
+is still earning its place. For the prompt rules specifically, the question is not only
+whether a rule is outdated but whether it sits at the right tier and in the right order —
+the five-tier framework (instruction / routed instruction / schema constraint / selection
+/ capability) plus [0048](./decisions/0048-heuristic-gates-warn-rather-than-fail.md)'s
+rule that only a decidable predicate may fail a run. Two rules have already been found
+actively fighting each other: a buried, conditional "make characters react to each other"
+clause was losing to a much more concrete instruction to describe the threat as a fraction
+of the frame ([0049](./decisions/0049-per-character-staging-in-beats.md)).
 
 **Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gemini/gemini-2.5-flash-image` is the current v1 placeholder ([decisions/0011](./decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md), superseding 0007's original OpenAI placeholder) — picked because its 9:16 output is a close aspect-ratio match to the video-generation stage's required size, not from a rigorous quality comparison; Kling, Runway, and a real quality bake-off against gpt-image-1-mini are all still untried.
 

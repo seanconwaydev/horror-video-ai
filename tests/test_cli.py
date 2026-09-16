@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -15,7 +16,6 @@ from historical_video_ai.cli import (
     _confirm,
     _generate_beats_with_choices,
     _generate_image_with_review,
-    _generate_previz_with_review,
     _generate_scene_references,
     _link_beat_into_gallery,
     _load_fact_sheet_from_fixture,
@@ -663,17 +663,35 @@ def _fake_review_completion(verdicts):
 
 
 def _generate_previz_with_review_kwargs(review_completion_fn, out_dir):
+    """Kwargs for _generate_image_with_review, the review loop itself.
+
+    These tests used to drive it through _generate_previz_with_review, the
+    single-image flow deleted in docs/decisions/0051; the loop they
+    actually exercise is shared with the live beat path, so they were
+    re-pointed at it rather than dropped.
+    """
     return {
-        "previz_model": "openai/gpt-image-1-mini",
         "review_model": "anthropic/claude-sonnet-5",
-        "image_kwargs": {"image_fn": _fake_image_fn},
         "review_kwargs": {"completion_fn": review_completion_fn},
         "out_dir": out_dir,
     }
 
 
-def test_generate_previz_with_review_accepts_on_first_attempt(tmp_path):
-    result, attempts = _generate_previz_with_review(
+def _previz_generate_fn(out_dir):
+    """A generate_fn writing one candidate to out_dir/previz.png."""
+
+    def _generate(previous_concerns):
+        del previous_concerns
+        path = out_dir / "previz.png"
+        path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+        return [PrevizResult(image_path=path, prompt_used="a prompt")]
+
+    return _generate
+
+
+def test_image_review_loop_accepts_on_first_attempt(tmp_path):
+    result, attempts = _generate_image_with_review(
+        _previz_generate_fn(tmp_path),
         _fact_check_result_for_previz(),
         **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
     )
@@ -685,10 +703,11 @@ def test_generate_previz_with_review_accepts_on_first_attempt(tmp_path):
     ]
 
 
-def test_generate_previz_with_review_retries_then_accepts(tmp_path):
+def test_image_review_loop_retries_then_accepts(tmp_path):
     verdicts = [(False, "Depicts something anachronistic."), (True, None)]
 
-    result, attempts = _generate_previz_with_review(
+    result, attempts = _generate_image_with_review(
+        _previz_generate_fn(tmp_path),
         _fact_check_result_for_previz(),
         **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
     )
@@ -700,7 +719,7 @@ def test_generate_previz_with_review_retries_then_accepts(tmp_path):
     assert [a["accepted"] for a in attempts] == [False, True]
 
 
-def test_generate_previz_with_review_passes_prior_concern_into_retry_review(tmp_path):
+def test_image_review_loop_passes_prior_concern_into_retry_review(tmp_path):
     # A retry review with no memory of the previous rejection could accept
     # a second attempt with the same unresolved flaw -- observed for real
     # (fisheye distortion flagged missing once, then waved through on
@@ -719,7 +738,8 @@ def test_generate_previz_with_review_passes_prior_concern_into_retry_review(tmp_
         content = json.dumps({"accepted": accepted, "concern": concern})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
-    _generate_previz_with_review(
+    _generate_image_with_review(
+        _previz_generate_fn(tmp_path),
         _fact_check_result_for_previz(),
         **_generate_previz_with_review_kwargs(_completion, tmp_path),
     )
@@ -728,10 +748,11 @@ def test_generate_previz_with_review_passes_prior_concern_into_retry_review(tmp_
     assert "Shot lacks the described extreme fisheye perspective." in captured_prompts[1]
 
 
-def test_generate_previz_with_review_gives_up_after_max_attempts(tmp_path):
+def test_image_review_loop_gives_up_after_max_attempts(tmp_path):
     verdicts = [(False, "Wrong.")] * 3
 
-    result, attempts = _generate_previz_with_review(
+    result, attempts = _generate_image_with_review(
+        _previz_generate_fn(tmp_path),
         _fact_check_result_for_previz(),
         **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
     )
@@ -1715,10 +1736,11 @@ def test_run_dir_omits_slug_when_not_given(tmp_path, monkeypatch):
     assert re.match(r"^run_\d{8}-\d{6}$", d.name)
 
 
-def test_generate_previz_with_review_calls_on_image_generated_before_review(tmp_path):
+def test_image_review_loop_calls_on_image_generated_before_review(tmp_path):
     calls = []
 
-    result, _ = _generate_previz_with_review(
+    result, _ = _generate_image_with_review(
+        _previz_generate_fn(tmp_path),
         _fact_check_result_for_previz(),
         **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
         on_image_generated=calls.append,
@@ -1728,7 +1750,7 @@ def test_generate_previz_with_review_calls_on_image_generated_before_review(tmp_
     assert calls[0] == result
 
 
-def test_generate_previz_with_review_on_image_generated_survives_a_review_crash(tmp_path):
+def test_image_review_loop_on_image_generated_survives_a_review_crash(tmp_path):
     # Regression test: a real run hit exactly this -- previz generated a
     # real image, but previz_review raised (missing ANTHROPIC_API_KEY)
     # before returning a verdict at all. on_image_generated must still have
@@ -1741,7 +1763,8 @@ def test_generate_previz_with_review_on_image_generated_survives_a_review_crash(
         raise RuntimeError("simulated previz_review crash (e.g. missing API key)")
 
     with pytest.raises(RuntimeError, match="simulated previz_review crash"):
-        _generate_previz_with_review(
+        _generate_image_with_review(
+            _previz_generate_fn(tmp_path),
             _fact_check_result_for_previz(),
             **_generate_previz_with_review_kwargs(_crashing_review, tmp_path),
             on_image_generated=calls.append,

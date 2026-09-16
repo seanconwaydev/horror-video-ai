@@ -14,8 +14,8 @@ scene's premise as historically impossible (docs/decisions/0008,
 _resolve_premise_conflict -- offers a suggested alternative or your own
 corrected description, re-verified before continuing), and previz's own
 generated image failing independent review (docs/decisions/0009,
-_generate_previz_with_review -- regenerates blind up to
-_MAX_PREVIZ_ATTEMPTS times, then gives up).
+_generate_image_with_review -- regenerates with each prior concern fed
+back in, up to _MAX_PREVIZ_ATTEMPTS times, then gives up).
 
 Flags:
 - `--mock`: no network calls, no API keys -- synthetic data for every stage.
@@ -72,7 +72,6 @@ from historical_video_ai.stages.previz import (
     build_location_reference_prompt,
     run_beat_image_stage,
     run_previz_review_stage,
-    run_previz_stage,
     run_reference_image_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
@@ -782,7 +781,6 @@ def _generate_image_with_review(
 ) -> tuple[PrevizResult | None, list[dict]]:
     """Generate an image via `generate_fn` (a callable producing one
     PrevizResult from the concerns accumulated so far -- a closure over
-    run_previz_stage for the original single-scene flow, or over
     run_beat_image_stage for a scene-plan beat, docs/decisions/0023/0024),
     then have an independent pass review the actual image against the
     scene (docs/decisions/0009). On rejection, regenerates -- now with
@@ -943,59 +941,6 @@ def _generate_image_with_review(
 
     print(f"\nNo image kept for this beat after {len(attempts)} attempt(s).")
     return None, attempts
-
-
-def _generate_previz_with_review(
-    fact_check_result: FactCheckResult,
-    *,
-    previz_model: str,
-    review_model: str,
-    image_kwargs: dict,
-    review_kwargs: dict,
-    out_dir: Path,
-    on_image_generated: Callable[[PrevizResult], None] | None = None,
-) -> tuple[PrevizResult | None, list[dict]]:
-    """The original single-scene previz+review flow (docs/decisions/0009) --
-    now a thin wrapper around _generate_image_with_review. See that
-    function's docstring for the shared retry/review behavior.
-
-    Unlike the scene-plan beat path (`_generate_beats_with_choices`),
-    this flow doesn't fold prior rejection reasons back into the retry --
-    `run_previz_stage` builds its prompt from the whole `fact_check_result`
-    with no per-attempt correction-injection point today. Left as a real,
-    known gap rather than force-fit, since this flow predates scene
-    planning and is less actively used now that beats exist.
-    """
-    attempt_n = 0
-
-    def _generate(previous_concerns: list[str]) -> list[PrevizResult]:
-        del previous_concerns  # not used by this flow -- see docstring above
-        nonlocal attempt_n
-        attempt_n += 1
-        print(f"\n--- previz (model: {previz_model}, attempt {attempt_n}/{_MAX_PREVIZ_ATTEMPTS}) ---")
-        # A list of one: this flow has no candidate fan-out, but
-        # _generate_image_with_review takes a list from every caller so it
-        # has one shape to handle rather than two.
-        return [
-            run_previz_stage(
-                fact_check_result,
-                model=previz_model,
-                output_dir=out_dir,
-                on_transient_retry=lambda n, exc: print(
-                    f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
-                ),
-                **image_kwargs,
-            )
-        ]
-
-    return _generate_image_with_review(
-        _generate,
-        fact_check_result,
-        review_model=review_model,
-        review_kwargs=review_kwargs,
-        out_dir=out_dir,
-        on_image_generated=on_image_generated,
-    )
 
 
 def _slugify(text: str, max_length: int = 40) -> str:

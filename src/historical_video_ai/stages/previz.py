@@ -92,32 +92,6 @@ class PrevizReview:
     concern: str | None
 
 
-def _build_prompt(fact_check_result: FactCheckResult) -> str:
-    """Build the image prompt from fact_check_result.fact_sheet.claims as
-    given -- this stage trusts that list as already resolved. It used to
-    auto-exclude any claim flagged "contradicted" itself, but that matching
-    relied on exact string equality between a flag's claim_text and the
-    original claim, which a real model response isn't guaranteed to
-    preserve (see fact_check.py's claim_text validation) -- and more
-    fundamentally, silently dropping a claim isn't this stage's call to
-    make. Per docs/pipeline.md's stage 3 review gate, a human resolves each
-    flag (accept, cut, or soften) before the fact sheet ever reaches here --
-    see cli.py's _resolve_flags."""
-    fact_sheet = fact_check_result.fact_sheet
-    detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
-    return (
-        f"A historically accurate scene. Time: {fact_sheet.time}. "
-        f"Place: {fact_sheet.place}. A generic, unnamed person (third "
-        f"person, not a specific named historical figure unless stated) "
-        f"{fact_sheet.description}\n\n"
-        f"Research claims about this place (these span its whole history, "
-        f"not just the moment above -- some describe the place at other "
-        f"times, e.g. a modern renovation or a technology from a different "
-        f"era, and must NOT appear in the image if they don't hold at "
-        f"{fact_sheet.time} specifically):\n{detail_lines}"
-    )
-
-
 def _call_with_transient_retry(
     fn: Callable,
     *,
@@ -125,7 +99,7 @@ def _call_with_transient_retry(
     on_transient_retry: Callable[[int, Exception], None] | None,
     **kwargs: object,
 ) -> object:
-    """Shared retry loop for both run_previz_stage and
+    """Shared retry loop for both
     run_reference_image_stage -- identical transient-error handling
     (docs/decisions/0016), regardless of which underlying call (plain
     generation or image-conditioned edit) is being made."""
@@ -191,10 +165,15 @@ def _generate_image_response(
     on_transient_retry: Callable[[int, Exception], None] | None,
 ) -> object:
     """Shared branch between plain text-to-image and image-conditioned
-    edit, used by both run_previz_stage and run_beat_image_stage. Reads
-    reference images as raw bytes, not `Path` objects -- see
-    run_previz_stage's docstring for why (litellm's Gemini image_edit
-    PathLike bug)."""
+    edit, used by every stage here that can take a reference image.
+
+    Reference images are read as raw bytes, not passed as `Path` objects:
+    litellm's Gemini `image_edit` provider advertises `os.PathLike` as an
+    accepted `image` type, but its `_read_all_bytes` only actually handles
+    `bytes`/`BytesIO`/`BufferedReader` and raises `ValueError` on a bare
+    `Path` -- confirmed directly against litellm 1.98.0's source.
+    TODO(WORKAROUND): file a litellm issue for this and link it here; none
+    of the existing open issues checked matched this exactly."""
     if reference_paths:
         image_bytes = [p.read_bytes() for p in reference_paths]
         return _call_with_transient_retry(
@@ -216,70 +195,6 @@ def _generate_image_response(
     )
 
 
-def run_previz_stage(
-    fact_check_result: FactCheckResult,
-    *,
-    model: str | None = None,
-    image_fn: Callable = litellm.image_generation,
-    edit_fn: Callable = litellm.image_edit,
-    character_reference: Path | None = None,
-    location_reference: Path | None = None,
-    output_dir: Path = Path("outputs"),
-    sleep_fn: Callable[[float], None] = time.sleep,
-    on_transient_retry: Callable[[int, Exception], None] | None = None,
-) -> PrevizResult:
-    """Generate one still image from a fact-checked scene.
-
-    `model` defaults to the pinned "previz" model; `image_fn`/`edit_fn`/
-    `sleep_fn` are injection points for tests (avoid a real API call /
-    real waiting).
-
-    `character_reference`/`location_reference` (docs/decisions/0024), if
-    given, condition the generation on those reference image(s) via
-    `edit_fn` instead of a plain `image_fn` text-to-image call -- see
-    `run_reference_image_stage` for generating the references themselves.
-    Reference images are read as raw bytes, not passed as `Path` objects:
-    litellm's Gemini `image_edit` provider advertises `os.PathLike` as an
-    accepted `image` type, but its `_read_all_bytes` only actually handles
-    `bytes`/`BytesIO`/`BufferedReader` and raises `ValueError` on a bare
-    `Path` -- confirmed directly against litellm 1.98.0's source.
-    TODO(WORKAROUND): file a litellm issue for this and link it here; none
-    of the existing open issues checked matched this exactly.
-
-    Retries the image call up to _MAX_TRANSIENT_RETRIES times on errors
-    judged transient (_TRANSIENT_IMAGE_ERRORS, docs/decisions/0016) --
-    added after real, repeated Gemini 503s, observed on both plain
-    generation and image-conditioned edit calls. Non-transient errors
-    (content rejection, bad request, auth) fail immediately.
-    `on_transient_retry`, if given, is called with (attempt number,
-    exception) before each retry.
-
-    Raises PrevizError if `fact_check_result` still carries an unresolved
-    premise conflict (docs/decisions/0008 -- refuses rather than fabricate)
-    or if the response has no recognizable image data.
-    """
-    if fact_check_result.premise_conflict is not None:
-        raise PrevizError(
-            "Refusing to generate an image: the scene's premise was flagged "
-            "as historically impossible and was never resolved -- "
-            f"{fact_check_result.premise_conflict.explanation}"
-        )
-
-    resolved_model = model or get_stage_model("previz")
-    prompt = _build_prompt(fact_check_result)
-    response = _generate_image_response(
-        prompt,
-        reference_paths=[p for p in (character_reference, location_reference) if p is not None],
-        model=resolved_model,
-        image_fn=image_fn,
-        edit_fn=edit_fn,
-        sleep_fn=sleep_fn,
-        on_transient_retry=on_transient_retry,
-    )
-    image_path = _extract_and_save_image(response, output_dir, "previz.png")
-    return PrevizResult(image_path=image_path, prompt_used=prompt)
-
-
 def run_reference_image_stage(
     prompt: str,
     *,
@@ -293,7 +208,7 @@ def run_reference_image_stage(
     (docs/decisions/0024) -- plain text-to-image, no `FactCheckResult`,
     since a reference image isn't tied to one specific historical scene
     the way a beat's final image is. Same transient-retry behavior as
-    `run_previz_stage`; `model` defaults to the same pinned "previz" model
+    the beat stage; `model` defaults to the same pinned "previz" model
     (a reference image and a beat's final image use the same image model,
     just a different call shape).
     """
@@ -536,8 +451,8 @@ def run_beat_image_stage(
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizResult:
     """Generate one beat's image from a ScenePlan (docs/decisions/0023) --
-    the beat-driven counterpart to run_previz_stage, which stays scoped to
-    the original single-scene (time/place/description) flow. `character`/
+    the beat-driven image stage -- the only image-generation entry point
+    for a scene plan (docs/decisions/0051). `character`/
     `location` supply the text description woven into the prompt (see
     `_build_beat_prompt`); `character_reference`/`location_reference`
     (docs/decisions/0024) additionally condition the generation on those
