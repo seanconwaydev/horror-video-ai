@@ -28,7 +28,9 @@ Two further changes make this the right moment. The project owner has stopped us
 3. **No default.** Blank input is re-prompted rather than meaning "spend more money". Every attempt past the first is an explicit choice.
 4. **`on_rejected` becomes `on_reviewed`**, called after every review with `(concern or None, attempt)`.
 5. **A superseded image is archived too.** A human can now retry an image the reviewer accepted, and that image must not be silently overwritten -- archived as `_superseded` rather than `_rejected`, since the distinction is real.
-6. **The second prompt is deleted.** Asking accept/reroll/edit again after the human already chose to keep the image was the same question twice.
+6. **The retry option says what it does.** It reads `(r)etry carrying N review concerns` when there are any, and plain `(r)etry` when there are none. It has always folded every concern so far into the next attempt's prompt, and nothing said so -- which led to the reasonable assumption that the reviewer's wording had to be copy-pasted in by hand via `(f)eedback`.
+7. **Concerns survive a cycle restart.** `(e)dit` and `(f)eedback` end the attempt cycle and begin a fresh one, and the reviewer's concerns used to be discarded at that boundary -- so adding a note of your own silently threw away everything the reviewer had said. The caller now carries them across, and `_generate_image_with_review` takes them as `initial_concerns`.
+8. **The second prompt is deleted.** Asking accept/reroll/edit again after the human already chose to keep the image was the same question twice.
 
 ## Consequences
 
