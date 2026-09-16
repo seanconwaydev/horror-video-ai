@@ -886,3 +886,50 @@ def test_planning_prompt_tells_the_planner_identity_fields_are_appearance_only()
     prompt = captured["messages"][0]["content"]
     assert "never what they are doing" in prompt
     assert "an instruction the character can never escape" in prompt
+
+
+# --- camera specified at a granularity image models act on (ADR 0044) ---
+
+
+def test_planning_prompt_asks_for_camera_in_model_actionable_terms():
+    """Real run: the planner specified "camera beside the boot of the
+    neighbouring parked car in bay 15" and "a ceiling corner at the west
+    end", and the image model produced eye-level shots three attempts
+    running. The CAMERA field already said the right thing; the model does
+    not place a virtual camera in a floor plan."""
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    prompt = captured["messages"][0]["content"]
+
+    assert "SHOT SIZE" in prompt
+    assert "CAMERA HEIGHT" in prompt
+    assert "SUBJECT ORIENTATION" in prompt
+    assert "Do NOT specify where the camera stands in the world" in prompt
+    # The old coverage rule demanded exactly what the model ignores.
+    assert "move the camera to a different part of the room" not in prompt
+
+
+def test_planning_prompt_asks_for_screen_direction_not_camera_side():
+    """The 180-degree rule's enforceable half is which way the subject
+    faces in frame; which side of an imaginary line the camera sits on is
+    not something an image model can honour."""
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    prompt = captured["messages"][0]["content"]
+
+    assert "SCREEN DIRECTION" in prompt
+    assert "which side of an imaginary line the camera sits on is not" in prompt
