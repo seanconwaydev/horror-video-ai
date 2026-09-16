@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -466,7 +466,7 @@ def build_location_reference_prompt(location: Location, *, style: str = DEFAULT_
 def _build_beat_prompt(
     beat: Beat,
     *,
-    character: Character | None,
+    characters: Sequence[Character] = (),
     location: Location | None,
     style: str = DEFAULT_STYLE,
 ) -> str:
@@ -487,12 +487,24 @@ def _build_beat_prompt(
     (evals/) had that construction lose on style 5-0.
     """
     parts = []
-    if character is not None:
+    # One block per character present, labelled, so a beat with more than
+    # one has a way to say which is which. Before docs/decisions/0041 only
+    # the scene's first character was ever passed here, so a planned
+    # antagonist could not be rendered at all.
+    for character in characters:
+        label = f"CHARACTER {character.id}" if len(characters) > 1 else "CHARACTER"
         parts.append(
-            f"CHARACTER: {character.face_build}, {character.hair}.\n"
+            f"{label}: {character.face_build}, {character.hair}.\n"
             f"WARDROBE (signature): {character.wardrobe_signature}.\n"
             f"WARDROBE (flexible): {character.wardrobe_flexible}.\n"
             f"DISTINGUISHING DETAIL: {character.distinguishing_detail}."
+        )
+    if len(characters) > 1:
+        present = ", ".join(c.id for c in characters)
+        parts.append(
+            f"ALL OF THESE CHARACTERS ARE IN THIS SHOT: {present}. Every one of "
+            "them must be visible in the frame, even if only partially -- a "
+            "silhouette, a figure in the background, a hand at the frame edge."
         )
     parts.append(f"SUBJECT: {beat.subject}")
     parts.append(f"ACTION: {beat.action}")
@@ -508,9 +520,9 @@ def _build_beat_prompt(
 def run_beat_image_stage(
     beat: Beat,
     *,
-    character: Character | None = None,
+    characters: Sequence[Character] = (),
     location: Location | None = None,
-    character_reference: Path | None = None,
+    character_references: Sequence[Path] = (),
     location_reference: Path | None = None,
     style: str = DEFAULT_STYLE,
     model: str | None = None,
@@ -531,10 +543,13 @@ def run_beat_image_stage(
     realism-level source -- see `_build_beat_prompt`.
     """
     resolved_model = model or get_stage_model("previz")
-    prompt = _build_beat_prompt(beat, character=character, location=location, style=style)
+    prompt = _build_beat_prompt(beat, characters=characters, location=location, style=style)
     response = _generate_image_response(
         prompt,
-        reference_paths=[p for p in (character_reference, location_reference) if p is not None],
+        reference_paths=[
+            *character_references,
+            *([location_reference] if location_reference is not None else []),
+        ],
         model=resolved_model,
         image_fn=image_fn,
         edit_fn=edit_fn,
@@ -629,7 +644,7 @@ def run_previz_review_stage(
     image_path: Path,
     fact_check_result: FactCheckResult,
     *,
-    character: Character | None = None,
+    characters: Sequence[Character] = (),
     beat: Beat | None = None,
     requires_grounding: bool = True,
     previous_concerns: list[str] | None = None,
@@ -681,13 +696,13 @@ def run_previz_review_stage(
     # were approved at scene-plan-review time (0023), not derived from the
     # original premise-conflict text, so they need naming here separately.
     planned_details_block = ""
-    if character is not None or beat is not None:
+    if characters or beat is not None:
         planned_lines = []
-        if character is not None:
+        for character in characters:
             planned_lines.append(
-                f"- This character's appearance was already deliberately planned "
-                f"and human-reviewed, including anything that looks anachronistic "
-                f"in isolation -- do NOT flag it: wardrobe is "
+                f"- Character {character.id} is deliberately planned and present in this "
+                f"shot -- do NOT flag them as unplanned or unexpected, and do NOT flag "
+                f"their appearance as anachronistic in isolation: wardrobe is "
                 f"{character.wardrobe_signature} ({character.wardrobe_flexible}); "
                 f"{character.distinguishing_detail}"
             )

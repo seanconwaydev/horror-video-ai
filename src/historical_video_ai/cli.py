@@ -1522,8 +1522,7 @@ def _generate_beats_with_choices(
     None if every review attempt was rejected, attempt log) for
     run_log.json.
     """
-    character = scene_plan.characters[0] if scene_plan.characters else None
-    character_ref = character_refs.get(character.id) if character else None
+    characters_by_id = {c.id: c for c in scene_plan.characters}
     locations_by_id = {loc.id: loc for loc in scene_plan.locations}
 
     beat_results = []
@@ -1542,6 +1541,18 @@ def _generate_beats_with_choices(
             on_beat_complete(beat_results)
 
     for i, beat in enumerate(scene_plan.beats, start=1):
+        # Every character the beat says is present, not just the scene's
+        # first one (docs/decisions/0041). A beat that names nobody falls
+        # back to the first character, which is what every beat got before.
+        beat_character_ids = beat.character_ids or (
+            [scene_plan.characters[0].id] if scene_plan.characters else []
+        )
+        beat_characters = [
+            characters_by_id[cid] for cid in beat_character_ids if cid in characters_by_id
+        ]
+        beat_character_refs = [
+            character_refs[c.id] for c in beat_characters if c.id in character_refs
+        ]
         location = locations_by_id.get(beat.location_id)
         location_ref = location_refs.get(beat.location_id)
         beat_out_dir = out_dir / f"beat_{i}"
@@ -1638,6 +1649,8 @@ def _generate_beats_with_choices(
                 location: Location | None = location,
                 location_ref: Path | None = location_ref,
                 beat_out_dir: Path = beat_out_dir,
+                beat_characters: list = beat_characters,
+                beat_character_refs: list = beat_character_refs,
             ) -> PrevizResult:
                 nonlocal attempt_n
                 attempt_n += 1
@@ -1647,9 +1660,9 @@ def _generate_beats_with_choices(
                 )
                 return run_beat_image_stage(
                     _beat_with_review_corrections(beat, previous_concerns),
-                    character=character,
+                    characters=beat_characters,
                     location=location,
-                    character_reference=character_ref,
+                    character_references=beat_character_refs,
                     location_reference=location_ref,
                     style=style,
                     model=previz_model,
@@ -1669,7 +1682,7 @@ def _generate_beats_with_choices(
                 # their plausibility from scratch on every attempt.
                 review_kwargs={
                     **review_kwargs,
-                    "character": character,
+                    "characters": beat_characters,
                     "beat": beat,
                     "requires_grounding": requires_grounding,
                 },
