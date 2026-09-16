@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import json
 from types import SimpleNamespace
@@ -405,17 +406,19 @@ def _location() -> Location:
     )
 
 
-def _beat() -> Beat:
-    return Beat(
-        location_id="street",
-        subject="The influencer",
-        action="checks her phone, puzzled",
-        camera="medium shot, three-quarter angle",
-        lighting="bright midday sun",
-        cinematography="35mm, shallow depth of field",
-        audio="street ambience",
-        duration_seconds="3",
-    )
+def _beat(**overrides) -> Beat:
+    fields = {
+        "location_id": "street",
+        "subject": "The influencer",
+        "action": "checks her phone, puzzled",
+        "camera": "medium shot, three-quarter angle",
+        "lighting": "bright midday sun",
+        "cinematography": "35mm, shallow depth of field",
+        "audio": "street ambience",
+        "duration_seconds": "3",
+    }
+    fields.update(overrides)
+    return Beat(**fields)
 
 
 def test_build_character_sheet_prompt_includes_all_character_fields():
@@ -894,3 +897,43 @@ def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_
     run_previz_review_stage(image_path, _fact_check_result(), completion_fn=_completion)
 
     assert captured["model"] == get_stage_model("previz_review")
+
+
+def test_previz_review_is_told_the_beats_lighting_not_just_its_action(tmp_path):
+    """Regression test for a real paid run.
+
+    scene_planning's horror threat rule requires a beat to state the
+    threat's placement and occlusion in its `lighting` field. The reviewer
+    was only shown `subject` and `action`, so it had no idea the monster
+    was planned -- and rejected the image for "an unplanned humanoid
+    silhouette figure", burning all three paid attempts on a beat that had
+    rendered correctly.
+    """
+    captured = {}
+
+    def _completion(**kwargs):
+        captured.update(kwargs)
+        content = json.dumps({"accepted": True, "concern": None})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    beat = _beat(
+        lighting=(
+            "Standing inside that doorframe is a solid black silhouette with no "
+            "interior detail, taller than the door itself"
+        ),
+        camera="28mm from the near end of the hallway, low to the floor",
+    )
+    image = tmp_path / "previz.png"
+    image.write_bytes(base64.b64decode(_TINY_PNG_B64))
+
+    run_previz_review_stage(
+        image,
+        _fact_check_result(),
+        beat=beat,
+        completion_fn=_completion,
+        model="anthropic/claude-sonnet-5",
+    )
+
+    sent = json.dumps(captured["messages"])
+    assert "solid black silhouette" in sent, "reviewer was not told what the beat's lighting plans"
+    assert "28mm from the near end" in sent, "reviewer was not told the beat's planned camera"
