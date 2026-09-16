@@ -510,7 +510,7 @@ def test_build_character_sheet_prompt_raises_on_unknown_style():
 def test_run_beat_image_stage_writes_image_and_prompt_includes_beat_fields(tmp_path):
     result = run_beat_image_stage(
         _beat(),
-        character=_character(),
+        characters=[_character()],
         location=_location(),
         model="gemini/gemini-2.5-flash-image",
         image_fn=_fake_image_fn(_TINY_PNG_B64),
@@ -531,7 +531,7 @@ def test_run_beat_image_stage_states_style_exactly_once(tmp_path):
     the beat's lens/grade notes attached to CAMERA instead."""
     result = run_beat_image_stage(
         _beat(),
-        character=_character(),
+        characters=[_character()],
         location=_location(),
         style="cel-shaded",
         image_fn=_fake_image_fn(_TINY_PNG_B64),
@@ -549,7 +549,7 @@ def test_run_beat_image_stage_states_style_exactly_once(tmp_path):
 def test_run_beat_image_stage_omits_character_block_when_none_given(tmp_path):
     result = run_beat_image_stage(
         _beat(),
-        character=None,
+        characters=[],
         location=_location(),
         image_fn=_fake_image_fn(_TINY_PNG_B64),
         output_dir=tmp_path,
@@ -569,7 +569,7 @@ def test_run_beat_image_stage_uses_edit_fn_when_references_given(tmp_path):
 
     run_beat_image_stage(
         _beat(),
-        character_reference=character_ref,
+        character_references=[character_ref],
         location_reference=location_ref,
         edit_fn=_edit_fn,
         output_dir=tmp_path,
@@ -766,7 +766,7 @@ def test_run_previz_review_stage_includes_planned_details_when_character_and_bea
     run_previz_review_stage(
         image_path,
         _fact_check_result(),
-        character=_character(),
+        characters=[_character()],
         beat=_beat(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_completion,

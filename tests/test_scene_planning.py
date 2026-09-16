@@ -9,10 +9,12 @@ from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
     Beat,
+    Character,
     ScenePlanningError,
     _random_character_trait_hint,
     _resolve_composition_mode,
     _resolve_threat_mode,
+    check_beat_character_references,
     check_cinematography_is_not_a_style_claim,
     run_scene_planning_stage,
 )
@@ -756,3 +758,71 @@ def test_parse_scene_plan_rejects_a_style_claim_in_cinematography():
 
     with pytest.raises(ScenePlanningError, match="art-style claim"):
         run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+
+
+# --- beats must be able to name more than one character (ADR 0041) ---
+
+
+def test_beat_renders_every_named_character_and_says_all_are_present():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+
+    woman = Character(
+        id="w1", face_build="mid-forties, slender", hair="ash-blonde shag",
+        wardrobe_signature="grey car coat", wardrobe_flexible="coat open",
+        distinguishing_detail="scar through right eyebrow",
+    )
+    figure = Character(
+        id="fig1", face_build="late sixties, heavy-set", hair="grey stubble under a cap",
+        wardrobe_signature="olive work jacket", wardrobe_flexible="collar turned up",
+        distinguishing_detail="brass keyring",
+    )
+    beat = _beat(subject="w1", character_ids=["w1", "fig1"])
+
+    prompt = _build_beat_prompt(beat, characters=[woman, figure], location=None)
+
+    assert "CHARACTER w1:" in prompt
+    assert "CHARACTER fig1:" in prompt
+    assert "ALL OF THESE CHARACTERS ARE IN THIS SHOT: w1, fig1" in prompt
+
+
+def test_check_beat_character_references_rejects_an_unknown_id():
+    known = [Character(id="w1", face_build="x", hair="x", wardrobe_signature="x",
+                       wardrobe_flexible="x", distinguishing_detail="x")]
+    beat = _beat(subject="w1", character_ids=["w1", "ghost"])
+    with pytest.raises(ScenePlanningError, match="don't match any defined character"):
+        check_beat_character_references([beat], known)
+
+
+def test_a_beat_without_character_ids_falls_back_to_the_first_character():
+    """A planning model that ignores the new field still produces a usable
+    single-character beat -- which is what every beat was before ADR 0041."""
+    payload = _valid_payload()
+    payload["beats"][0].pop("character_ids", None)
+
+    def _completion(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+        )
+
+    plan = run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    assert plan.beats[0].character_ids == [plan.characters[0].id]
+
+
+def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():
+    """A real run defined a stalking figure, generated its reference image,
+    mentioned it once in a lighting field, and produced four beats with no
+    antagonist in any of them."""
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(), genre="horror", tone="dread", completion_fn=_completion
+    )
+    prompt = captured["messages"][0]["content"]
+    assert "LIST ITS ID in `character_ids`" in prompt
+    assert "EVERY character visible in that shot" in prompt

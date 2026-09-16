@@ -69,6 +69,13 @@ class Beat:
     cinematography: str
     audio: str
     duration_seconds: str
+    #: Every character visible in this beat, by id -- not just the focal
+    #: one named in `subject`. Without it a beat had no way to say a second
+    #: character was present, so a planned antagonist could be given its own
+    #: reference image and then never appear in a single frame
+    #: (docs/decisions/0041). Defaults to empty so a plan captured before
+    #: this field existed still loads.
+    character_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -223,7 +230,14 @@ fear-appropriate.
 across a clear majority of beats, not declared once and then dropped -- \
 give most beats some concrete visual trace of it (a shadow, a disturbed \
 object, a shape at the edge of vision), even when the beat's main action \
-is just the character moving through a space. Never rely on a vague \
+is just the character moving through a space.
+- If that threat is an embodied character rather than an environmental \
+effect -- a person, a creature, a figure -- define it as a Character and \
+LIST ITS ID in `character_ids` on every beat where any part of it is \
+visible, however little. Describing it only in a beat's prose is not \
+enough: a real run defined a stalking figure, generated its reference \
+image, mentioned it once in a lighting field, and produced four beats with \
+no antagonist in any of them. Never rely on a vague \
 adjective like "barely visible" or "half-hidden" to control how prominent \
 the threat is -- an image model renders that as a bold, centered \
 silhouette unless given a literal constraint instead. State it \
@@ -351,6 +365,13 @@ concrete terms (materials, fixed structures), not aesthetic ones.
 - A BEAT is exactly one moment/shot, never more -- do not describe \
 multiple sequential actions in one beat's `action` field. Every beat must \
 reference a `location_id` matching one of the Locations you define.
+- Every beat must list in `character_ids` EVERY character visible in that \
+shot, by id, including partially visible ones -- a figure in the \
+background, a silhouette in a doorway, a hand at the frame edge. Only \
+characters listed there can be drawn; a character you define but never \
+list in any beat will be given a reference image and then never appear in \
+a single frame. `subject` names which of them the shot is *about*; \
+`character_ids` says who is actually in it.
 - A beat's `action`/`lighting`/`camera` text must be physically possible in \
 the Location it's assigned to -- if the scene's description mentions a \
 distinct space (a bedroom, a bathroom, a car), that space needs its own \
@@ -481,6 +502,7 @@ this exact shape:
   ],
   "beats": [
     {{"location_id": "<must match a location id above>", "subject": "...",
+      "character_ids": ["<every character id visible in this beat>"],
       "action": "...", "camera": "...", "lighting": "...", "cinematography": "...",
       "audio": "...", "duration_seconds": "..."}}
   ]
@@ -555,6 +577,38 @@ def check_cinematography_is_not_a_style_claim(beats: list) -> None:
                 f"{beat.cinematography!r}. That field is for lens and grade notes only -- the "
                 "run's style preset is the single source for art style (docs/decisions/0039)."
             )
+
+
+def check_beat_character_references(beats: list, characters: list) -> None:
+    """Raise ScenePlanningError if a beat names a character id that no
+    Character defines, or names none at all.
+
+    Beats used to carry a single `subject` id and nothing else, so a plan
+    could define an antagonist, spend money generating its reference image,
+    and then have no way to put it in a frame -- which is exactly what
+    happened on a real run: the threat appeared in zero of four beats
+    (docs/decisions/0041). A prompt rule asked for threat presence that the
+    data model could not express.
+
+    Re-run after human edits, like the other checks here, for the reason in
+    docs/decisions/0028.
+    """
+    if not characters:
+        return  # nothing to check against; a plan with no cast is checked elsewhere
+    known = {c.id for c in characters}
+    for beat in beats:
+        if not beat.character_ids:
+            raise ScenePlanningError(
+                f"A beat at {beat.location_id!r} lists no character_ids -- every beat must "
+                "name every character visible in it, even if that is just one."
+            )
+        unknown = [cid for cid in beat.character_ids if cid not in known]
+        if unknown:
+            raise ScenePlanningError(
+                f"A beat references character id(s) {unknown}, which don't match any defined "
+                f"character ({sorted(known)})."
+            )
+
 
 
 def check_beat_location_references(beats: list, locations: list) -> None:
@@ -636,9 +690,33 @@ def _parse_scene_plan(raw_content: str) -> ScenePlan:
              "duration_seconds"],
             item_desc="A beat",
         )
-        beats.append(Beat(**{f: item[f] for f in Beat.__dataclass_fields__}))
+        # Falls back to the first character, not to `subject`: `subject` is
+        # not reliably an id -- real plans have used both a bare id ("w1")
+        # and a description ("The influencer") in that field. The first
+        # character is exactly who a beat was rendered with before
+        # docs/decisions/0041, so this reproduces the old behaviour.
+        character_ids = item.get("character_ids") or (
+            [characters[0].id] if characters else []
+        )
+        if not isinstance(character_ids, list) or not all(
+            isinstance(cid, str) and cid for cid in character_ids
+        ):
+            raise ScenePlanningError(
+                f"A beat's 'character_ids' must be a list of non-empty id strings, got "
+                f"{item.get('character_ids')!r}"
+            )
+        # Falling back to [subject] rather than failing: a planning model
+        # that ignores the new field still produces a usable single-character
+        # beat, which is what every beat was before docs/decisions/0041.
+        beats.append(
+            Beat(
+                **{f: item[f] for f in Beat.__dataclass_fields__ if f != "character_ids"},
+                character_ids=character_ids,
+            )
+        )
     check_beat_location_references(beats, locations)
     check_cinematography_is_not_a_style_claim(beats)
+    check_beat_character_references(beats, characters)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")
