@@ -411,15 +411,24 @@ generalized to the character's own face and body.
 shot to facing the camera -- a character can face away from camera, be \
 seen in profile, or be shot from behind, whenever that's the more natural \
 choice for what's happening in that beat.
+- The `camera` field must be written in the three terms an image model \
+actually acts on, and nothing else: SHOT SIZE (extreme wide / wide / \
+medium / close-up / extreme close-up), CAMERA HEIGHT (high above / eye \
+level / low / ground level), and SUBJECT ORIENTATION (facing camera / \
+three-quarter / profile / from behind). Do NOT specify where the camera \
+stands in the world -- "from a ceiling corner at the west end", "beside \
+the boot of the car in bay 15", "camera east of the aisle" are all \
+wasted: an image model does not place a virtual camera in your location's \
+floor plan, and a beat's composition comes mostly from its reference \
+image regardless. Naming a position the model cannot honour only \
+guarantees the shot fails its own description.
 - When multiple beats share a `location_id`, give them real "coverage" \
-(the standard film-production term): shots from genuinely different \
-camera *positions* in that space, not just a different angle adjective on \
-roughly the same spot -- move the camera to a different part of the room \
-or street, and vary how close it is to the subject (a wider shot, then a \
-closer one, not two medium shots back to back). The same static shot \
-repeated can be a legitimate deliberate choice for a specific effect, but \
-must never be the unplanned default outcome of two beats sharing a \
-location.
+(the standard film-production term) using exactly those three terms: no \
+two consecutive beats should share the same combination. A wide high shot \
+from behind, then a medium eye-level three-quarter, then a low close-up \
+in profile. The same framing repeated can be a legitimate deliberate \
+choice for a specific effect, but must never be the unplanned default \
+outcome of two beats sharing a location.
 - Beyond camera position, also place the character at a genuinely \
 different physical position *within* that location's own space for each \
 beat that shares it, whenever the location's own geography supports it -- \
@@ -462,12 +471,13 @@ style or realism level -- do not write "photorealistic", "cartoon", \
 "anime", "illustration", "3D render", "stylized" or similar here. The \
 run's art style is chosen once elsewhere and is the only thing that sets \
 it; a realism claim in this field is rejected outright, not overridden.
-- Keep the camera on one consistent side of the "line of action" across \
-consecutive beats at the same location (the 180-degree rule) -- if a \
-character is moving left-to-right or two characters face each other \
-across a space, don't flip which side of that line the camera is on \
-between beats without a deliberate reason, or the sense of spatial \
-geography breaks for the viewer.
+- Keep SCREEN DIRECTION consistent across consecutive beats at the same \
+location -- if the character moves or faces toward the left of frame in \
+one beat, keep that in the next unless something in the story turns them \
+around. This is the readable half of the 180-degree rule: which way the \
+subject faces within the frame is something an image model can honour, \
+whereas which side of an imaginary line the camera sits on is not, so \
+state the former and never the latter.
 - Give each beat a clear anticipation beat when it helps: a brief, \
 readable lead-in to the main action (a breath, a shift of weight, a \
 glance) rather than starting the beat already mid-action with no setup -- \
