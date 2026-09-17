@@ -1648,13 +1648,21 @@ def test_each_finished_beat_is_persisted_immediately(tmp_path):
         character_refs={},
         location_refs={},
         auto_yes=True,
-        on_beat_complete=lambda results: snapshots.append(len(results)),
+        on_beat_complete=lambda results: snapshots.append(
+            [(r["index"], r.get("in_progress", False)) for r in results]
+        ),
         **kwargs,
     )
 
-    # Fired once per beat, with the cumulative list each time -- so an
-    # interrupt after beat 2 still leaves beats 1 and 2 on disk.
-    assert snapshots == [1, 2, 3]
+    # Each beat is written while still in flight and again once finished,
+    # so an interrupt at any point keeps what was already generated and
+    # paid for (docs/decisions/0056).
+    assert snapshots[0][-1] == (1, True), "beat 1 must reach disk before it finishes"
+    assert (1, False) in snapshots[-1], "and be marked finished once it is"
+    # Cumulative every time, and the last write has all three finished.
+    assert snapshots[-1] == [(1, False), (2, False), (3, False)]
+    # An in-progress beat never lingers once it finishes.
+    assert not any(flag for _, flag in snapshots[-1])
 
 
 def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_path, monkeypatch, capsys):

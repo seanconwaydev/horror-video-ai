@@ -834,6 +834,7 @@ def _generate_image_with_retries(
     archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_reviewed: Callable[[str | None, int], str] | None = None,
+    on_attempt: Callable[[dict], None] | None = None,
     choose_auto: bool = False,
     max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
     context: str | None = None,
@@ -918,6 +919,22 @@ def _generate_image_with_retries(
                 for c in candidates
             ]
 
+        # The images are paid for the moment they exist, and the very next
+        # thing is a prompt a human may never answer. Record them before
+        # asking anything (docs/decisions/0056) -- `kept` is not known yet
+        # and the later writes for this attempt supersede this one.
+        if on_attempt is not None:
+            on_attempt(
+                {
+                    "attempt": attempt,
+                    "accepted": None,
+                    "concern": None,
+                    "human_choice": None,
+                    "unattended": choose_auto,
+                    "candidates": _candidate_records(None),
+                }
+            )
+
         if len(candidates) > 1:
             chosen = _choose_candidate(
                 candidates, auto_yes=choose_auto, context=context
@@ -926,16 +943,17 @@ def _generate_image_with_retries(
                 # Rejecting every candidate is a rejection of the attempt,
                 # not of the beat -- the loop offers the usual choices next.
                 print("None kept.")
-                attempts.append(
-                    {
-                        "attempt": attempt,
-                        "accepted": False,
-                        "concern": "human rejected every candidate",
-                        "human_choice": "none",
-                        "unattended": choose_auto,
-                        "candidates": _candidate_records(None),
-                    }
-                )
+                record = {
+                    "attempt": attempt,
+                    "accepted": False,
+                    "concern": "human rejected every candidate",
+                    "human_choice": "none",
+                    "unattended": choose_auto,
+                    "candidates": _candidate_records(None),
+                }
+                attempts.append(record)
+                if on_attempt is not None:
+                    on_attempt(record)
                 decision = (
                     on_reviewed("none of the candidates were usable", attempt)
                     if on_reviewed is not None
@@ -953,6 +971,18 @@ def _generate_image_with_retries(
             previz_result = candidates[0]
             human_choice = None
 
+        if on_attempt is not None:
+            on_attempt(
+                {
+                    "attempt": attempt,
+                    "accepted": None,  # not decided yet
+                    "concern": None,
+                    "human_choice": human_choice,
+                    "unattended": choose_auto,
+                    "candidates": _candidate_records(previz_result),
+                }
+            )
+
         # No automated review here any more (docs/decisions/0055). The
         # human is asked after every attempt, which is what
         # docs/decisions/0043 established was doing the actual work.
@@ -969,6 +999,8 @@ def _generate_image_with_retries(
                     "candidates": _candidate_records(previz_result),
                 }
             )
+            if on_attempt is not None:
+                on_attempt(attempts[-1])
             return previz_result, attempts
 
         # Archived rather than overwritten: the human passed over this
@@ -991,6 +1023,8 @@ def _generate_image_with_retries(
                 ],
             }
         )
+        if on_attempt is not None:
+            on_attempt(attempts[-1])
         if decision == "stop":
             break
         if max_attempts is None or attempt < max_attempts:
@@ -1652,6 +1686,31 @@ def _generate_beats_with_choices(
         if on_beat_complete is not None:
             on_beat_complete(beat_results)
 
+    def _persist_in_progress(index: int, beat: Beat, attempts_so_far: list[dict]) -> None:
+        """Write the beat currently being worked on, before it finishes.
+
+        Per-beat persistence still lost whatever was in flight, and the
+        owner abandons most runs partway through, so that was the common
+        case rather than an edge one: across 26 real runs, 27% of every
+        image generated had no record at all. Since
+        docs/decisions/0053 the same gap loses human judgements, which
+        cost more to produce than the images. See docs/decisions/0056.
+        """
+        if on_beat_complete is None:
+            return
+        on_beat_complete(
+            beat_results
+            + [
+                {
+                    "index": index,
+                    "beat": dataclasses.asdict(beat),
+                    "image_path": None,
+                    "attempts": attempts_so_far,
+                    "in_progress": True,
+                }
+            ]
+        )
+
     for i, beat in enumerate(scene_plan.beats, start=1):
         # Every character the beat says is present, not just the scene's
         # first one (docs/decisions/0041, now via staging -- 0049). A beat
@@ -1812,24 +1871,43 @@ def _generate_beats_with_choices(
                     for n in range(1, candidates + 1)
                 ]
 
+            def _on_attempt(
+                record: dict,
+                cycle: int = cycle,
+                i: int = i,
+                beat: Beat = beat,
+                all_attempts: list[dict] = all_attempts,
+            ) -> None:
+                entry = {"cycle": cycle, **record}
+                # A provisional record for the same attempt is replaced,
+                # not duplicated -- it is fired before the accept/retry
+                # prompt precisely so quitting there keeps something.
+                for n, existing in enumerate(all_attempts):
+                    if (existing["cycle"], existing["attempt"]) == (cycle, record["attempt"]):
+                        all_attempts[n] = entry
+                        break
+                else:
+                    all_attempts.append(entry)
+                _persist_in_progress(i, beat, all_attempts)
+
             beat_context = _beat_review_context(beat, beat_characters)
-            previz_result, attempts = _generate_image_with_retries(
+            previz_result, _ = _generate_image_with_retries(
                 _generate,
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
                 on_reviewed=_on_reviewed,
+                on_attempt=_on_attempt,
                 choose_auto=auto_yes,
                 max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
                 context=beat_context,
             )
-            for record in attempts:
-                all_attempts.append(
-                    {
-                        "cycle": cycle,
-                        **record,
-                        **human_actions.get((cycle, record["attempt"]), {}),
-                    }
-                )
+            # _on_attempt already recorded each attempt as it happened;
+            # this only folds in the human's action, which is not known
+            # until they answer the prompt.
+            for n, entry in enumerate(all_attempts):
+                action = human_actions.get((entry["cycle"], entry["attempt"]))
+                if action:
+                    all_attempts[n] = {**entry, **action}
 
             if previz_result is None:
                 if beat_was_edited:
