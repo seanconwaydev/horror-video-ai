@@ -72,7 +72,6 @@ from historical_video_ai.stages.previz import (
     build_character_sheet_prompt,
     build_location_reference_prompt,
     run_beat_image_stage,
-    run_previz_review_stage,
     run_reference_image_stage,
 )
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
@@ -139,13 +138,6 @@ def _mock_image(**kwargs: object) -> SimpleNamespace:
 
 def _mock_image_edit(**kwargs: object) -> SimpleNamespace:
     return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
-
-
-def _mock_review_completion(**kwargs: object) -> SimpleNamespace:
-    """No network call, no API key -- always accepts, so --mock exercises
-    the previz-review loop's mechanics without cost or credentials."""
-    content = json.dumps({"accepted": True, "concern": None})
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
@@ -349,6 +341,16 @@ def _resolve_flags(
     return dataclasses.replace(fact_sheet, claims=[c for c in resolved_claims if c is not None])
 
 
+if TYPE_CHECKING:  # typeshed-only; not importable at runtime.
+    from _typeshed import DataclassInstance
+
+#: Any frozen dataclass artifact the review loop edits -- Character,
+#: Location or Beat. Named so _edit_item_fields and _review_item can say
+#: they return the same type they were handed, which `object` erased at
+#: every call site.
+_ItemT = TypeVar("_ItemT", bound="DataclassInstance")
+
+
 def _print_item_fields(item: _ItemT) -> None:
     for f in dataclasses.fields(item):
         value = getattr(item, f.name)
@@ -373,33 +375,6 @@ def _print_item_fields(item: _ItemT) -> None:
 # decisions/0028 requires for a real structural edit) was real, reported
 # friction. These three are what actually drives what gets rendered.
 _BEAT_QUICK_EDIT_FIELDS = ("staging", "action", "camera", "lighting")
-
-
-def _beat_with_review_corrections(beat: Beat, previous_concerns: list[str]) -> Beat:
-    """Return `beat` with every prior rejection reason appended to its
-    `action` text as a direct correction, or `beat` unchanged if there are
-    none yet (first attempt). Reframes previz_review's own third-person
-    critique ("the image shows anger, not fear") as an imperative
-    instruction ("Fix this: ...") rather than passing the raw complaint
-    through verbatim -- the same shape as the project owner's own real
-    (f)eedback note that fixed a near-identical case by hand. Does not
-    mutate the caller's stored `beat` -- only this specific generation
-    attempt's prompt sees the correction; `beat_results`' recorded `beat`
-    field stays the original, human/scene-plan-approved text."""
-    if not previous_concerns:
-        return beat
-    corrections = " ".join(f"Fix this: {concern}" for concern in previous_concerns)
-    return dataclasses.replace(beat, action=f"{beat.action} {corrections}")
-
-
-if TYPE_CHECKING:  # typeshed-only; not importable at runtime.
-    from _typeshed import DataclassInstance
-
-#: Any frozen dataclass artifact the review loop edits -- Character,
-#: Location or Beat. Named so _edit_item_fields and _review_item can say
-#: they return the same type they were handed, which `object` erased at
-#: every call site.
-_ItemT = TypeVar("_ItemT", bound="DataclassInstance")
 
 
 def _edit_item_fields(item: _ItemT, *, fields: tuple[str, ...] | None = None) -> _ItemT:
@@ -852,17 +827,13 @@ def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") 
     return out_dir / f"{prefix}_{n}_{suffix}.png"
 
 
-def _generate_image_with_review(
-    generate_fn: Callable[[list[str]], list[PrevizResult]],
-    fact_check_result: FactCheckResult,
+def _generate_image_with_retries(
+    generate_fn: Callable[[], list[PrevizResult]],
     *,
-    review_model: str,
-    review_kwargs: dict,
     out_dir: Path,
     archive_prefix: str = "previz_attempt",
     on_image_generated: Callable[[PrevizResult], None] | None = None,
     on_reviewed: Callable[[str | None, int], str] | None = None,
-    initial_concerns: list[str] | None = None,
     choose_auto: bool = False,
     max_attempts: int | None = _MAX_PREVIZ_ATTEMPTS,
     context: str | None = None,
@@ -917,11 +888,6 @@ def _generate_image_with_review(
     --yes does.
     """
     attempts: list[dict] = []
-    # Seeded rather than always empty: an (e)dit or (f)eedback ends this
-    # call and starts a fresh one, and the reviewer's concerns used to be
-    # thrown away at that boundary -- so adding a note of your own silently
-    # discarded everything the reviewer had said (docs/decisions/0043).
-    previous_concerns: list[str] = list(initial_concerns or [])
     # `max_attempts=None` means no ceiling. The cap exists to stop an
     # UNATTENDED run regenerating forever; once every attempt is an
     # explicit human choice (docs/decisions/0043) it stops being a guard
@@ -930,7 +896,7 @@ def _generate_image_with_review(
     attempt = 0
     while max_attempts is None or attempt < max_attempts:
         attempt += 1
-        candidates = generate_fn(previous_concerns)
+        candidates = generate_fn()
         for candidate in candidates:
             print(f"Image saved to {candidate.image_path}")
             if on_image_generated is not None:
@@ -987,45 +953,17 @@ def _generate_image_with_review(
             previz_result = candidates[0]
             human_choice = None
 
-        print(f"--- previz review (model: {review_model}) ---")
-        review = run_previz_review_stage(
-            previz_result.image_path,
-            fact_check_result,
-            model=review_model,
-            # Carries forward every prior rejection reason on this same
-            # beat so a retry review isn't an independent judgment with no
-            # memory of what it already flagged -- observed in a real run
-            # to matter: the reviewer caught a missing fisheye distortion
-            # once, then accepted a second attempt that still didn't have
-            # it, because nothing forced it to specifically re-check that.
-            previous_concerns=previous_concerns or None,
-            **review_kwargs,
-        )
-
-        if review.accepted:
-            print("Review: no concerns.")
-        else:
-            print(f"Review concern: {review.concern}")
-
-        # Asked after EVERY review, not only after a rejection
-        # (docs/decisions/0043). The reviewer's verdict is shown as
-        # information and no longer decides anything on its own: it was
-        # measured ranking four arms in exact reverse of blind human
-        # judgement, and rejecting 88% of images, so letting it pick the
-        # default action cost real money on images a human would have kept.
-        decision = (
-            on_reviewed(review.concern if not review.accepted else None, attempt)
-            if on_reviewed is not None
-            else ("accept" if review.accepted else "continue")
-        )
+        # No automated review here any more (docs/decisions/0055). The
+        # human is asked after every attempt, which is what
+        # docs/decisions/0043 established was doing the actual work.
+        decision = on_reviewed(None, attempt) if on_reviewed is not None else "accept"
 
         if decision == "accept":
             attempts.append(
                 {
                     "attempt": attempt,
                     "accepted": True,
-                    "concern": review.concern,
-                    "review_accepted": review.accepted,
+                    "concern": None,
                     "human_choice": human_choice,
                     "unattended": choose_auto,
                     "candidates": _candidate_records(previz_result),
@@ -1033,18 +971,15 @@ def _generate_image_with_review(
             )
             return previz_result, attempts
 
-        # Archived whichever way the review went: a human can now retry an
-        # image the reviewer was happy with, and that image must not be
-        # silently overwritten by the next attempt.
-        suffix = "rejected" if not review.accepted else "superseded"
-        archived_path = _next_archive_path(out_dir, archive_prefix, suffix=suffix)
+        # Archived rather than overwritten: the human passed over this
+        # image, and the next attempt must not silently destroy it.
+        archived_path = _next_archive_path(out_dir, archive_prefix, suffix="rejected")
         previz_result.image_path.rename(archived_path)
         attempts.append(
             {
                 "attempt": attempt,
                 "accepted": False,
-                "concern": review.concern,
-                "review_accepted": review.accepted,
+                "concern": None,
                 "image_path": str(archived_path),
                 "human_choice": human_choice,
                 "unattended": choose_auto,
@@ -1056,8 +991,6 @@ def _generate_image_with_review(
                 ],
             }
         )
-        if review.concern:
-            previous_concerns.append(review.concern)
         if decision == "stop":
             break
         if max_attempts is None or attempt < max_attempts:
@@ -1655,17 +1588,13 @@ def _generate_scene_references(
 
 def _generate_beats_with_choices(
     scene_plan: ScenePlan,
-    fact_check_result: FactCheckResult,
     *,
     character_refs: dict[str, Path],
     location_refs: dict[str, Path],
     previz_model: str,
-    review_model: str,
     image_kwargs: dict,
-    review_kwargs: dict,
     out_dir: Path,
     style: str = DEFAULT_STYLE,
-    requires_grounding: bool = True,
     auto_yes: bool = False,
     candidates: int = 1,
     on_beat_complete: Callable[[list[dict]], None] | None = None,
@@ -1745,8 +1674,7 @@ def _generate_beats_with_choices(
         # _generate_image_with_review, which is per call. An (e)dit or
         # (f)eedback starts a new call, and the reviewer's concerns must
         # survive that (docs/decisions/0043).
-        carried_concerns: list[str] = []
-        # Spans cycles for the same reason carried_concerns does. Each
+        # Spans cycles because each
         # _generate_image_with_review call returns only its own attempts,
         # and the previous binding used to be thrown away at an (e)dit or
         # (f)eedback boundary (docs/decisions/0053).
@@ -1770,7 +1698,6 @@ def _generate_beats_with_choices(
                 )
             attempt_n = 0
             beat_was_edited = False
-            last_concern: str | None = None
 
             def _on_reviewed(
                 concern: str | None,
@@ -1779,58 +1706,33 @@ def _generate_beats_with_choices(
                 # Bound as a default like the other loop captures
                 # (ruff B023). It is mutated in place, not rebound,
                 # so the caller sees every append.
-                carried_concerns: list[str] = carried_concerns,
                 cycle: int = cycle,
                 human_actions: dict = human_actions,
             ) -> str:
-                """One prompt after every review, whatever the verdict.
+                """One prompt after every attempt. The human decides.
 
-                The reviewer's opinion is shown above this as information
-                and decides nothing on its own (docs/decisions/0043): it
-                was measured ranking four arms in exact reverse of blind
-                human judgement and rejecting 88% of images, so letting it
-                choose the default action spent money on images a human
-                would have kept, and skipped the question entirely on ones
-                a human would have rerolled.
+                There is no automated verdict any more
+                (docs/decisions/0055) -- previz_review agreed with the
+                owner's keep/discard decision on only 56% of 78 images it
+                had never scored, against 79% for accepting everything, so
+                as a gate it was worse than not having one.
                 """
-                nonlocal beat, beat_was_edited, last_concern
+                nonlocal beat, beat_was_edited
                 if auto_yes:
-                    # Unattended, there is no human to ask. Follow the
-                    # reviewer, since something has to decide -- but stop on
-                    # a repeated concern rather than spend the remaining
-                    # attempts on a near-certain repeat. Deliberately the
-                    # weaker path now: --yes is a secondary mode, and its
-                    # gate is the component measured as anti-correlated.
-                    if concern is None:
-                        return "accept"
-                    is_repeat = last_concern is not None and concern == last_concern
-                    last_concern = concern
-                    return "stop" if is_repeat else "continue"
+                    # Unattended, nobody is asked and nothing grades the
+                    # image, so the first attempt is taken. --yes is a
+                    # secondary mode (docs/decisions/0043); the
+                    # interactive path is where the judgement happens.
+                    return "accept"
 
-                if concern is not None:
-                    carried_concerns.append(concern)
-
-                # The retry option says what it actually does. It folds
-                # every concern so far into the next attempt's prompt, and
-                # nothing said so -- which led to the reasonable assumption
-                # that the reviewer's wording had to be copy-pasted in by
-                # hand via (f)eedback.
-                n_carried = len(carried_concerns)
-                retry_label = (
-                    f"(r)etry carrying {n_carried} review "
-                    f"concern{'' if n_carried == 1 else 's'}"
-                    if n_carried
-                    else "(r)etry"
-                )
                 choice = None
                 while choice not in ("a", "r", "e", "f", "g"):
                     # No "/3": interactively there is no ceiling, so a
                     # denominator would promise a limit that isn't there.
                     # The running count is the cost signal instead.
                     choice = input(
-                        f"  Attempt {attempt} -- (a)ccept / "
-                        f"{retry_label} / (e)dit the beat / "
-                        "(f)eedback then retry / (g)ive up: "
+                        f"  Attempt {attempt} -- (a)ccept / (r)etry / "
+                        "(e)dit the beat / (f)eedback then retry / (g)ive up: "
                     ).strip().lower()
                 human_actions[(cycle, attempt)] = {"human_action": choice}
                 if choice == "a":
@@ -1869,7 +1771,6 @@ def _generate_beats_with_choices(
             # over loop variables is a real footgun ruff correctly flags
             # (B023) even though this particular control flow is safe.
             def _generate(
-                previous_concerns: list[str],
                 candidates: int = candidates,
                 beat: Beat = beat,
                 location: Location | None = location,
@@ -1885,13 +1786,12 @@ def _generate_beats_with_choices(
                     f"--- beat image (model: {previz_model}, "
                     f"attempt {attempt_n}{cap}) ---"
                 )
-                corrected = _beat_with_review_corrections(beat, previous_concerns)
                 # One call per candidate. Gemini's image API has no n>1
                 # parameter via litellm, so the fan-out lives here rather
                 # than in the provider call (docs/decisions/0046).
                 return [
                     run_beat_image_stage(
-                        corrected,
+                        beat,
                         characters=beat_characters,
                         location=location,
                         character_references=beat_character_refs,
@@ -1913,23 +1813,11 @@ def _generate_beats_with_choices(
                 ]
 
             beat_context = _beat_review_context(beat, beat_characters)
-            previz_result, attempts = _generate_image_with_review(
+            previz_result, attempts = _generate_image_with_retries(
                 _generate,
-                fact_check_result,
-                review_model=review_model,
-                # docs/decisions/0032: character/beat are already
-                # scene-plan-approved -- previz_review shouldn't re-derive
-                # their plausibility from scratch on every attempt.
-                review_kwargs={
-                    **review_kwargs,
-                    "characters": beat_characters,
-                    "beat": beat,
-                    "requires_grounding": requires_grounding,
-                },
                 out_dir=beat_out_dir,
                 archive_prefix=f"beat{i}_attempt",
                 on_reviewed=_on_reviewed,
-                initial_concerns=carried_concerns,
                 choose_auto=auto_yes,
                 max_attempts=_MAX_PREVIZ_ATTEMPTS if auto_yes else None,
                 context=beat_context,
@@ -2226,7 +2114,6 @@ def main() -> None:
     beat_image_kwargs = (
         {"image_fn": _mock_image, "edit_fn": _mock_image_edit} if args.mock else {}
     )
-    review_kwargs: dict[str, Any] = {"completion_fn": _mock_review_completion} if args.mock else {}
     scene_planning_kwargs: dict[str, Any] = (
         {"completion_fn": _mock_scene_planning_completion} if args.mock else {}
     )
@@ -2431,20 +2318,18 @@ def main() -> None:
     _write_log(out_dir, log)
 
     previz_model = get_stage_model("previz")
-    review_model = get_stage_model("previz_review")
     log["previz_model"] = previz_model
-    log["previz_review_model"] = review_model
     # Part of a judgement's context, not just a generation input: a
     # rejection under one style preset says nothing about another
     # (docs/decisions/0053).
     log["style"] = args.style
 
     # Cost visibility (docs/decisions/0024) -- a real, checked range, not a
-    # guess: minimum is one image per reference plus one per beat; maximum
-    # accounts for every beat needing all _MAX_PREVIZ_ATTEMPTS review
-    # attempts. Rerolls/edits from the human choices below aren't counted
-    # here since they're open-ended by nature -- this is the floor and the
-    # automatic-review ceiling, not an absolute cap.
+    # guess: one image per reference plus one per beat, times the
+    # candidates each beat attempt costs. This is a floor, not a cap:
+    # every retry is a human choice with no ceiling
+    # (docs/decisions/0043, 0055), so the real spend is open-ended by
+    # nature and pretending otherwise would be a worse number.
     # Counts only the references this run will actually generate, and the
     # candidates each beat attempt will actually cost. Both were previously
     # ignored here, so the figure a human confirmed against could be several
@@ -2455,14 +2340,12 @@ def main() -> None:
     num_beats = len(scene_plan.beats)
     per_attempt = num_beats * args.candidates
     min_images = num_references + per_attempt
-    max_images = num_references + per_attempt * _MAX_PREVIZ_ATTEMPTS
     candidate_note = f" x {args.candidates} candidates" if args.candidates > 1 else ""
     print(
         f"\nThis scene plan needs {num_references} reference image(s) + {num_beats} beat "
-        f"image(s){candidate_note} = {min_images} previz image(s) minimum "
-        f"({_estimate_image_cost(previz_model, min_images)}), up to {max_images} if every "
-        f"beat needs all {_MAX_PREVIZ_ATTEMPTS} automatic review attempts "
-        f"({_estimate_image_cost(previz_model, max_images)})."
+        f"image(s){candidate_note} = {min_images} previz image(s) for one attempt each "
+        f"({_estimate_image_cost(previz_model, min_images)}). Every retry you choose "
+        f"costs that beat's candidates again."
     )
     if not _confirm("Proceed with reference and beat image generation?", auto_yes=args.yes):
         log["stopped_reason"] = "declined_before_image_generation"
@@ -2505,16 +2388,12 @@ def main() -> None:
 
     beat_results = _generate_beats_with_choices(
         scene_plan,
-        fact_check_result,
         character_refs=character_refs,
         location_refs=location_refs,
         previz_model=previz_model,
-        review_model=review_model,
         image_kwargs=beat_image_kwargs,
-        review_kwargs=review_kwargs,
         out_dir=out_dir,
         style=args.style,
-        requires_grounding=requires_grounding,
         auto_yes=args.yes,
         candidates=args.candidates,
         on_beat_complete=_persist_beats,

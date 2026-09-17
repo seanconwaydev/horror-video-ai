@@ -179,7 +179,10 @@ has entries logged as open that may have been fixed since.
 `docs/dry-runs/` holds one historical dry run. Both may be worth keeping
 as history — but decide deliberately rather than leaving them ambiguous.
 
-**`previz_review`'s future.** Measured as anti-correlated with human
-judgement, and it still gates the retry loop. Rescope it, grade on a
-scale, or drop it. This is a decision, not an audit item, but the audit
-should not silently pass over it.
+**`previz_review`'s future — closed.** Measured against 78 images the
+owner had already ruled on: 56% agreement, against 79% for accepting
+everything, and it rejected 31 of the 62 images the owner kept. Deleted by
+[ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md). The
+earlier "exact reverse" claim measured a different task (ranking by
+quality) and was overstated; on accept/reject it is weakly positive but
+still worse than no gate.

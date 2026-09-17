@@ -109,26 +109,30 @@ reasoning about it, and both are worth knowing about:
 capture is verified against `--mock`, not against a live interactive run.
 One horror run by the owner turns it on.
 
-## Step 2 — fix the judge. This is the actual priority
+## Step 2 — the judge: settled, deleted (ADR 0055)
 
-`previz_review` is the AI-centric component the project already has, and it
-is the single most broken thing in the pipeline: measured ranking four arms
-in exact reverse of blind human judgement, rejecting 88% of images, and
-**still gating the retry loop**. A judge that anti-correlates will, if used
-for optimization, confidently drive the system toward images the owner
-rejects.
+`evals/judge_agreement.py` scored `previz_review` over 78 images the owner
+had already ruled on (62 kept, 16 rejected), reusing images and prompts on
+disk so nothing was generated.
 
-- Build `evals/judge_agreement.py`: score `previz_review` against the
-  human labels Step 1 now captures. Measure agreement, not just reversal —
-  reuse `reviewer_reliability.py`'s approach, which already does repeated
-  verdicts per image.
-- Then decide its fate **with data**: rescope it to the one thing it may
-  be good at, grade on a scale instead of accept/reject, or drop it. Write
-  the ADR either way. The audit brief already lists this as open; this plan
-  supplies the evidence it was missing.
+- agreement with the owner: **56%**
+- "always accept" baseline: **79%**
+- it rejected **31 of the 62** images the owner kept
 
-Needs one real interactive run first, to produce labels. Any horror run
-works; the owner runs these by hand.
+So it discriminated slightly (+31% separation, not inverted) but lost to
+the trivial baseline by 23 points. Its concerns were also being injected
+into the next attempt's prompt as "Fix this: ...", so a signal wrong 44%
+of the time was steering regeneration.
+
+Deleted in [ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md).
+`run_previz_review_stage` survives for `evals/` only. Results kept at
+`evals/results/judge-agreement-20260917.json`.
+
+**Caveat that matters for any rebuild:** the 62 positives are least-bad
+picks, not endorsements -- the owner rejects nearly everything at present.
+A rebuilt judge should be measured on whether its *observations are
+factually true of the image*, which needs no quality label, rather than on
+whether its verdict predicts a choice.
 
 ## Step 3 — swap the image model, judged on the harness
 

@@ -10,12 +10,11 @@ import pytest
 from PIL import Image
 
 from historical_video_ai.cli import (
-    _MAX_PREVIZ_ATTEMPTS,
     _beat_gallery_dir,
     _check_video_prompt_practices,
     _confirm,
     _generate_beats_with_choices,
-    _generate_image_with_review,
+    _generate_image_with_retries,
     _generate_scene_references,
     _link_beat_into_gallery,
     _load_fact_sheet_from_fixture,
@@ -662,26 +661,20 @@ def _fake_review_completion(verdicts):
     return _completion
 
 
-def _generate_previz_with_review_kwargs(review_completion_fn, out_dir):
-    """Kwargs for _generate_image_with_review, the review loop itself.
+def _retry_loop_kwargs(out_dir):
+    """Kwargs for _generate_image_with_retries, the attempt loop itself.
 
-    These tests used to drive it through _generate_previz_with_review, the
-    single-image flow deleted in docs/decisions/0051; the loop they
-    actually exercise is shared with the live beat path, so they were
-    re-pointed at it rather than dropped.
+    The loop runs no automated review any more (docs/decisions/0055), so
+    what remains to exercise is attempt counting, archiving, and the human
+    choice callback.
     """
-    return {
-        "review_model": "anthropic/claude-sonnet-5",
-        "review_kwargs": {"completion_fn": review_completion_fn},
-        "out_dir": out_dir,
-    }
+    return {"out_dir": out_dir}
 
 
 def _previz_generate_fn(out_dir):
     """A generate_fn writing one candidate to out_dir/previz.png."""
 
-    def _generate(previous_concerns):
-        del previous_concerns
+    def _generate():
         path = out_dir / "previz.png"
         path.write_bytes(base64.b64decode(_TINY_PNG_B64))
         return [PrevizResult(image_path=path, prompt_used="a prompt")]
@@ -690,10 +683,9 @@ def _previz_generate_fn(out_dir):
 
 
 def test_image_review_loop_accepts_on_first_attempt(tmp_path):
-    result, attempts = _generate_image_with_review(
+    result, attempts = _generate_image_with_retries(
         _previz_generate_fn(tmp_path),
-        _fact_check_result_for_previz(),
-        **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
+        **_retry_loop_kwargs(tmp_path),
     )
 
     assert result is not None
@@ -703,7 +695,6 @@ def test_image_review_loop_accepts_on_first_attempt(tmp_path):
             "attempt": 1,
             "accepted": True,
             "concern": None,
-            "review_accepted": True,
             # Single-candidate attempts have no choice to record.
             "human_choice": None,
             "unattended": False,
@@ -722,12 +713,12 @@ def test_image_review_loop_accepts_on_first_attempt(tmp_path):
 
 
 def test_image_review_loop_retries_then_accepts(tmp_path):
-    verdicts = [(False, "Depicts something anachronistic."), (True, None)]
+    decisions = iter(["continue", "accept"])
 
-    result, attempts = _generate_image_with_review(
+    result, attempts = _generate_image_with_retries(
         _previz_generate_fn(tmp_path),
-        _fact_check_result_for_previz(),
-        **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
+        on_reviewed=lambda concern, attempt: next(decisions),
+        **_retry_loop_kwargs(tmp_path),
     )
 
     assert result is not None
@@ -737,42 +728,11 @@ def test_image_review_loop_retries_then_accepts(tmp_path):
     assert [a["accepted"] for a in attempts] == [False, True]
 
 
-def test_image_review_loop_passes_prior_concern_into_retry_review(tmp_path):
-    # A retry review with no memory of the previous rejection could accept
-    # a second attempt with the same unresolved flaw -- observed for real
-    # (fisheye distortion flagged missing once, then waved through on
-    # attempt 2). The retry loop must forward each rejection's concern
-    # into the next review call's prompt.
-    verdicts = [(False, "Shot lacks the described extreme fisheye perspective."), (True, None)]
-    responses = iter(verdicts)
-    captured_prompts = []
-
-    def _completion(**kwargs):
-        text = next(
-            part["text"] for part in kwargs["messages"][0]["content"] if part["type"] == "text"
-        )
-        captured_prompts.append(text)
-        accepted, concern = next(responses)
-        content = json.dumps({"accepted": accepted, "concern": concern})
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-
-    _generate_image_with_review(
-        _previz_generate_fn(tmp_path),
-        _fact_check_result_for_previz(),
-        **_generate_previz_with_review_kwargs(_completion, tmp_path),
-    )
-
-    assert "This is a retry" not in captured_prompts[0]
-    assert "Shot lacks the described extreme fisheye perspective." in captured_prompts[1]
-
-
 def test_image_review_loop_gives_up_after_max_attempts(tmp_path):
-    verdicts = [(False, "Wrong.")] * 3
-
-    result, attempts = _generate_image_with_review(
+    result, attempts = _generate_image_with_retries(
         _previz_generate_fn(tmp_path),
-        _fact_check_result_for_previz(),
-        **_generate_previz_with_review_kwargs(_fake_review_completion(verdicts), tmp_path),
+        on_reviewed=lambda concern, attempt: "continue",
+        **_retry_loop_kwargs(tmp_path),
     )
 
     assert result is None
@@ -974,9 +934,7 @@ def test_link_beat_into_gallery_is_idempotent(tmp_path):
 def _generate_beats_with_choices_kwargs(out_dir, *, image_fn=_fake_image_fn, edit_fn=_fake_image_fn):
     return {
         "previz_model": "gemini/gemini-2.5-flash-image",
-        "review_model": "anthropic/claude-sonnet-5",
         "image_kwargs": {"image_fn": image_fn, "edit_fn": edit_fn},
-        "review_kwargs": {"completion_fn": _fake_review_completion([(True, None)])},
         "out_dir": out_dir,
     }
 
@@ -988,7 +946,6 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={"influencer": char_ref},
         location_refs={"street": loc_ref},
         auto_yes=True,
@@ -1020,10 +977,9 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
     # Each generation attempt (the rerolled one and the accepted one) goes
     # through its own previz_review pass before the human choice is even
     # asked -- two accepted verdicts needed, not one.
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None), (True, None)])}
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert calls["n"] == 2  # one rerolled attempt, then the accepted one
@@ -1038,10 +994,9 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None), (True, None)])}
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["beat"]["action"] == "smiles warmly"
@@ -1061,115 +1016,31 @@ def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion([(False, "Wrong.")] * 4 + [(True, None)])
-    }
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["image_path"] is not None, "the 5th attempt was refused"
     assert len(results[0]["attempts"]) == 5
 
 
-def test_an_unattended_run_still_stops_at_the_attempt_cap(tmp_path):
-    """--yes has no human to ask, so the ceiling still applies there."""
+def test_an_unattended_run_accepts_the_first_attempt(tmp_path):
+    """--yes has nobody to ask and nothing to grade the image, so it takes
+    attempt 1 rather than spending the cap (docs/decisions/0055)."""
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion(
-            [(False, "One."), (False, "Two."), (False, "Three.")]
-        )
-    }
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         auto_yes=True,
         **kwargs,
     )
 
-    assert results[0]["image_path"] is None
-    assert len(results[0]["attempts"]) <= _MAX_PREVIZ_ATTEMPTS
-
-
-def test_generate_beats_with_choices_folds_rejection_reason_into_next_attempts_prompt(
-    tmp_path, monkeypatch
-):
-    # Real report (2026-09-15): previz_review's own rejection text is
-    # itself a near-ready correction ("the image shows anger, not fear"),
-    # confirmed by a human manually typing almost the same note via
-    # (f)eedback and getting a fixed result. A blind retry with the exact
-    # same prompt and zero new information is strictly worse than folding
-    # that concern back in automatically -- this should now happen on
-    # every retry, not just when a human manually intervenes.
-    # (r)etry at the review prompt, then (a)ccept the second attempt.
-    # There is one prompt after every review now (docs/decisions/0043), and
-    # no blank default that spends money.
-    responses = iter(["r", "a"])
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    captured_prompts = []
-
-    def _capturing_image_fn(**kwargs):
-        captured_prompts.append(kwargs["prompt"])
-        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
-
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion(
-            [(False, "She looks angry, not scared."), (True, None)]
-        )
-    }
-
-    _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    assert len(captured_prompts) == 2
-    assert "Fix this: She looks angry, not scared." not in captured_prompts[0]
-    assert "Fix this: She looks angry, not scared." in captured_prompts[1]
-
-
-def test_generate_beats_with_choices_passes_character_and_beat_to_review(tmp_path):
-    # docs/decisions/0032: the review call must know which character/beat
-    # it's reviewing so it can trust their already-approved details instead
-    # of re-deriving plausibility from scratch.
-    captured = {}
-
-    def _review_completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps({"accepted": True, "concern": None}))
-                )
-            ]
-        )
-
-    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
-    char_ref = _write_reference_png(tmp_path, "char_ref.png")
-    loc_ref = _write_reference_png(tmp_path, "loc_ref.png")
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _review_completion}
-
-    _generate_beats_with_choices(
-        scene_plan,
-        _fact_check_result_for_previz(),
-        character_refs={"influencer": char_ref},
-        location_refs={"street": loc_ref},
-        auto_yes=True,
-        **kwargs,
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "already deliberately planned and human-reviewed" in prompt_text
-    assert "white crop top, gray leggings" in prompt_text
+    assert results[0]["image_path"] is not None
+    assert len(results[0]["attempts"]) == 1
 
 
 def test_generate_beats_with_choices_passes_style_through(tmp_path):
@@ -1185,7 +1056,6 @@ def test_generate_beats_with_choices_passes_style_through(tmp_path):
 
     _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         style="semi-realistic",
@@ -1207,40 +1077,13 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["image_path"] is None
     assert len(results[0]["attempts"]) == 1
-
-
-def test_generate_beats_with_choices_lets_human_accept_rejected_image_anyway(
-    tmp_path, monkeypatch
-):
-    # A human's own "good enough for me" judgment can override
-    # previz_review's rejection -- (a)ccept at the on-rejection prompt.
-    # This is the *only* input needed: the redundant post-generation
-    # accept/reroll/edit confirm is skipped for an override, since the
-    # human already made that exact call one step ago.
-    responses = iter(["a"])
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
-
-    results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    assert results[0]["image_path"] is not None
-    # No second generation call -- the rejected attempt's own image is
-    # what gets kept, not a fresh roll.
-    assert len(results[0]["attempts"]) == 1
-    assert results[0]["attempts"][0]["accepted"] is True
-    assert results[0]["attempts"][0]["concern"] == "Wrong."
 
 
 def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_retry(
@@ -1253,12 +1096,9 @@ def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_r
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion([(False, "Too large."), (True, None)])
-    }
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["image_path"] is not None
@@ -1279,17 +1119,14 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion([(False, "Wrong."), (True, None)])
-    }
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["image_path"] is not None
     # Both cycles are recorded. The restarted cycle is a fresh
-    # _generate_image_with_review call, and its own attempt log used to be
+    # _generate_image_with_retries call, and its own attempt log used to be
     # the only one kept -- so choosing (e)dit silently discarded the
     # rejected attempt that prompted the edit, which is the judgement
     # worth keeping (docs/decisions/0053).
@@ -1298,52 +1135,6 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     assert [a["accepted"] for a in attempts] == [False, True]
     # The human's action at the first cycle's prompt is the label.
     assert attempts[0]["human_action"] == "e"
-
-
-def test_generate_beats_with_choices_stops_early_under_auto_yes_on_repeated_concern(tmp_path):
-    # docs/decisions/0029: under auto_yes there's no human to ask, so an
-    # identical rejection concern twice in a row is treated as doomed and
-    # stops the retry loop early instead of spending the third attempt on
-    # a near-certain repeat.
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion([(False, "Same reason."), (False, "Same reason.")])
-    }
-
-    results = _generate_beats_with_choices(
-        scene_plan,
-        _fact_check_result_for_previz(),
-        character_refs={},
-        location_refs={},
-        auto_yes=True,
-        **kwargs,
-    )
-
-    assert results[0]["image_path"] is None
-    assert len(results[0]["attempts"]) == 2
-
-
-def test_generate_beats_with_choices_keeps_retrying_under_auto_yes_when_concern_differs(tmp_path):
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion(
-            [(False, "First reason."), (False, "Second, different reason."), (True, None)]
-        )
-    }
-
-    results = _generate_beats_with_choices(
-        scene_plan,
-        _fact_check_result_for_previz(),
-        character_refs={},
-        location_refs={},
-        auto_yes=True,
-        **kwargs,
-    )
-
-    assert results[0]["image_path"] is not None
-    assert len(results[0]["attempts"]) == 3
 
 
 def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_path):
@@ -1372,7 +1163,6 @@ def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_pat
 
     _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={"influencer": char_ref, "second": second_char_ref},
         location_refs={"street": loc_ref},
         auto_yes=True,
@@ -1762,39 +1552,14 @@ def test_run_dir_omits_slug_when_not_given(tmp_path, monkeypatch):
 def test_image_review_loop_calls_on_image_generated_before_review(tmp_path):
     calls = []
 
-    result, _ = _generate_image_with_review(
+    result, _ = _generate_image_with_retries(
         _previz_generate_fn(tmp_path),
-        _fact_check_result_for_previz(),
-        **_generate_previz_with_review_kwargs(_fake_review_completion([(True, None)]), tmp_path),
+        **_retry_loop_kwargs(tmp_path),
         on_image_generated=calls.append,
     )
 
     assert len(calls) == 1
     assert calls[0] == result
-
-
-def test_image_review_loop_on_image_generated_survives_a_review_crash(tmp_path):
-    # Regression test: a real run hit exactly this -- previz generated a
-    # real image, but previz_review raised (missing ANTHROPIC_API_KEY)
-    # before returning a verdict at all. on_image_generated must still have
-    # fired for that image, so a caller logging progress (main()'s
-    # run_log.json) doesn't lose track of an already-generated, already
-    # paid-for image just because the next stage blew up.
-    calls = []
-
-    def _crashing_review(**kwargs):
-        raise RuntimeError("simulated previz_review crash (e.g. missing API key)")
-
-    with pytest.raises(RuntimeError, match="simulated previz_review crash"):
-        _generate_image_with_review(
-            _previz_generate_fn(tmp_path),
-            _fact_check_result_for_previz(),
-            **_generate_previz_with_review_kwargs(_crashing_review, tmp_path),
-            on_image_generated=calls.append,
-        )
-
-    assert len(calls) == 1
-    assert calls[0].image_path == tmp_path / "previz.png"
 
 
 def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatch):
@@ -1818,7 +1583,7 @@ def _rejecting_generate_fn(out_dir, image_name="previz.png"):
     """A generate_fn that writes a real file each call, like the real one."""
     counter = {"n": 0}
 
-    def _generate(previous_concerns):
+    def _generate():
         counter["n"] += 1
         path = out_dir / image_name
         path.write_bytes(f"image bytes {counter['n']}".encode())
@@ -1833,7 +1598,7 @@ def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
     """Regression test for a real data-loss bug found in a paid run.
 
     A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
-    fresh `_generate_image_with_review` call against the same directory
+    fresh `_generate_image_with_retries` call against the same directory
     and the same `archive_prefix`. Its attempt counter restarts at 1, so
     it reused `<prefix>_1_rejected.png` -- and `Path.rename` replaces the
     destination silently on POSIX, destroying the earlier cycle's already
@@ -1842,7 +1607,6 @@ def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
     out_dir = tmp_path / "beat_1"
     out_dir.mkdir()
     common = {
-        "review_model": "anthropic/claude-sonnet-5",
         "out_dir": out_dir,
         "archive_prefix": "beat1_attempt",
     }
@@ -1851,14 +1615,11 @@ def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
     # and an overwrite can't hide behind identical content.
     generate_fn = _rejecting_generate_fn(out_dir)
     for _ in range(2):
-        _generate_image_with_review(
+        _generate_image_with_retries(
             generate_fn,
-            _fact_check_result_for_previz(),
-            review_kwargs={
-                "completion_fn": _fake_review_completion(
-                    [(False, "no"), (False, "no"), (False, "no")]
-                )
-            },
+            # Keep saying retry so every attempt is archived, which is
+            # what this test is about.
+            on_reviewed=lambda concern, attempt: "continue",
             **common,
         )
 
@@ -1880,14 +1641,10 @@ def test_each_finished_beat_is_persisted_immediately(tmp_path):
         characters=[], locations=[_location()], beats=[_beat(), _beat(), _beat()]
     )
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion([(True, None)] * 3)
-    }
     snapshots = []
 
     _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         auto_yes=True,
@@ -1909,10 +1666,9 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
 
     _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     out = capsys.readouterr().out
@@ -2014,29 +1770,6 @@ def test_ids_used_as_directory_names_cannot_escape_the_run_folder(raw_id, expect
 # --- one review prompt, asked every time (ADR 0043) ---
 
 
-def test_human_is_asked_even_when_the_review_accepts(tmp_path, monkeypatch, capsys):
-    """previz_review was measured ranking four arms in exact reverse of
-    blind human judgement. Letting its verdict decide whether to ask meant
-    an image it liked was never offered for rerolling, and an image it
-    disliked spent money retrying by default."""
-    responses = iter(["r", "a"])
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    # Both attempts ACCEPTED by the reviewer -- the human still gets asked,
-    # and still chooses to retry the first one.
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
-
-    results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    assert results[0]["image_path"] is not None
-    assert len(results[0]["attempts"]) == 2, "the human's retry of an accepted image was ignored"
-    out = capsys.readouterr().out
-    assert "Review: no concerns." in out
-
-
 def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, monkeypatch):
     """A human can now retry an image the reviewer was happy with, so that
     image has to be archived like any other superseded attempt rather than
@@ -2045,14 +1778,13 @@ def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, m
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)] * 2)}
 
     _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
-    superseded = list((tmp_path / "beat_1").glob("*_superseded.png"))
-    assert len(superseded) == 1, f"expected the retried image to be kept, found {superseded}"
+    archived = list((tmp_path / "beat_1").glob("*_rejected.png"))
+    assert len(archived) == 1, f"expected the retried image to be kept, found {archived}"
 
 
 def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
@@ -2062,92 +1794,15 @@ def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Wrong.")])}
 
     results = _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     # Two blanks were re-prompted rather than triggering a retry, so only
     # one image was ever generated before the human gave up.
     assert results[0]["image_path"] is None
     assert len(results[0]["attempts"]) == 1
-
-
-def test_feedback_keeps_the_reviewers_concerns_instead_of_discarding_them(tmp_path, monkeypatch):
-    """(f)eedback ends the attempt cycle and starts a fresh one, and the
-    reviewer's concerns used to be thrown away at that boundary -- so
-    adding a note of your own silently discarded everything the reviewer
-    had said, and the only way to keep both was to copy-paste the review
-    text in by hand."""
-    responses = iter(["r", "f", "make the shadow smaller", "a"])
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    captured_prompts = []
-
-    def _capturing_image_fn(**kwargs):
-        captured_prompts.append(kwargs["prompt"])
-        return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
-
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
-    kwargs["review_kwargs"] = {
-        "completion_fn": _fake_review_completion(
-            [(False, "Concern ONE."), (False, "Concern TWO."), (True, None)]
-        )
-    }
-
-    _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    third = captured_prompts[2]
-    assert "make the shadow smaller" in third, "the human's own note was lost"
-    assert "Fix this: Concern ONE." in third, "a concern from before the feedback was discarded"
-    assert "Fix this: Concern TWO." in third, "the concern that prompted the feedback was discarded"
-
-
-def test_the_retry_option_says_that_it_carries_the_concerns(tmp_path, monkeypatch):
-    """Nothing said (r)etry did anything, which led to the reasonable
-    assumption that the reviewer's wording had to be pasted in by hand."""
-    prompts_shown = []
-
-    def _capturing_input(prompt):
-        prompts_shown.append(prompt)
-        return "a"
-
-    monkeypatch.setattr("builtins.input", _capturing_input)
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(False, "Too bright.")])}
-
-    _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    assert "(r)etry carrying 1 review concern " in prompts_shown[0]
-
-
-def test_the_retry_option_is_plain_when_the_review_had_no_concerns(tmp_path, monkeypatch):
-    prompts_shown = []
-
-    def _capturing_input(prompt):
-        prompts_shown.append(prompt)
-        return "a"
-
-    monkeypatch.setattr("builtins.input", _capturing_input)
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
-
-    _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
-    )
-
-    assert "(r)etry /" in prompts_shown[0]
-    assert "carrying" not in prompts_shown[0]
-
-
-# --- best-of-N candidate selection (ADR 0046) ---
 
 
 def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
@@ -2159,11 +1814,9 @@ def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
     )
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         candidates=3,
@@ -2182,11 +1835,9 @@ def test_rejecting_every_candidate_rejects_the_attempt_not_the_beat(tmp_path, mo
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         candidates=2,
@@ -2211,10 +1862,9 @@ def test_one_candidate_is_the_previous_behaviour(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", _capturing_input)
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
 
     _generate_beats_with_choices(
-        scene_plan, _fact_check_result_for_previz(), character_refs={}, location_refs={}, **kwargs
+        scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert (tmp_path / "beat_1" / "previz.png").exists()
@@ -2227,11 +1877,9 @@ def test_unattended_runs_take_the_first_candidate(tmp_path):
     least honest about being arbitrary."""
     scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         auto_yes=True,
@@ -2292,11 +1940,9 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_image_fn)
     kwargs["image_kwargs"]["edit_fn"] = _edit_fn
-    kwargs["review_kwargs"] = {"completion_fn": _fake_review_completion([(True, None)])}
 
     results = _generate_beats_with_choices(
         scene_plan,
-        _fact_check_result_for_previz(),
         character_refs={},
         location_refs={},
         **kwargs,
