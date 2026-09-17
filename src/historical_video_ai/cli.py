@@ -182,6 +182,7 @@ def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
                             "character_id": "mock-character",
                             "action": "[MOCK]",
                             "frame_position": "[MOCK]",
+                            "occlusion": "[MOCK]",
                         }
                     ],
                     "camera": "[MOCK]",
@@ -359,6 +360,8 @@ def _print_item_fields(item: _ItemT) -> None:
             for s in value:
                 print(f"    - {s.character_id}: {s.action}")
                 print(f"      in frame: {s.frame_position}")
+                if s.occlusion:
+                    print(f"      hidden by: {s.occlusion}")
             continue
         print(f"  {f.name}: {value}")
 
@@ -426,6 +429,8 @@ def _edit_item_fields(item: _ItemT, *, fields: tuple[str, ...] | None = None) ->
                             ("action", input(f"  {s.character_id} action [{s.action}]: ").strip()),
                             ("frame_position",
                              input(f"  {s.character_id} in frame [{s.frame_position}]: ").strip()),
+                            ("occlusion",
+                             input(f"  {s.character_id} hidden by [{s.occlusion}]: ").strip()),
                         )
                         if v
                     },
@@ -774,6 +779,8 @@ def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
         lines.append(f"  {name} doing: {staged.action}")
         if staged.frame_position:
             lines.append(f"  {name} in frame: {staged.frame_position}")
+        if staged.occlusion:
+            lines.append(f"  {name} hidden by: {staged.occlusion}")
     return "\n".join(lines)
 
 

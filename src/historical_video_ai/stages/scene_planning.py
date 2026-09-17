@@ -76,7 +76,17 @@ class Staging:
     action: str
     #: Where in the frame they sit and roughly how much of it they occupy.
     #: Every character gets one, so nobody defaults to dead centre.
+    #: Position ONLY -- what hides them belongs in `occlusion`.
     frame_position: str
+    #: What stands between the camera and this character, and roughly how
+    #: much of them survives it. Split out of `frame_position` after a run
+    #: where the two halves of that one field scored completely
+    #: differently: position was right in 3 of 4 beats while the occlusion
+    #: clause in the same sentence was wrong in 4 of 4 ("position is good,
+    #: but his hiddenness is 100% wrong"). Position had its own field and
+    #: its own prompt line; hiding was prose inside it. See
+    #: docs/decisions/0054. Empty for a plan captured before this field.
+    occlusion: str = ""
 
 
 @dataclass(frozen=True)
@@ -185,17 +195,19 @@ def _resolve_composition_mode(genre: str | None, tone: str | None) -> str:
 # instinct on top of it rather than being the only place composition is
 # ever discussed.
 _BASE_COMPOSITION_RULE = """\
-- A beat's `camera` must make one deliberate compositional choice about \
-the whole frame, not just name a lens, a height and a distance. State at \
-least one concretely: the subject placed well off-centre with the empty \
-side of the frame left genuinely empty; something solid in the near \
-foreground the shot looks past (a doorframe, the back of a chair, a \
-shoulder) so the frame has depth; the location's own lines (a hallway's \
-walls, a stair rail, a window frame) leading toward the subject or boxing \
-them in; or the subject small and low in a frame mostly filled by the \
-space around them. "Medium shot, eye level, centred on her" is what the \
-image model already produces unasked -- it is the absence of a choice, \
-not a choice.
+- Every beat must make one deliberate compositional choice instead of \
+accepting the default, and each part of that choice goes in the field \
+that controls it -- never as extra prose in `camera`. Shot size, camera \
+height and subject orientation go in `camera`; where each character sits \
+goes in their `frame_position`; what stands between the camera and them \
+goes in their `occlusion`. Pick at least one and make it concrete: a \
+subject well off-centre with the opposite side of the frame left empty; a \
+subject small and low with the space around them dominating; or a solid \
+near-foreground object the shot looks past. "Medium shot, eye level, \
+centred on her" is what the image model produces unasked -- it is the \
+absence of a choice, not a choice. Describing the frame's contents in \
+`camera` states a character's position a second time, in a field that \
+cannot control it, and the two statements then contradict each other.
 """
 
 _STAGED_COMPOSITION_RULE = """\
@@ -280,13 +292,13 @@ visible, however little. Describing it only in a beat's prose is not \
 enough: a real run defined a stalking figure, generated its reference \
 image, mentioned it once in a lighting field, and produced four beats with \
 no antagonist in any of them. Its prominence is controlled by its \
-`frame_position`, never by a vague adjective like "barely visible" or \
-"half-hidden" -- an image model renders those as a bold, centered \
-silhouette. In `frame_position` state concretely roughly what fraction of \
-the frame it occupies, where in the frame (a background corner, a frame \
-edge, never centered), and what specifically occludes it (a doorframe, \
-furniture, deep unlit shadow). Its `action` is a separate question and \
-must still give it something to DO.
+`frame_position` and `occlusion`, never by a vague adjective like \
+"barely visible" or "half-hidden" -- an image model renders those as a \
+bold, centered silhouette. In `frame_position` state roughly what \
+fraction of the frame it occupies and where (a background corner, a frame \
+edge, never centered); in `occlusion` name the specific object doing the \
+hiding. Its `action` is a separate question and must still give it \
+something to DO.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
 decaying, a sound growing louder), give EVERY beat its own explicit, \
@@ -542,6 +554,13 @@ pillars, turning away from the noise, pressing a palm flat to the wall. \
 not actions; a character given one of those is rendered upright, arms at sides, facing camera, \
 like a character-select screen. This applies to a background or \
 partially-hidden character exactly as much as to the focal one.
+- Write that action as the frozen instant, not the movement through it. \
+One still frame cannot show "spinning", "trembling", "turning", "leaning \
+out" or "lowering" -- there is no before-and-after in a single image, so \
+a process verb renders as the character standing still. Name the \
+configuration a camera would freeze: which foot carries the weight, how \
+far the torso is twisted from the hips, where the hair has already swung \
+to, which hand has already closed on what.
 - In EVERY beat with more than one character, at least one `staging` \
 entry must name what that character does BECAUSE OF another character in \
 the same beat -- a flinch away from them, a step that puts a pillar \
@@ -554,10 +573,18 @@ weight shifted onto the front foot, a hand leaving a pocket. Never encode \
 an escalation only as a larger `frame_position`: a real run escalated a \
 stalker purely from "finger-height in frame" to "a quarter of the frame" \
 and got one motionless man rendered at four zoom levels.
-- Give EVERY character a `frame_position`, including the focal one. A \
-character with no stated position is rendered dead centre, which is the \
-dullest possible framing; say which side of the frame they sit in, and \
-let the subject sit off-centre.
+- Give EVERY character a `frame_position` AND an `occlusion`, including \
+the focal one. A character with no stated position is rendered dead \
+centre, which is the dullest possible framing; say which side of the \
+frame they sit in, and let the subject sit off-centre. `occlusion` names \
+what physically stands between the camera and them and roughly how much \
+of them survives it -- "the pillar's near face covers everything but his \
+left shoulder and half his head", "nothing, she is fully in the open". \
+Keep the two separate: `frame_position` is WHERE, `occlusion` is WHAT \
+HIDES THEM. Hiding written into `frame_position` is ignored -- across a \
+four-beat run the position half of that field was right in three beats \
+while the hiding half was wrong in all four, because position had its own \
+field and hiding was prose inside it.
 - If a Genre and/or Tone are given above, let them actually shape staging, \
 expression, and wardrobe choices -- a comedic/ironic tone reads through \
 confident, knowing expressions and poses (not just a funny premise \
@@ -584,7 +611,8 @@ this exact shape:
       "staging": [
         {{"character_id": "<a character id above>",
           "action": "<what THIS character physically does, acting on someone or something>",
-          "frame_position": "<where in frame, and roughly how much of it they occupy>"}}
+          "frame_position": "<where in frame, and roughly how much of it they occupy>",
+          "occlusion": "<what physically hides them and how much survives, or 'nothing'>"}}
       ],
       "camera": "...", "lighting": "...",
       "audio": "...", "duration_seconds": "..."}}
@@ -771,7 +799,7 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
         if not characters:
             return []
         return [Staging(character_id=characters[0].id, action=item.get("action", ""),
-                        frame_position="")]
+                        frame_position="", occlusion="")]
     if not isinstance(raw, list):
         raise ScenePlanningError(f"A beat's 'staging' must be a list, got {raw!r}")
     staging = []
@@ -785,7 +813,10 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
             entry, ["character_id", "action", "frame_position"], item_desc="A staging entry"
         )
         staging.append(
-            Staging(**{f: entry[f] for f in Staging.__dataclass_fields__})
+            Staging(
+                **{f: entry[f] for f in Staging.__dataclass_fields__ if f != "occlusion"},
+                occlusion=entry.get("occlusion", ""),
+            )
         )
     return staging
 

@@ -425,6 +425,8 @@ def _build_beat_prompt(
             block += f"\nDOING: {staged.action}"
             if staged.frame_position:
                 block += f"\nPOSITION IN FRAME: {staged.frame_position}"
+            if staged.occlusion:
+                block += f"\nHIDDEN BY: {staged.occlusion}"
         parts.append(block)
     if len(characters) > 1:
         present = ", ".join(c.id for c in characters)

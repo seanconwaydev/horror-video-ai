@@ -321,6 +321,46 @@ def _beat(**overrides) -> Beat:
     return Beat(**fields)
 
 
+# docs/decisions/0054: occlusion gets its own labelled line, which is the
+# entire mechanism -- position got one in 0049 and is respected, while
+# hiding written as prose inside frame_position lost in 4 of 4 beats.
+def test_beat_prompt_gives_occlusion_its_own_labelled_line():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    character = _character()
+    beat = _beat(
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="drags a crooked finger down the concrete",
+                frame_position="right edge, a fifth of the frame",
+                occlusion="the pillar's near face covers all but one shoulder and half its head",
+            )
+        ]
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[character], location=None, style="horror-comic")
+
+    assert "HIDDEN BY: the pillar's near face covers all but one shoulder" in prompt
+    # separate lines, not one merged sentence -- the split is the point
+    assert "POSITION IN FRAME: right edge, a fifth of the frame" in prompt
+
+
+def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    character = _character()
+    beat = _beat(
+        staging=[Staging(character_id="influencer", action="reaches", frame_position="left third")]
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[character], location=None, style="horror-comic")
+
+    assert "HIDDEN BY:" not in prompt
+
+
 def test_build_character_sheet_prompt_includes_all_character_fields():
     prompt = build_character_sheet_prompt(_character())
     assert "light brown wavy" in prompt
