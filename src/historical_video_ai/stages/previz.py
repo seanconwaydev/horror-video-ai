@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import time
+from typing import Any
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -93,12 +94,12 @@ class PrevizReview:
 
 
 def _call_with_transient_retry(
-    fn: Callable,
+    fn: Callable[..., Any],
     *,
     sleep_fn: Callable[[float], None],
     on_transient_retry: Callable[[int, Exception], None] | None,
     **kwargs: object,
-) -> object:
+) -> Any:
     """Shared retry loop for both
     run_reference_image_stage -- identical transient-error handling
     (docs/decisions/0016), regardless of which underlying call (plain
@@ -115,7 +116,7 @@ def _call_with_transient_retry(
     raise AssertionError("unreachable")  # loop always returns or raises
 
 
-def _extract_and_save_image(response: object, output_dir: Path, filename: str) -> Path:
+def _extract_and_save_image(response: Any, output_dir: Path, filename: str) -> Path:
     """Shared response-parsing/saving logic for both image-generation
     functions in this module."""
     data = getattr(response, "data", None)
@@ -159,11 +160,11 @@ def _generate_image_response(
     *,
     reference_paths: list[Path],
     model: str,
-    image_fn: Callable,
-    edit_fn: Callable,
+    image_fn: Callable[..., Any],
+    edit_fn: Callable[..., Any],
     sleep_fn: Callable[[float], None],
     on_transient_retry: Callable[[int, Exception], None] | None,
-) -> object:
+) -> Any:
     """Shared branch between plain text-to-image and image-conditioned
     edit, used by every stage here that can take a reference image.
 
@@ -199,7 +200,7 @@ def run_reference_image_stage(
     prompt: str,
     *,
     model: str | None = None,
-    image_fn: Callable = litellm.image_generation,
+    image_fn: Callable[..., Any] = litellm.image_generation,
     output_dir: Path = Path("outputs"),
     sleep_fn: Callable[[float], None] = time.sleep,
     on_transient_retry: Callable[[int, Exception], None] | None = None,
@@ -458,8 +459,8 @@ def run_beat_image_stage(
     location_reference: Path | None = None,
     style: str = DEFAULT_STYLE,
     model: str | None = None,
-    image_fn: Callable = litellm.image_generation,
-    edit_fn: Callable = litellm.image_edit,
+    image_fn: Callable[..., Any] = litellm.image_generation,
+    edit_fn: Callable[..., Any] = litellm.image_edit,
     output_dir: Path = Path("outputs"),
     #: Lets a caller generate several candidates for one beat into the same
     #: directory without each overwriting the last (docs/decisions/0046).
@@ -584,7 +585,7 @@ def run_previz_review_stage(
     requires_grounding: bool = True,
     previous_concerns: list[str] | None = None,
     model: str | None = None,
-    completion_fn: Callable = litellm.completion,
+    completion_fn: Callable[..., Any] = litellm.completion,
     sleep_fn: Callable[[float], None] = time.sleep,
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizReview:

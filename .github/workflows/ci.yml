@@ -52,6 +52,14 @@ jobs:
       - name: Tests
         run: uv run pytest
 
+      # Blocking from the start rather than advisory: the codebase is at
+      # zero errors as of this commit, so there is no backlog to wade
+      # through and nothing to grandfather in. An advisory type check in a
+      # repo whose failure mode is "the guard existed and nobody ran it"
+      # would be the same mistake in a new place.
+      - name: Types
+        run: uv run mypy
+
   smoke:
     name: offline smoke
     runs-on: ubuntu-latest

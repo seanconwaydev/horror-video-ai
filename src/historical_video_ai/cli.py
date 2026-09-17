@@ -54,6 +54,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import (
@@ -109,7 +110,7 @@ _MOCK_PNG_B64 = (
 )
 
 
-def _mock_completion(**kwargs: object) -> SimpleNamespace:
+def _mock_completion(**kwargs: Any) -> SimpleNamespace:
     """No network call, no API key -- returns a plausible-shaped fake so
     the pipeline's mechanics (ordering, confirm-loop, run logging) can be
     exercised without cost or credentials. Used only with --mock."""
@@ -347,7 +348,7 @@ def _resolve_flags(
     return dataclasses.replace(fact_sheet, claims=[c for c in resolved_claims if c is not None])
 
 
-def _print_item_fields(item: object) -> None:
+def _print_item_fields(item: _ItemT) -> None:
     for f in dataclasses.fields(item):
         value = getattr(item, f.name)
         # staging is a list of dataclasses; its repr is unreadable in a
@@ -388,7 +389,17 @@ def _beat_with_review_corrections(beat: Beat, previous_concerns: list[str]) -> B
     return dataclasses.replace(beat, action=f"{beat.action} {corrections}")
 
 
-def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) -> object:
+if TYPE_CHECKING:  # typeshed-only; not importable at runtime.
+    from _typeshed import DataclassInstance
+
+#: Any frozen dataclass artifact the review loop edits -- Character,
+#: Location or Beat. Named so _edit_item_fields and _review_item can say
+#: they return the same type they were handed, which `object` erased at
+#: every call site.
+_ItemT = TypeVar("_ItemT", bound="DataclassInstance")
+
+
+def _edit_item_fields(item: _ItemT, *, fields: tuple[str, ...] | None = None) -> _ItemT:
     """Prompt for a new value per field (blank keeps the current one) and
     return the updated item -- the shared editing mechanism behind both
     _review_item's (a)ccept/(e)dit loop and the beat-generation loop's
@@ -398,7 +409,7 @@ def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) ->
     `fields`, if given, restricts prompting to just those field names --
     every other field keeps its current value untouched. See
     _BEAT_QUICK_EDIT_FIELDS."""
-    updates = {}
+    updates: dict[str, Any] = {}
     field_names = fields if fields is not None else [f.name for f in dataclasses.fields(item)]
     for name in field_names:
         current = getattr(item, name)
@@ -430,7 +441,7 @@ def _edit_item_fields(item: object, *, fields: tuple[str, ...] | None = None) ->
     return dataclasses.replace(item, **updates)
 
 
-def _review_item(item: object, *, item_desc: str, auto_yes: bool = False) -> object:
+def _review_item(item: _ItemT, *, item_desc: str, auto_yes: bool = False) -> _ItemT:
     """Print one scene-plan item (Character/Location/Beat) and let a human
     accept it as-is or edit it field-by-field -- docs/decisions/0023's
     per-item review loop. Editing replaces the item directly; unlike
@@ -700,9 +711,12 @@ def _resolve_premise_conflict(
     if action == "s":
         print("Stopping -- the scene's premise was never resolved.")
         return None
-    new_description = (
-        conflict.suggested_alternative if action == "u" else _prompt_if_missing(None, "Corrected description")
-    )
+    if action == "u":
+        # "u" is only in valid_actions when this is non-empty, above.
+        assert conflict.suggested_alternative is not None
+        new_description = conflict.suggested_alternative
+    else:
+        new_description = _prompt_if_missing(None, "Corrected description")
 
     print(f"\nRe-verifying with the corrected description: {new_description!r}")
     result = _run_research_and_fact_check(
@@ -832,7 +846,7 @@ def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") 
 
 
 def _generate_image_with_review(
-    generate_fn: Callable[[list[str]], PrevizResult],
+    generate_fn: Callable[[list[str]], list[PrevizResult]],
     fact_check_result: FactCheckResult,
     *,
     review_model: str,
@@ -1467,10 +1481,12 @@ def _run_video_generation_only(
     list appended to rather than a separate log file, so one folder holds
     a scene's whole history.
     """
-    video_kwargs = (
+    video_kwargs: dict[str, Any] = (
         {"prediction_fn": _mock_prediction, "download_fn": _mock_download} if mock else {}
     )
-    policy_check_kwargs = {"moderation_fn": _mock_moderation_policy_check} if mock else {}
+    policy_check_kwargs: dict[str, Any] = (
+        {"moderation_fn": _mock_moderation_policy_check} if mock else {}
+    )
 
     video_model = video_model or get_stage_model("video_generation")
 
@@ -1517,13 +1533,18 @@ def _run_video_generation_only(
         # would silently overwrite the earlier video instead of
         # accumulating both.
         timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+        # Omitted entirely rather than passed as None when unset, so the
+        # stage's own default applies (docs/decisions/0020).
+        seconds_kwarg: dict[str, Any] = (
+            {"seconds": video_seconds} if video_seconds is not None else {}
+        )
         result = run_video_generation_stage(
             target.image_path,
             target.prompt_used,
             model=video_model,
             output_dir=target.output_dir,
             output_filename=f"video_{timestamp}.mp4",
-            **({"seconds": video_seconds} if video_seconds is not None else {}),
+            **seconds_kwarg,
             **video_kwargs,
         )
         print(
@@ -1849,7 +1870,7 @@ def _generate_beats_with_choices(
                 beat_out_dir: Path = beat_out_dir,
                 beat_characters: list = beat_characters,
                 beat_character_refs: list = beat_character_refs,
-            ) -> PrevizResult:
+            ) -> list[PrevizResult]:
                 nonlocal attempt_n
                 attempt_n += 1
                 cap = f"/{_MAX_PREVIZ_ATTEMPTS}" if auto_yes else ""
@@ -2189,17 +2210,17 @@ def main() -> None:
         )
         return
 
-    completion_kwargs = {"completion_fn": _mock_completion} if args.mock else {}
+    completion_kwargs: dict[str, Any] = {"completion_fn": _mock_completion} if args.mock else {}
     # run_reference_image_stage never conditions on other references (it's
     # plain text-to-image), so it only ever takes image_fn -- edit_fn is
     # for run_beat_image_stage specifically, which does condition on
     # character/location references.
-    image_kwargs = {"image_fn": _mock_image} if args.mock else {}
+    image_kwargs: dict[str, Any] = {"image_fn": _mock_image} if args.mock else {}
     beat_image_kwargs = (
         {"image_fn": _mock_image, "edit_fn": _mock_image_edit} if args.mock else {}
     )
-    review_kwargs = {"completion_fn": _mock_review_completion} if args.mock else {}
-    scene_planning_kwargs = (
+    review_kwargs: dict[str, Any] = {"completion_fn": _mock_review_completion} if args.mock else {}
+    scene_planning_kwargs: dict[str, Any] = (
         {"completion_fn": _mock_scene_planning_completion} if args.mock else {}
     )
 
