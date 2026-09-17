@@ -945,6 +945,7 @@ def _generate_image_with_review(
                         "accepted": False,
                         "concern": "human rejected every candidate",
                         "human_choice": "none",
+                        "unattended": choose_auto,
                         "candidates": _candidate_records(None),
                     }
                 )
@@ -957,7 +958,10 @@ def _generate_image_with_review(
                     break
                 continue
             previz_result = chosen
-            human_choice = str(candidates.index(chosen) + 1)
+            # Under --yes nobody was asked and candidates[0] is taken, which
+            # is indistinguishable from a human picking candidate 1. Marked
+            # so preference studies can exclude it (docs/decisions/0053).
+            human_choice = None if choose_auto else str(candidates.index(chosen) + 1)
         else:
             previz_result = candidates[0]
             human_choice = None
@@ -1002,6 +1006,7 @@ def _generate_image_with_review(
                     "concern": review.concern,
                     "review_accepted": review.accepted,
                     "human_choice": human_choice,
+                    "unattended": choose_auto,
                     "candidates": _candidate_records(previz_result),
                 }
             )
@@ -1021,6 +1026,7 @@ def _generate_image_with_review(
                 "review_accepted": review.accepted,
                 "image_path": str(archived_path),
                 "human_choice": human_choice,
+                "unattended": choose_auto,
                 # The chosen candidate moved; record where it actually is
                 # now, or the label points at a path that no longer exists.
                 "candidates": [
@@ -2400,6 +2406,10 @@ def main() -> None:
     review_model = get_stage_model("previz_review")
     log["previz_model"] = previz_model
     log["previz_review_model"] = review_model
+    # Part of a judgement's context, not just a generation input: a
+    # rejection under one style preset says nothing about another
+    # (docs/decisions/0053).
+    log["style"] = args.style
 
     # Cost visibility (docs/decisions/0024) -- a real, checked range, not a
     # guess: minimum is one image per reference plus one per beat; maximum
