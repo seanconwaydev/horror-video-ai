@@ -13,8 +13,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pytest",
     "ruff",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [project.scripts]
@@ -43,3 +45,25 @@ extend-select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# ruff's ANN rules enforce that annotations *exist*; nothing checked they
+# were *true*, so the project paid the cost of writing them without
+# collecting the benefit. Turning mypy on found 25 errors, including a
+# `Callable[[list[str]], PrevizResult]` whose function actually returned a
+# list -- seven cascading errors from one wrong annotation, in code whose
+# own body called len() on the "single" result.
+#
+# src/ only. tests/ is exempt from the ANN rules for the same reason
+# (pytest fixtures are conventionally unannotated), so checking it would
+# be noise.
+[tool.mypy]
+files = ["src"]
+python_version = "3.11"
+
+# litellm ships no usable types for its response objects. Stage code
+# validates their shape at runtime -- getattr, try/except, then a
+# <Stage>Error -- which is the real contract; a stricter annotation here
+# would be a guess dressed as a guarantee.
+[[tool.mypy.overrides]]
+module = "litellm.*"
+ignore_missing_imports = true

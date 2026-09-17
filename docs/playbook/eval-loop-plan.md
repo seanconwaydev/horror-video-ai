@@ -58,10 +58,9 @@ repo records what a human actually thinks of an image. Capturing
 judgements is not deferring the AI-centric work; it is the only thing that
 unblocks it.
 
-## Step 1 — capture judgements as data
+## Step 1 — capture judgements as data — DONE
 
-**Status: code done, not yet committed as of this writing. See "State of
-the work" below.**
+Recorded as [ADR 0053](../decisions/0053-human-judgements-are-recorded-as-data.md).
 
 The gap: `cli.py` recorded `prompt_used` **only on the accepted branch**.
 Every *rejected* beat — the most informative label — discarded the exact
@@ -88,15 +87,27 @@ Done:
   attempt that prompted it. The images survived; the judgements did not.
   `tests/test_cli.py` previously asserted this discard as intended.
 
-Remaining:
+- `evals/export_judgements.py` flattens run logs into one labelled JSONL
+  dataset, one row per candidate image, carrying the siblings it was shown
+  against. Verified end to end against a real `--mock` run.
+- The run log now records `style` too.
 
-- `evals/export_judgements.py` — walk `outputs/*/run_log.json` into one
-  flat labelled dataset (JSONL): one row per candidate image with its
-  prompt, beat, run metadata (model, style, genre, tone), whether the human
-  kept it, and what `previz_review` said. This is the artifact that makes
-  the capture usable; without it the data is just sitting in run logs.
-- ADR 0053 recording the decision.
-- Doc updates: `CLAUDE.md`, `docs/architecture.md`, and this file.
+Two bugs were caught by running the export against real data rather than
+reasoning about it, and both are worth knowing about:
+
+1. Pre-0053 runs store `candidates` as a list of bare path strings. A
+   "is the list empty" guard does not catch a wrong-*shaped* list — this is
+   the same round-trip failure as the audit brief's finding 4. The export
+   now checks the shape and skips those runs.
+2. `previz_review` runs **once per attempt, on the kept candidate only**.
+   The first version of the export copied its verdict onto every sibling,
+   counting images the judge never saw as agreements or disagreements —
+   which would have silently poisoned step 2, the one study this dataset
+   exists for. Verdicts are now attached only to the scored image.
+
+**The one thing left in step 1: it has produced no real data yet.** The
+capture is verified against `--mock`, not against a live interactive run.
+One horror run by the owner turns it on.
 
 ## Step 2 — fix the judge. This is the actual priority
 
@@ -177,7 +188,19 @@ broader eval discussion. It is still open.
 
 ## State of the work
 
-Branch `claude/repo-audit-fixes`, PR #75. Step 1's `cli.py` changes and
-test updates are committed there; `export_judgements.py`, ADR 0053 and the
-doc updates may not be — check `git log` on that branch and the checklist
-above against what is actually present before assuming either way.
+Branch `claude/repo-audit-fixes`, PR #75. **Step 1 is complete and
+committed**: the `cli.py` capture, `evals/export_judgements.py`, ADR 0053,
+and this file. 478 tests pass, ruff clean.
+
+**Pick up at step 2.** It is blocked on one thing only: a real interactive
+run to produce labels, which the owner does by hand. The exact next
+actions, in order:
+
+1. Owner does one horror run (any scene; they run these themselves).
+2. `uv run python evals/export_judgements.py` — confirm rows appear and
+   the summary's agreement line is populated.
+3. Build `evals/judge_agreement.py` per step 2 above, and write the ADR
+   that decides `previz_review`'s fate on the evidence.
+
+Do not start step 3 or 4 before step 2 lands. The ordering argument is in
+each step's own section and it is the whole point of the plan.

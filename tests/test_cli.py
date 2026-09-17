@@ -706,6 +706,7 @@ def test_image_review_loop_accepts_on_first_attempt(tmp_path):
             "review_accepted": True,
             # Single-candidate attempts have no choice to record.
             "human_choice": None,
+            "unattended": False,
             # The exact prompt is the label's input: _build_beat_prompt
             # changes over time, so a beat's fields can't reconstruct it
             # after the fact (docs/decisions/0053).
