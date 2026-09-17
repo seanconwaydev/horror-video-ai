@@ -180,7 +180,7 @@ def main() -> None:
     parser.add_argument(
         "--runs",
         type=Path,
-        default=REPO_ROOT / "outputs",
+        default=None,
         help="directory of run_* output folders (default: outputs/)",
     )
     parser.add_argument(
@@ -189,10 +189,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.runs.exists():
+    # A missing outputs/ is the normal state of a fresh checkout -- it is
+    # gitignored, so nobody has run the pipeline there yet. That is zero
+    # judgements, not an error. A --runs path given explicitly and missing
+    # is a typo and still fails, since silently reporting zero rows for it
+    # would look like a real answer.
+    runs_dir = args.runs or (REPO_ROOT / "outputs")
+    if args.runs is not None and not args.runs.exists():
         raise SystemExit(f"No such directory: {args.runs}")
 
-    rows = [row for path, log in _run_logs(args.runs) for row in _beat_rows(path, log)]
+    rows = (
+        [row for path, log in _run_logs(runs_dir) for row in _beat_rows(path, log)]
+        if runs_dir.exists()
+        else []
+    )
 
     if args.out:
         lines = "".join(json.dumps(row) + "\n" for row in rows)
