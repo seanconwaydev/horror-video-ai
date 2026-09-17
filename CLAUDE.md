@@ -46,11 +46,22 @@ tree is at zero mypy errors, so there is no backlog to grandfather in, and
 this repo's documented failure mode is precisely "the guard existed and
 nobody ran it".
 
-Two environment traps that CI caught and that a local run will not: paths
-under `evals/results/` and `outputs/` are gitignored, so anything that
-reads them passes on a developer machine and fails in a clean checkout. To
-reproduce CI's conditions, move `evals/results`, `outputs` and `.env`
-aside before running.
+Three traps that CI caught and that a local run will not:
+
+- `evals/results/` and `outputs/` are gitignored, so anything reading them
+  passes on a developer machine and fails in a clean checkout. To
+  reproduce CI's conditions, move `evals/results`, `outputs` and `.env`
+  aside before running.
+- **A stale `.ruff_cache` can give a false pass.** A misordered import that
+  ruff flags from a cold cache was reported clean locally by the same
+  pinned ruff version. `rm -rf .ruff_cache .mypy_cache` before treating a
+  local lint or type result as authoritative, and treat CI -- which always
+  starts cold in a clean checkout -- as the authority over a local run.
+- **Never redirect a checker's output** (`ruff check . >/dev/null`). It
+  reduces the check to an exit code nobody reads and makes a suspiciously
+  silent run indistinguishable from a passing one. Read what the tool
+  actually said; that is the whole point of the Verification discipline
+  above.
 
 
 When a tool exists for a job — anything in Commands above, or any other install/test/lint/build step — always run it and use its real output, rather than approximating what it would say by hand (hand-simulating a test, eyeballing a lint rule, reasoning about whether a dependency would resolve). A hand-rolled substitute is structurally weaker: narrower coverage, more room for a real problem to slip through unnoticed.
