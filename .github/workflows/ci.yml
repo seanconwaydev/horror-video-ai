@@ -1,0 +1,98 @@
+# Runs the checks that already exist in this repo but were opt-in until now.
+#
+# The point is enforcement across a boundary, not discovery: the repo's
+# documented failure mode is a convention that holds until someone
+# (frequently a fresh Claude Code session with no memory of the one that
+# wrote the rule) misses it, ships a green-looking change, and nothing
+# notices for weeks -- see docs/playbook/repo-audit-brief.md.
+#
+# Nothing here spends money or needs a key. Every job is offline: --mock
+# for the pipeline, --dry-run for the eval scripts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch makes the previous run's answer obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: lint and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen rather than a plain sync: it fails if uv.lock is out of
+      # date with pyproject.toml, which matters here because CLAUDE.md
+      # documents litellm workarounds verified against one specific
+      # version while pyproject declares litellm with no constraint at
+      # all. The lockfile is what actually pins it, so drift between the
+      # two is worth failing on.
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      # Includes test_docs_links.py (every relative markdown link
+      # resolves) and test_adr_supersession.py (an ADR that supersedes
+      # another is linked from both ends). Both exist to catch a future
+      # session's omission, and both are useless unless something runs
+      # them on a change that omits it.
+      - name: Tests
+        run: uv run pytest
+
+  smoke:
+    name: offline smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # pytest's testpaths is ["tests"], and nothing under tests/ imports
+      # anything under evals/ -- so the entire measurement layer had zero
+      # automated coverage. That is why the eval harness sat broken for a
+      # month: ADR 0045 deleted Beat.cinematography, the committed
+      # anchor_scene.json kept it, and Beat(**beat) raised TypeError on
+      # the repo's own fixture with nothing to notice. These dry-runs
+      # would have failed the day the field was deleted.
+      - name: Eval scripts still import and parse their fixtures
+        run: |
+          set -e
+          for script in camera_obedience conditioning_bakeoff motion_test \
+                        reference_anchor run_eval; do
+            echo "--- $script"
+            uv run python "evals/$script.py" --dry-run
+          done
+
+      # No --dry-run flag because it never calls a model at all; it reads
+      # finished run logs. Exercised here so a change to the run-log shape
+      # cannot silently break the judgement dataset (docs/decisions/0053).
+      - name: Judgement export runs
+        run: uv run python evals/export_judgements.py
+
+      # The pipeline end to end with no network and no keys. Covers the
+      # wiring between stages, which no unit test spans.
+      - name: Pipeline runs offline
+        run: |
+          uv run historical-video-ai --mock --yes \
+            --genre horror --tone dread --candidates 2 --max-beats 2 \
+            --time "present day" --place "an underground car park at night" \
+            --description "a woman notices someone standing between the pillars"
