@@ -73,10 +73,17 @@ jobs:
       # anchor_scene.json kept it, and Beat(**beat) raised TypeError on
       # the repo's own fixture with nothing to notice. These dry-runs
       # would have failed the day the field was deleted.
+      #
+      # motion_test.py is deliberately absent: it takes a previous run's
+      # images as its input and globs evals/results/, which is gitignored.
+      # It passes locally, where results from earlier runs exist, and fails
+      # in a clean checkout -- which is what happened on this workflow's
+      # first run. It has no smoke coverage as a result; covering it would
+      # mean committing image fixtures.
       - name: Eval scripts still import and parse their fixtures
         run: |
           set -e
-          for script in camera_obedience conditioning_bakeoff motion_test \
+          for script in camera_obedience conditioning_bakeoff \
                         reference_anchor run_eval; do
             echo "--- $script"
             uv run python "evals/$script.py" --dry-run
