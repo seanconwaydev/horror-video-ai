@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "AI pipeline for generating historical educational YouTube videos, stage by stage with human review gates."
 requires-python = ">=3.11"
 dependencies = [
-    "litellm",
+    "litellm>=1.98.0",
     "pyyaml",
     "python-dotenv",
     "pillow",
@@ -57,7 +57,7 @@ testpaths = ["tests"]
 # (pytest fixtures are conventionally unannotated), so checking it would
 # be noise.
 [tool.mypy]
-files = ["src"]
+files = ["src", "evals", "tests"]
 python_version = "3.11"
 
 # litellm ships no usable types for its response objects. Stage code

@@ -686,7 +686,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "litellm" },
+    { name = "litellm", specifier = ">=1.98.0" },
     { name = "pillow" },
     { name = "python-dotenv" },
     { name = "pyyaml" },

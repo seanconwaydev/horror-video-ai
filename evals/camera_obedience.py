@@ -152,7 +152,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
-    models = {k: MODELS[k] for k in args.models.split(",")}
+    models: dict[str, dict[str, Any]] = {k: MODELS[k] for k in args.models.split(",")}
     n_conditions = 2 if args.reference else 1
     total = len(models) * len(CAMERA_SPECS) * n_conditions
     print(
@@ -165,8 +165,8 @@ def main() -> None:
         print("  text-to-image only -- pass --reference to compare against the pipeline's path")
     for name in models:
         print(f"  {name}")
-    for spec in CAMERA_SPECS:
-        print(f"  spec: {spec}")
+    for spec_label in CAMERA_SPECS:
+        print(f"  spec: {spec_label}")
     if args.dry_run:
         print("\n--dry-run: nothing called, nothing spent.")
         return

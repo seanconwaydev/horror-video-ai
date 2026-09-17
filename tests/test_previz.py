@@ -308,7 +308,7 @@ def _location() -> Location:
 
 
 def _beat(**overrides) -> Beat:
-    fields = {
+    fields: dict[str, object] = {
         "location_id": "street",
         "subject": "The influencer",
         "action": "checks her phone, puzzled",
@@ -318,7 +318,9 @@ def _beat(**overrides) -> Beat:
         "duration_seconds": "3",
     }
     fields.update(overrides)
-    return Beat(**fields)
+    # Splatting a fixture dict into a typed dataclass is not checkable;
+    # overrides legitimately carry a staging list among the strings.
+    return Beat(**fields)  # type: ignore[arg-type]
 
 
 # docs/decisions/0054: occlusion gets its own labelled line, which is the

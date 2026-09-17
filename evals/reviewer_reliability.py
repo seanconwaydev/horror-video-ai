@@ -73,7 +73,7 @@ def main() -> None:
             review = run_previz_review_stage(
                 image,
                 fact_check,
-                character=character,
+                characters=[character],
                 beat=beats[index - 1],
                 requires_grounding=False,
                 model=review_model,
