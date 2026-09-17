@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "mypy>=2.3.1",
     "pytest",
+    "pytest-cov>=7.1.0",
     "ruff",
     "types-pyyaml>=6.0.12.20260906",
 ]
@@ -45,6 +46,17 @@ extend-select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# A floor, not a target: it exists to stop coverage sliding, not to chase
+# a number. Set at the level measured when it was introduced. Every stage
+# module is at 95-100%; effectively all of the uncovered code is in
+# cli.py, which is also the largest module by a wide margin.
+[tool.coverage.run]
+source = ["src/historical_video_ai"]
+
+[tool.coverage.report]
+fail_under = 84
+show_missing = true
 
 # ruff's ANN rules enforce that annotations *exist*; nothing checked they
 # were *true*, so the project paid the cost of writing them without
