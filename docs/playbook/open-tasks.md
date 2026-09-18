@@ -42,22 +42,23 @@ Two questions, both the owner's:
   at all now, which changes what ablation would be measured *against*.
   Resolve that before starting.
 
-## 2. Fix `previz.py`'s 2:1 prompt weighting
+## 2. Add relational geometry to `Staging`
 
-The owner's longest-standing complaint: the non-focal character is "just
-standing there… a permanent issue since extra characters were added."
+Half of the 2:1 weighting fix is done
+([0057](../decisions/0057-drop-the-duplicate-action-line.md) dropped the
+duplicate `ACTION:` line). The other half of the owner's "just standing
+there" complaint is a schema gap: both characters get an absolute
+`frame_position` and **nothing anywhere states who is behind whom, how
+far apart they are, or where each is looking.**
 
-Known cause, unfixed: `_build_beat_prompt` emits `ACTION: {beat.action}`,
-which restates the focal character's physicality — so a two-character
-prompt describes the protagonist twice and the antagonist once before the
-image model reads a word. ADR 0049 moved per-character physicality into
-`staging`, but `beat.action` was left in the prompt alongside it.
+The failure taxonomy already names this shape as the clearest instance of
+this project's worst pattern -- a prose rule instructing a model to do
+something the data model cannot express. The composition rule asks for
+characters who react to each other; `Staging` has no field in which a
+planner could say so.
 
-Also unaddressed from the same diagnosis: no relational geometry exists
-anywhere. Both characters get absolute `frame_position` values and nothing
-states who is behind whom, how far apart, or where each is looking.
-Deciding between "drop the duplicate `ACTION:` line" and "add a relational
-field to `Staging`" is an ADR-sized call.
+Bigger than 0057: a new field on `Staging`, the planner prompt that fills
+it, the parser, and the eval fixtures. ADR-sized.
 
 ## 3. Validate ADR 0054 against a real run
 

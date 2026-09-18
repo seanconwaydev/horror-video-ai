@@ -385,6 +385,7 @@ def _build_beat_prompt(
     characters: Sequence[Character] = (),
     location: Location | None,
     style: str = DEFAULT_STYLE,
+    corrections: Sequence[str] = (),
 ) -> str:
     """Build one beat's image prompt from its fields (docs/decisions/0023)
     -- deliberately not routed through _build_prompt, whose "historically
@@ -408,6 +409,7 @@ def _build_beat_prompt(
     # the scene's first character was ever passed here, so a planned
     # antagonist could not be rendered at all.
     staging_by_id = {s.character_id: s for s in beat.staging}
+    anyone_is_doing_something = False
     for character in characters:
         label = f"CHARACTER {character.id}" if len(characters) > 1 else "CHARACTER"
         block = (
@@ -422,6 +424,7 @@ def _build_beat_prompt(
         # the focal character the verb and left everyone else a static pose.
         staged = staging_by_id.get(character.id)
         if staged is not None:
+            anyone_is_doing_something = True
             block += f"\nDOING: {staged.action}"
             if staged.frame_position:
                 block += f"\nPOSITION IN FRAME: {staged.frame_position}"
@@ -436,7 +439,15 @@ def _build_beat_prompt(
             "silhouette, a figure in the background, a hand at the frame edge."
         )
     parts.append(f"SUBJECT: {beat.subject}")
-    parts.append(f"ACTION: {beat.action}")
+    # `beat.action` describes the focal character, and since
+    # docs/decisions/0049 every character's physicality already has its own
+    # DOING line -- so emitting it here too described the protagonist twice
+    # and everyone else once before the model read a word
+    # (docs/decisions/0057). Kept only as a fallback: a beat whose staging
+    # covers nobody in `characters` would otherwise carry no verb at all,
+    # which is the shape of a plan captured before 0049 and replayed.
+    if not anyone_is_doing_something:
+        parts.append(f"ACTION: {beat.action}")
     if len(beat.staging) > 1:
         parts.append(
             "These characters are in the same moment and must react to each other -- "
@@ -448,6 +459,12 @@ def _build_beat_prompt(
     parts.append(f"CAMERA: {beat.camera}")
     parts.append(f"LIGHTING: {beat.lighting}")
     parts.append(f"STYLE: {_style_instruction(style)}")
+    # Last, because a correction modifies everything stated above it.
+    # Phrased plainly rather than as an "overriding requirement (takes
+    # priority over anything above)" -- that construction lost a blind A/B
+    # 5-0 (docs/decisions/0039).
+    for correction in corrections:
+        parts.append(f"CORRECTION -- fix this, keep everything else: {correction}")
     parts.append("No on-screen text, no UI, no logos, no watermark.")
     return "\n".join(parts)
 
@@ -467,6 +484,10 @@ def run_beat_image_stage(
     #: Lets a caller generate several candidates for one beat into the same
     #: directory without each overwriting the last (docs/decisions/0046).
     filename: str = "previz.png",
+    #: Human-typed corrections from earlier attempts on this same beat,
+    #: oldest first (docs/decisions/0057). Ephemeral per-attempt text, not
+    #: part of the plan -- the recorded beat stays as it was written.
+    corrections: Sequence[str] = (),
     sleep_fn: Callable[[float], None] = time.sleep,
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizResult:
@@ -481,7 +502,9 @@ def run_beat_image_stage(
     realism-level source -- see `_build_beat_prompt`.
     """
     resolved_model = model or get_stage_model("previz")
-    prompt = _build_beat_prompt(beat, characters=characters, location=location, style=style)
+    prompt = _build_beat_prompt(
+        beat, characters=characters, location=location, style=style, corrections=corrections
+    )
     response = _generate_image_response(
         prompt,
         reference_paths=[

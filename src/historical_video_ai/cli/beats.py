@@ -508,6 +508,13 @@ def generate_beats_with_choices(
         # attempt number -- the judgement itself, as opposed to what was
         # generated.
         human_actions: dict[tuple[int, int], dict] = {}
+        # Human-typed (f)eedback, oldest first. Spans cycles like
+        # all_attempts, because feedback ends a cycle and the next one has
+        # to carry it. Kept separate from the beat rather than appended to
+        # `beat.action`: a planned action and a correction to a render are
+        # different facts, and the recorded beat should stay as it was
+        # written (docs/decisions/0057).
+        corrections: list[str] = []
         cycle = 0
         while True:
             cycle += 1
@@ -533,6 +540,7 @@ def generate_beats_with_choices(
                 # so the caller sees every append.
                 cycle: int = cycle,
                 human_actions: dict = human_actions,
+                corrections: list = corrections,
             ) -> str:
                 """One prompt after every attempt. The human decides.
 
@@ -569,18 +577,18 @@ def generate_beats_with_choices(
                     return "stop"
                 if choice == "f":
                     # A targeted correction ("keep this, just make her
-                    # smaller") appended to the existing action text --
-                    # cheaper than rewriting a field that was already
-                    # mostly right, for the common case where the plan was
-                    # fine and only the render missed one specific thing.
+                    # smaller") carried into every later attempt on this
+                    # beat -- cheaper than rewriting a field that was
+                    # already mostly right, for the common case where the
+                    # plan was fine and only the render missed one thing.
                     note = ""
                     while not note:
-                        note = input("  Feedback (appended to the beat's action): ").strip()
+                        note = input("  Feedback (applied to the next attempt): ").strip()
                     # A human-authored correction naming exactly what the
                     # render got wrong -- the highest-value text in the
-                    # whole loop and previously unrecorded.
+                    # whole loop.
                     human_actions[(cycle, attempt)]["feedback"] = note
-                    beat = dataclasses.replace(beat, action=f"{beat.action} {note}")
+                    corrections.append(note)
                     beat_was_edited = True
                     return "stop"
                 if choice == "g":
@@ -603,6 +611,11 @@ def generate_beats_with_choices(
                 beat_out_dir: Path = beat_out_dir,
                 beat_characters: list = beat_characters,
                 beat_character_refs: list = beat_character_refs,
+                # Read at call time, not at definition time: _on_reviewed
+                # appends to this same list between cycles, and a fresh
+                # _generate is defined each iteration, so the next
+                # attempt sees every correction typed so far.
+                corrections: list = corrections,
             ) -> list[PrevizResult]:
                 nonlocal attempt_n
                 attempt_n += 1
@@ -617,6 +630,7 @@ def generate_beats_with_choices(
                 return [
                     run_beat_image_stage(
                         beat,
+                        corrections=tuple(corrections),
                         characters=beat_characters,
                         location=location,
                         character_references=beat_character_refs,

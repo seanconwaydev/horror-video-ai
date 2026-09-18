@@ -381,9 +381,9 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
 def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_retry(
     tmp_path, monkeypatch
 ):
-    # (f)eedback appends a short note to the beat's existing action text
-    # instead of rewriting it -- a targeted correction, not a full edit,
-    # for the common case where the plan was mostly right.
+    # (f)eedback is a targeted correction to the render, not an edit to the
+    # plan -- so it reaches the next attempt's prompt and leaves the
+    # recorded beat exactly as it was written (docs/decisions/0057).
     responses = iter(["f", "make her noticeably smaller", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
@@ -394,7 +394,13 @@ def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_r
     )
 
     assert results[0]["image_path"] is not None
-    assert results[0]["beat"]["action"] == "checks her phone make her noticeably smaller"
+    assert results[0]["beat"]["action"] == "checks her phone"
+    assert "make her noticeably smaller" in results[0]["prompt_used"]
+    # The attempt that prompted the feedback was generated before it, so
+    # only the later one carries it.
+    prompts = [c["prompt_used"] for a in results[0]["attempts"] for c in a["candidates"]]
+    assert "make her noticeably smaller" not in prompts[0]
+    assert "make her noticeably smaller" in prompts[-1]
 
 
 def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry(

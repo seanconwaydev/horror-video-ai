@@ -363,6 +363,62 @@ def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
     assert "HIDDEN BY:" not in prompt
 
 
+# docs/decisions/0057: `beat.action` restates the focal character, whose
+# physicality already has its own DOING line since 0049 -- so emitting both
+# described the protagonist twice and everyone else once.
+def test_beat_prompt_does_not_restate_the_focal_character_action():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    character = _character()
+    beat = _beat(
+        action="checks her phone",
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="checks her phone",
+                frame_position="left third",
+            )
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[character], location=None)
+
+    assert "DOING: checks her phone" in prompt
+    assert "ACTION:" not in prompt
+
+
+def test_beat_prompt_keeps_the_action_when_no_character_block_carries_it():
+    # A plan captured before 0049, or one whose staging names nobody in
+    # `characters`, would otherwise reach the model with no verb at all.
+    from historical_video_ai.stages.previz import _build_beat_prompt
+
+    beat = _beat(action="checks her phone", staging=[])
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "ACTION: checks her phone" in prompt
+
+
+def test_beat_prompt_carries_human_corrections_last():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(staging=[Staging(character_id="influencer", action="reaches", frame_position="l")])
+
+    prompt = _build_beat_prompt(
+        beat,
+        characters=[_character()],
+        location=None,
+        corrections=["make her noticeably smaller", "lose the second light source"],
+    )
+
+    assert "CORRECTION -- fix this, keep everything else: make her noticeably smaller" in prompt
+    # After STYLE, because a correction modifies everything stated above it.
+    assert prompt.index("STYLE:") < prompt.index("CORRECTION")
+    assert prompt.index("make her noticeably smaller") < prompt.index("lose the second light")
+
+
 def test_build_character_sheet_prompt_includes_all_character_fields():
     prompt = build_character_sheet_prompt(_character())
     assert "light brown wavy" in prompt
