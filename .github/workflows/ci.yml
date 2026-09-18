@@ -75,7 +75,7 @@ jobs:
         run: uv run mypy
 
       # A floor to stop coverage sliding, not a target to chase. All of
-      # the uncovered code is in cli.py; the stage modules are 95-100%.
+      # the uncovered code is in cli/app.py; the stage modules are 95-100%.
       - name: Coverage
         run: uv run pytest --cov --cov-report=term-missing
 

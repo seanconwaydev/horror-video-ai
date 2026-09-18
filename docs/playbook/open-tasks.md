@@ -15,18 +15,35 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Split `cli.py`
+## 1. Finish splitting `cli.py`
 
-2,413 lines, 46% of the codebase, and **every one of the 190 uncovered
-statements in the repo is in it** — each stage module sits at 95-100%,
-`cli.py` at 75%. So this is the same task as "raise coverage", not a
-separate tidiness exercise. The coverage floor in `pyproject.toml`
-(`fail_under = 84`) should rise as a *consequence* of the split.
+It is now a package, `src/historical_video_ai/cli/`, being taken apart one
+seam per commit so each step is reviewable and revertible. Every stage
+module sits at 95-100% coverage; `cli/app.py` is at 75% and holds
+effectively all of the uncovered code in the repo.
 
-Rough seams visible from the outside: pipeline orchestration, the beat
-retry loop, the `--video-gen-from` path, the `--mock` fakes, argument
-parsing, and the run-log/persistence helpers. Not yet designed — scope it
-before moving code.
+Be clear about what the split does and does not buy: moving code changes
+no coverage number at all. The floor rises because a module small enough
+to test on its own gets tested — which is what happened when `mocks.py`
+came out (0% to 100%, floor 84 to 85).
+
+| Seam | Lands in | Status |
+|---|---|---|
+| the `--mock` fakes | `cli/mocks.py` | done |
+| `--video-gen-from` | `cli/video_gen.py` | next |
+| review widgets (`_confirm`, `_review_*`, `_edit_item_fields`) | `cli/review.py` | to do |
+| run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | to do |
+| research + fact-check + premise conflict | `cli/research_flow.py` | to do |
+| the beat generation loop | `cli/beats.py` | to do |
+| flags, arg parser, `main` | stays in `cli/app.py` | — |
+
+One hazard to keep handling: `tests/test_cli.py` (2,000 lines) imports
+private names from the module directly and monkeypatches
+`"historical_video_ai.cli.app._project_root"` by string in three places.
+When a patched function moves, patching the old binding stops affecting
+the real caller and the test goes green while testing nothing — so the
+test file has to be split alongside each move, not papered over with
+re-exports from `__init__`.
 
 ## 2. Decide the prompt rule registry
 

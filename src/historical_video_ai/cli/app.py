@@ -3,18 +3,18 @@
 scene planning -> previz (docs/decisions/0006, 0023). Run with
 `uv run historical-video-ai`.
 
-Scene planning (docs/decisions/0023) produces a reviewed plan --
-characters, locations, and beats -- but isn't yet wired into previz's
-actual generation calls (that's docs/decisions/0024); previz still
-generates its one image from fact_check_result alone, same as before this
-stage existed.
+Every image comes from a beat of the reviewed scene plan. The
+single-image path that generated one image from fact_check_result alone
+was deleted once scene planning made it unreachable
+(docs/decisions/0051); archived runs in that older shape are still
+readable by --video-gen-from.
 
 Refuses rather than fabricates in two cases: fact-check flagging the
 scene's premise as historically impossible (docs/decisions/0008,
 _resolve_premise_conflict -- offers a suggested alternative or your own
 corrected description, re-verified before continuing), and previz's own
 generated image failing independent review (docs/decisions/0009,
-_generate_image_with_review -- regenerates with each prior concern fed
+_generate_image_with_retries -- regenerates with each prior concern fed
 back in, up to _MAX_PREVIZ_ATTEMPTS times, then gives up).
 
 Flags:
@@ -53,9 +53,17 @@ import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from historical_video_ai.cli.mocks import (
+    mock_completion,
+    mock_download,
+    mock_image,
+    mock_image_edit,
+    mock_moderation_policy_check,
+    mock_prediction,
+    mock_scene_planning_completion,
+)
 from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import (
     ClaimFlag,
@@ -91,125 +99,6 @@ from historical_video_ai.stages.video_generation import (
     MIN_VIDEO_SECONDS,
     run_video_generation_stage,
 )
-
-# 90x160 (9:16, tiny for speed). The aspect-ratio guard that originally
-# forced a real image here is gone with Sora (docs/decisions/0038) -- the
-# video stage now only base64-encodes whatever file it's given -- but a
-# real PNG is still the honest stand-in for a previz output, and previz's
-# own code paths do open it.
-_MOCK_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAFoAAACgCAIAAAADw+wqAAABOUlEQVR4nO3SsQ3AMBAD"
-    "sY/339mpYvgyA1mpPuiZ2cNnnYUcf94RcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfI"
-    "EXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFy"
-    "hBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQc"
-    "IUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFH"
-    "yBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gR"
-    "coQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gxtxdJIAI/Sl4X"
-    "NwAAAABJRU5ErkJggg=="
-)
-
-
-def _mock_completion(**kwargs: Any) -> SimpleNamespace:
-    """No network call, no API key -- returns a plausible-shaped fake so
-    the pipeline's mechanics (ordering, confirm-loop, run logging) can be
-    exercised without cost or credentials. Used only with --mock."""
-    prompt = kwargs["messages"][0]["content"]
-    if "Claims to check" in prompt:
-        content = json.dumps({"flags": []})
-    else:
-        content = json.dumps(
-            {
-                "claims": [
-                    {
-                        "text": "[MOCK] A placeholder claim standing in for real research.",
-                        "source": "[MOCK] no real source -- this is a dry run",
-                        "date": None,
-                        "names": [],
-                    }
-                ]
-            }
-        )
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-
-
-def _mock_image(**kwargs: object) -> SimpleNamespace:
-    return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
-
-
-def _mock_image_edit(**kwargs: object) -> SimpleNamespace:
-    return SimpleNamespace(data=[SimpleNamespace(b64_json=_MOCK_PNG_B64)])
-
-
-def _mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
-    """No network call, no API key -- returns a minimal valid ScenePlan, so
-    --mock exercises the scene-planning stage's mechanics (docs/decisions
-    /0023) without cost or credentials."""
-    content = json.dumps(
-        {
-            "characters": [
-                {
-                    "id": "mock-character",
-                    "face_build": "[MOCK]",
-                    "hair": "[MOCK]",
-                    "wardrobe_signature": "[MOCK]",
-                    "wardrobe_flexible": "[MOCK]",
-                    "distinguishing_detail": "[MOCK]",
-                }
-            ],
-            "locations": [
-                {
-                    "id": "mock-location",
-                    "architecture": "[MOCK]",
-                    "fixed_props": "[MOCK]",
-                    "ambient_light": "[MOCK]",
-                }
-            ],
-            "beats": [
-                {
-                    "location_id": "mock-location",
-                    "subject": "[MOCK]",
-                    "action": "[MOCK]",
-                    "staging": [
-                        {
-                            "character_id": "mock-character",
-                            "action": "[MOCK]",
-                            "frame_position": "[MOCK]",
-                            "occlusion": "[MOCK]",
-                        }
-                    ],
-                    "camera": "[MOCK]",
-                    "lighting": "[MOCK]",
-                    "audio": "[MOCK]",
-                    "duration_seconds": "4",
-                }
-            ],
-        }
-    )
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-
-
-def _mock_prediction(*args: object, **kwargs: object) -> dict:
-    """No network call, no API token -- returns a prediction already
-    'succeeded', so --video-gen-from --mock exercises the stage's own
-    payload-building and output-handling without cost or credentials."""
-    return {
-        "id": "mock-prediction-id",
-        "status": "succeeded",
-        "output": "https://example.invalid/mock-video.mp4",
-        "error": None,
-    }
-
-
-def _mock_download(*args: object, **kwargs: object) -> bytes:
-    return b"[MOCK] not a real video file"
-
-
-def _mock_moderation_policy_check(**kwargs: object) -> SimpleNamespace:
-    """No network call, no API key -- always comes back clean, so --mock
-    exercises the moderation pre-flight's mechanics (docs/decisions/0038)
-    without cost or credentials."""
-    return SimpleNamespace(results=[SimpleNamespace(flagged=False, categories={})])
-
 
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
 # tunable via a flag, to keep behavior predictable rather than open-ended.
@@ -806,7 +695,7 @@ def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") 
 
     Deliberately not derived from the retry loop's own attempt counter.
     A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
-    *fresh* `_generate_image_with_review` call against the same directory
+    *fresh* `_generate_image_with_retries` call against the same directory
     -- its counter restarts at 1, so deriving the name from it reused
     `<prefix>_1_rejected.png`, and `Path.rename` replaces the destination
     silently on POSIX. That destroyed the earlier cycle's already-paid-for
@@ -1456,10 +1345,10 @@ def _run_video_generation_only(
     a scene's whole history.
     """
     video_kwargs: dict[str, Any] = (
-        {"prediction_fn": _mock_prediction, "download_fn": _mock_download} if mock else {}
+        {"prediction_fn": mock_prediction, "download_fn": mock_download} if mock else {}
     )
     policy_check_kwargs: dict[str, Any] = (
-        {"moderation_fn": _mock_moderation_policy_check} if mock else {}
+        {"moderation_fn": mock_moderation_policy_check} if mock else {}
     )
 
     video_model = video_model or get_stage_model("video_generation")
@@ -1637,7 +1526,7 @@ def _generate_beats_with_choices(
     (docs/decisions/0033) is the run's single authoritative realism-level
     source. Every attempt
     still goes through previz_review's own automatic reject-and-regenerate
-    loop (docs/decisions/0009, via _generate_image_with_review), but now
+    loop (docs/decisions/0009, via _generate_image_with_retries), but now
     with an on-rejection hook (docs/decisions/0029): after *any*
     rejection, not just after all attempts are exhausted, a human can edit
     the beat's text and retry fresh, or give up on this beat now --
@@ -1730,11 +1619,11 @@ def _generate_beats_with_choices(
         beat_out_dir = out_dir / f"beat_{i}"
 
         # Spans attempt cycles, unlike the list inside
-        # _generate_image_with_review, which is per call. An (e)dit or
+        # _generate_image_with_retries, which is per call. An (e)dit or
         # (f)eedback starts a new call, and the reviewer's concerns must
         # survive that (docs/decisions/0043).
         # Spans cycles because each
-        # _generate_image_with_review call returns only its own attempts,
+        # _generate_image_with_retries call returns only its own attempts,
         # and the previous binding used to be thrown away at an (e)dit or
         # (f)eedback boundary (docs/decisions/0053).
         all_attempts: list[dict] = []
@@ -2183,17 +2072,17 @@ def main() -> None:
         )
         return
 
-    completion_kwargs: dict[str, Any] = {"completion_fn": _mock_completion} if args.mock else {}
+    completion_kwargs: dict[str, Any] = {"completion_fn": mock_completion} if args.mock else {}
     # run_reference_image_stage never conditions on other references (it's
     # plain text-to-image), so it only ever takes image_fn -- edit_fn is
     # for run_beat_image_stage specifically, which does condition on
     # character/location references.
-    image_kwargs: dict[str, Any] = {"image_fn": _mock_image} if args.mock else {}
+    image_kwargs: dict[str, Any] = {"image_fn": mock_image} if args.mock else {}
     beat_image_kwargs = (
-        {"image_fn": _mock_image, "edit_fn": _mock_image_edit} if args.mock else {}
+        {"image_fn": mock_image, "edit_fn": mock_image_edit} if args.mock else {}
     )
     scene_planning_kwargs: dict[str, Any] = (
-        {"completion_fn": _mock_scene_planning_completion} if args.mock else {}
+        {"completion_fn": mock_scene_planning_completion} if args.mock else {}
     )
 
     research_model = args.experiment_model or get_stage_model("research")

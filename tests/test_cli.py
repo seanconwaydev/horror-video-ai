@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from historical_video_ai.cli import (
+from historical_video_ai.cli.app import (
     _beat_gallery_dir,
     _check_video_prompt_practices,
     _confirm,
@@ -1532,7 +1532,7 @@ def test_project_root_raises_when_no_pyproject_toml_found(monkeypatch):
 
 
 def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):
-    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+    monkeypatch.setattr("historical_video_ai.cli.app._project_root", lambda: tmp_path)
 
     d = _run_dir("a-flood-rescue-scene")
 
@@ -1542,7 +1542,7 @@ def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):
 
 
 def test_run_dir_omits_slug_when_not_given(tmp_path, monkeypatch):
-    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+    monkeypatch.setattr("historical_video_ai.cli.app._project_root", lambda: tmp_path)
 
     d = _run_dir()
 
@@ -1726,7 +1726,7 @@ def test_run_dir_never_reuses_an_existing_directory(tmp_path, monkeypatch):
     right after a failed attempt lands in the same second with the same
     slug, and `exist_ok=True` let the second run write straight over the
     first one's images and log."""
-    monkeypatch.setattr("historical_video_ai.cli._project_root", lambda: tmp_path)
+    monkeypatch.setattr("historical_video_ai.cli.app._project_root", lambda: tmp_path)
 
     first = _run_dir("same-scene")
     (first / "previz.png").write_bytes(b"first run's image")
@@ -1967,7 +1967,7 @@ def test_references_default_to_none(monkeypatch):
     in money and in pinned composition -- is no longer the default."""
     import sys
 
-    from historical_video_ai.cli import _build_arg_parser
+    from historical_video_ai.cli.app import _build_arg_parser
 
     monkeypatch.setattr(sys, "argv", ["historical-video-ai"])
     args = _build_arg_parser().parse_args([])
@@ -1977,7 +1977,7 @@ def test_references_default_to_none(monkeypatch):
 def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
     """staging is a list of dataclasses; the editor must prompt per
     character rather than asking for a repr back (docs/decisions/0049)."""
-    from historical_video_ai.cli import _edit_item_fields
+    from historical_video_ai.cli.app import _edit_item_fields
     from historical_video_ai.stages.scene_planning import Beat, Staging
 
     beat = Beat(

@@ -48,14 +48,15 @@ extend-select = [
 testpaths = ["tests"]
 
 # A floor, not a target: it exists to stop coverage sliding, not to chase
-# a number. Set at the level measured when it was introduced. Every stage
-# module is at 95-100%; effectively all of the uncovered code is in
-# cli.py, which is also the largest module by a wide margin.
+# a number. Raised as each seam comes out of the old cli.py -- moving code
+# changes no coverage number by itself, but a module small enough to test
+# on its own gets tested, and the floor follows. Every stage module is at
+# 95-100%; effectively all of the uncovered code is in cli/app.py.
 [tool.coverage.run]
 source = ["src/historical_video_ai"]
 
 [tool.coverage.report]
-fail_under = 84
+fail_under = 85
 show_missing = true
 
 # ruff's ANN rules enforce that annotations *exist*; nothing checked they
