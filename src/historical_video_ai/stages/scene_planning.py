@@ -502,24 +502,6 @@ stepping, sitting, gesturing). A slightly different look for the \
 character between beats (hair catching light differently, a minor \
 pose-driven wardrobe shift) is fine and expected -- prioritize dynamic, believable movement over rigid \
 visual sameness.
-- For a character who doesn't belong to the historical setting (a \
-modern-day visitor, time traveler, narrator), describe \
-`wardrobe_signature`/`wardrobe_flexible` with specific, concrete, \
-contemporary clothing items -- not vague terms like "casual clothes" -- \
-so the result actually reads as modern, not historical.
-- Any lit screen (a phone, a device) should be described as a subtle, \
-realistic light source, clearly weaker than the beat's main light source \
-(sun, lamp, sky) -- e.g. "a faint, dim glow on her hands, much weaker \
-than the daylight around her," not open-ended "glowing"/"electric glow" \
-language, which image models tend to render as an unrealistically bright, \
-star-like point light.
-- When a beat has a character looking at a handheld or propped screen \
-from a camera angle that would naturally hide the screen from camera (an \
-over-the-shoulder shot from behind her, a side view, a back view), \
-explicitly state in `action` or `camera` that the screen face is NOT \
-visible to camera -- we see its back or edge instead. Image models \
-default to rendering a screen's face toward the viewer regardless of the \
-described geometry unless told the opposite outright.
 
 - Keep SCREEN DIRECTION consistent across consecutive beats at the same \
 location -- if the character moves or faces toward the left of frame in \

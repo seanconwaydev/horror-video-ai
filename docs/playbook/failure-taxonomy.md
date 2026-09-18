@@ -130,7 +130,7 @@ The character was meant to read as a modern-day visitor but came across ambiguou
 
 **2026-09-02** · Pompeii influencer run · *tentative category: prop lighting realism* · genre: modern-visitor-in-historical-setting
 A held smartphone rendered as an unrealistically bright, star-like light source. Traced to escalating "glow" language across beats' own `action`/`lighting` text ("a glowing smartphone" → "cool electric glow" → "phone-screen light"), not the Character's own description — nothing told the model to keep it subtle relative to the scene's real light source.
-→ Addressed: scene_planning.py prompt rule requiring lit screens to be described as clearly weaker than the beat's main light source (PR #24).
+→ Addressed: scene_planning.py prompt rule requiring lit screens to be described as clearly weaker than the beat's main light source (PR #24). **That rule was deleted again on 2026-09-18** ([ADR 0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)) as an instance patch addressed to the planner for a defect the image model produces. If this recurs, it needs a field, not a re-added bullet -- see [ADR 0054](../decisions/0054-one-fact-per-field.md).
 
 **2026-09-02** · Pompeii influencer run · *tentative category: prop spatial/orientation consistency* (matches T2I-CompBench's own "spatial relationships" category) · genre: modern-visitor-in-historical-setting
 A held phone's screen rendered facing the camera in a shot where the described geometry (over-the-shoulder from behind her) should have shown its back instead. Image models default to rendering a phone's iconic "screen-facing-viewer" view regardless of described camera geometry unless told the opposite outright.
