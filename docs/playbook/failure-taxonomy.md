@@ -1,6 +1,6 @@
 # Image/video generation failure taxonomy — playbook
 
-Last updated: 2026-09-02
+Last updated: 2026-09-18
 
 A running log of real, observed oddities in generated previz images/video, and what (if anything) was done about each one. This is the raw material for eventually building a genuinely sustainable answer to "AI generation keeps producing small, specific oddities" — see the Methodology section for why a log, not just a growing pile of one-off prompt tweaks, is the point.
 
@@ -302,3 +302,24 @@ Same shape as ADR 0029's purple-hair case, where a detail in `face_build` propag
 Two things from the same run that are **not** fixed. A beat can say *who* is present but not what each of them is *doing*: a non-focal character's behaviour is describable only inside the focal character's `action` prose. That was adequate for position ("a figure stands motionless at the far end of the aisle") and inadequate for anything else. And images still over-favour the subject facing camera even with ADR 0040's in-world reference in place -- the reviewer flagged it directly, "Mara is shown facing the camera rather than in rear-quarter profile walking away as specified". 0040 improved this measurably; it did not solve it.
 
 Also fixed here, a UX report rather than a defect: after giving up on a beat, the next beat's prompt "changed" to `(a)ccept / (r)eroll / (e)dit`. It had not -- that prompt appears when the reviewer *accepts*, and the five-option one appears when it *rejects*, so which appears depends on the verdict. Nothing said so. The accept prompt now leads with "Review accepted this image."
+
+**2026-09-18** · Real run, car-park stalker scene (`run_20260918-221017`) · *category: a figure can be correctly hidden without being anywhere* · genre: horror, embodied threat — **validates [ADR 0054](../decisions/0054-one-fact-per-field.md) and [ADR 0057](../decisions/0057-drop-the-duplicate-action-line.md); one new failure open**
+
+First run after giving occlusion its own field and dropping the duplicate `ACTION:` line. Both worked, and this run produced **the first image in this project the owner called genuinely acceptable** (beat 3, candidate 2) -- one he would take forward to video generation.
+
+What the owner observed, beat by beat: in beat 1, two of three candidates had the antagonist "actually hiding with their hand against the pillar, much better". Beat 2 had him "hidden properly with his hand on the pillar". Beat 3 was "much better about the two characters interacting with each other... not perfect but x100 better than before". The occlusion field is being obeyed as a physical act, not as a description -- a hand braced on the concrete he is hiding behind is a pose no earlier run produced.
+
+**The new failure: occlusion satisfied, physics not.** One beat-1 candidate had the antagonist "floating in the top left, half of his body hidden by a... rooftop piece of cement. Complete failure (though he is technically hidden)."
+
+That one is a *plan* defect, not a model hallucination, and the run log shows it exactly. Beat 1's camera is `wide, low, from behind`, and the antagonist's `frame_position` reads "a sliver in the far background, **upper-left of frame**, roughly a twentieth of the image". In a low wide shot down a receding aisle, upper-left of frame is ceiling. The model put a standing man where it was told to put him, found nothing up there to hide him behind, and invented a roof slab. Occlusion was satisfied; gravity was not.
+
+The missing fact is neither position nor occlusion. `frame_position` states where someone sits in the **2D frame**; nothing anywhere states where they stand in the **space** -- what they are standing on, how far back, at what eye level relative to the camera. A planner writing "upper-left" is not making an error on its own terms; it has no field in which to say "forty metres down the aisle, on the floor". This is the same shape as ADR 0041's missing character slot and ADR 0054's occlusion-as-prose: a prose rule asking for something the data model cannot express.
+
+**Gaze has the same gap.** One beat-3 candidate had "the enemy looking at the camera, for some reason". His staging says nothing about where he looks -- it describes his weight, his torso and his extended arm. The prompt's multi-character line asks that the characters' "gazes, distances and body angles have to agree", which is prose asking for three facts no field carries.
+
+**Mood and shadow are under-delivered, and it is not a prompt gap.** The owner: "the shadows and mood should probably be better for horror, though i didn't check how much of the prompt specified this." It is specified twice, in detail. The `horror-comic` preset asks for "heavy inked black shadows... high contrast between lit and unlit areas", and each beat's own `lighting` field is specific chiaroscuro written by the planner -- beat 1: "one hard pool of white light onto the concrete around her while the far end of the aisle drops into unlit black"; beat 3: "flattens his coat into a black slab and catches the shine on her forehead and eyes". The instruction is present, concrete, and stated at two levels. Whatever is losing here is downstream of the prompt text, which makes it a different kind of problem from every entry above -- worth treating as open rather than as another rule to write.
+
+One observation the owner made that is **not** yet a finding: the beat-1 candidate where the antagonist failed was also the one where the protagonist best matched her described action. With three candidates in one beat that is as likely to be coincidence as a real attention trade-off. Worth watching across runs before treating it as anything.
+
+Two runs of housekeeping confirmed here: quitting partway cost no judgements (ADR 0056) -- beats 1 and 2 are recorded as rejected-with-no-image-kept and beat 3 records candidate 2 as `kept`, which is the ADR 0053 dataset working on a real abandoned run.
+

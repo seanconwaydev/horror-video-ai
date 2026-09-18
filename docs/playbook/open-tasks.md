@@ -3,10 +3,13 @@
 A resume queue for a fresh session. Each entry is meant to be actionable
 without reading the rest of the conversation that produced it. Roughly in
 priority order. Neither is decided: 1 is an ADR-sized schema call, and 2
-needs a real run.
+is a diagnosis nobody has run yet. Both come out of the same real run.
 
 Finished entries are deleted rather than ticked off -- git history is the
-record. Most recently done: dropping the duplicate `ACTION:` line
+record. Most recently done: **validating 0054 and 0057 against a real
+run** -- occlusion now renders as a physical act (a hand braced on the
+pillar being hidden behind) and beat 3 produced the first image the owner
+called genuinely acceptable -- plus dropping the duplicate `ACTION:` line
 ([0057](../decisions/0057-drop-the-duplicate-action-line.md)), deleting
 three prompt rules by judgement rather than building the ablation
 registry ([0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)),
@@ -29,39 +32,49 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Add relational geometry to `Staging`
+## 1. Give `Staging` the facts it is missing: ground, depth, gaze
 
-Half of the 2:1 weighting fix is done
-([0057](../decisions/0057-drop-the-duplicate-action-line.md) dropped the
-duplicate `ACTION:` line). The other half of the owner's "just standing
-there" complaint is a schema gap: both characters get an absolute
-`frame_position` and **nothing anywhere states who is behind whom, how
-far apart they are, or where each is looking.**
+Now measured against a real run rather than reasoned about
+(`run_20260918-221017`, logged in
+[failure-taxonomy.md](./failure-taxonomy.md)). ADR 0057 worked -- the
+antagonist acts instead of standing there, and beat 3 produced the first
+image the owner called genuinely acceptable. Three facts have no field,
+and each produced a visible defect in the same run:
 
-The failure taxonomy already names this shape as the clearest instance of
-this project's worst pattern -- a prose rule instructing a model to do
-something the data model cannot express. The composition rule asks for
-characters who react to each other; `Staging` has no field in which a
-planner could say so.
+- **Where someone stands in the space.** `frame_position` is a 2D fact.
+  Beat 1 said "far background, upper-left of frame" under a `wide, low,
+  from behind` camera, which in that shot is the ceiling -- so the model
+  put a standing man in the air and invented a roof slab to hide him
+  behind. The planner was not wrong on its own terms; it had nowhere to
+  write "forty metres down the aisle, on the floor".
+- **Who is where relative to whom.** Still nothing states who is behind
+  whom or how far apart they are. The planner currently smuggles this
+  into `action` prose ("keeping the concrete between himself and her
+  sightline"), which is exactly where 0049 and 0054 found it losing.
+- **Where each is looking.** One beat-3 candidate had the antagonist
+  staring at camera mid-lunge. His staging describes weight, torso and
+  arm, and says nothing about his eyes. The prompt's multi-character line
+  asks that "gazes, distances and body angles have to agree" -- three
+  facts, no fields, which is the pattern ADR 0054 exists to stop.
 
-Bigger than 0057: a new field on `Staging`, the planner prompt that fills
-it, the parser, and the eval fixtures. ADR-sized.
+ADR-sized: new fields on `Staging`, the planner prompt that fills them,
+the parser, the eval fixtures. Worth deciding whether these are three
+fields or one, and 0054's evidence argues for separate ones.
 
-## 2. Validate ADR 0054 and 0057 against a real run
+## 2. Why is the mood under-delivered when the prompt asks for it twice?
 
-[0054](../decisions/0054-one-fact-per-field.md) gave occlusion its own
-field and its own `HIDDEN BY:` prompt line, on the evidence that
-structured fields are obeyed while prose inside them is not. **Nothing has
-been validated against an actual image.** The next horror run is the test:
-does a dedicated occlusion field produce a genuinely half-hidden figure?
+The owner on the 2026-09-18 run: "the shadows and mood should probably be
+better for horror, though i didn't check how much of the prompt specified
+this." It is specified twice and in detail -- the `horror-comic` preset
+asks for "heavy inked black shadows... high contrast between lit and
+unlit areas", and each beat's own `lighting` field is concrete chiaroscuro
+("one hard pool of white light... the far end of the aisle drops into
+unlit black").
 
-Run it interactively so it produces labels
-([0053](../decisions/0053-human-judgements-are-recorded-as-data.md)); the
-persistence fix in [0056](../decisions/0056-persist-work-in-flight.md)
-means quitting partway no longer costs them. Compare against the 16
-rejections already in `evals/results/` from 2026-09-17.
-
-Watch for one risk 0052 flagged and 0054 inherits: the planner has copied
-the composition rule's example phrasings near-verbatim before ("small and
-low… from behind" in 2 of 4 beats). If `occlusion` text starts reading the
-same way run to run, the menu has become a house style.
+So this is not a missing instruction, and writing a 32nd rule would be
+the exact move ADR 0058 just argued against. Things worth checking before
+anything else: whether the character reference sheet every beat is *edited
+from* is washing out the contrast it inherits, whether `LIGHTING` late in
+the prompt loses to `STYLE` right after it, and whether the model simply
+does not do heavy blacks at this level. The first two are testable with
+the eval harness; the third is not fixable here.
