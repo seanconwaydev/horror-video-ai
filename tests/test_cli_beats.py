@@ -1,3 +1,10 @@
+"""Generating a scene plan's beats into images (cli/beats.py).
+
+The last piece of test_cli.py to be split; it was the bulk of it. The
+generate_fn / image_fn / edit_fn seams these tests drive are the reason
+none of this needs a live API call.
+"""
+
 import base64
 import json
 from pathlib import Path
@@ -6,12 +13,12 @@ from types import SimpleNamespace
 import pytest
 from factories import TINY_PNG_B64, a_beat, a_character, a_location
 
-from historical_video_ai.cli.app import (
-    _beat_gallery_dir,
-    _generate_beats_with_choices,
-    _generate_image_with_retries,
-    _generate_scene_references,
-    _link_beat_into_gallery,
+from historical_video_ai.cli.beats import (
+    beat_gallery_dir,
+    generate_beats_with_choices,
+    generate_image_with_retries,
+    generate_scene_references,
+    link_beat_into_gallery,
 )
 from historical_video_ai.stages.previz import PrevizResult
 from historical_video_ai.stages.scene_planning import Character, ScenePlan
@@ -36,7 +43,7 @@ def _fake_review_completion(verdicts):
 
 
 def _retry_loop_kwargs(out_dir):
-    """Kwargs for _generate_image_with_retries, the attempt loop itself.
+    """Kwargs for generate_image_with_retries, the attempt loop itself.
 
     The loop runs no automated review any more (docs/decisions/0055), so
     what remains to exercise is attempt counting, archiving, and the human
@@ -57,7 +64,7 @@ def _previz_generate_fn(out_dir):
 
 
 def test_image_review_loop_accepts_on_first_attempt(tmp_path):
-    result, attempts = _generate_image_with_retries(
+    result, attempts = generate_image_with_retries(
         _previz_generate_fn(tmp_path),
         **_retry_loop_kwargs(tmp_path),
     )
@@ -89,7 +96,7 @@ def test_image_review_loop_accepts_on_first_attempt(tmp_path):
 def test_image_review_loop_retries_then_accepts(tmp_path):
     decisions = iter(["continue", "accept"])
 
-    result, attempts = _generate_image_with_retries(
+    result, attempts = generate_image_with_retries(
         _previz_generate_fn(tmp_path),
         on_reviewed=lambda concern, attempt: next(decisions),
         **_retry_loop_kwargs(tmp_path),
@@ -103,7 +110,7 @@ def test_image_review_loop_retries_then_accepts(tmp_path):
 
 
 def test_image_review_loop_gives_up_after_max_attempts(tmp_path):
-    result, attempts = _generate_image_with_retries(
+    result, attempts = generate_image_with_retries(
         _previz_generate_fn(tmp_path),
         on_reviewed=lambda concern, attempt: "continue",
         **_retry_loop_kwargs(tmp_path),
@@ -120,7 +127,7 @@ def test_image_review_loop_gives_up_after_max_attempts(tmp_path):
 def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "y")
 
-    character_refs, location_refs = _generate_scene_references(
+    character_refs, location_refs = generate_scene_references(
         ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _fake_image_fn},
@@ -140,7 +147,7 @@ def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path
         captured_prompts.append(kwargs["prompt"])
         return SimpleNamespace(data=[SimpleNamespace(b64_json=TINY_PNG_B64)])
 
-    _generate_scene_references(
+    generate_scene_references(
         ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _capturing_image_fn},
@@ -162,7 +169,7 @@ def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypa
         calls["n"] += 1
         return SimpleNamespace(data=[SimpleNamespace(b64_json=TINY_PNG_B64)])
 
-    character_refs, _ = _generate_scene_references(
+    character_refs, _ = generate_scene_references(
         ScenePlan(characters=[a_character()], locations=[], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _counting_image_fn},
@@ -186,7 +193,7 @@ def test_beat_gallery_dir_exists_immediately_before_any_beat_is_linked(tmp_path)
     # after the first beat finishes -- so a run cancelled before any beat
     # completes still leaves a (empty) folder behind, per the project
     # owner's own reported use case (restarting runs often).
-    gallery = _beat_gallery_dir(tmp_path)
+    gallery = beat_gallery_dir(tmp_path)
 
     assert gallery == tmp_path / "all_beats"
     assert gallery.is_dir()
@@ -198,7 +205,7 @@ def test_link_beat_into_gallery_symlinks_by_index(tmp_path):
     beat1_dir.mkdir()
     image1 = _write_reference_png(beat1_dir, "previz.png")
 
-    _link_beat_into_gallery(tmp_path, 1, str(image1))
+    link_beat_into_gallery(tmp_path, 1, str(image1))
 
     link = tmp_path / "all_beats" / "beat_1.png"
     assert link.is_symlink()
@@ -210,8 +217,8 @@ def test_link_beat_into_gallery_is_idempotent(tmp_path):
     beat1_dir.mkdir()
     image1 = _write_reference_png(beat1_dir, "previz.png")
 
-    _link_beat_into_gallery(tmp_path, 1, str(image1))
-    _link_beat_into_gallery(tmp_path, 1, str(image1))  # re-linking must not raise
+    link_beat_into_gallery(tmp_path, 1, str(image1))
+    link_beat_into_gallery(tmp_path, 1, str(image1))  # re-linking must not raise
 
     assert (tmp_path / "all_beats" / "beat_1.png").resolve() == image1.resolve()
 
@@ -229,7 +236,7 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
     char_ref = _write_reference_png(tmp_path, "char_ref.png")
     loc_ref = _write_reference_png(tmp_path, "loc_ref.png")
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={"influencer": char_ref},
         location_refs={"street": loc_ref},
@@ -242,7 +249,7 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
     assert results[0]["beat"]["action"] == "checks her phone"
     # The gallery is populated as beats are accepted, as part of this same
     # call -- not a separate step a caller has to remember to run
-    # afterward (see _link_beat_into_gallery's docstring).
+    # afterward (see link_beat_into_gallery's docstring).
     link = tmp_path / "all_beats" / "beat_1.png"
     assert link.is_symlink()
     assert link.resolve() == Path(results[0]["image_path"]).resolve()
@@ -263,7 +270,7 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
     # through its own previz_review pass before the human choice is even
     # asked -- two accepted verdicts needed, not one.
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -280,7 +287,7 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -296,13 +303,13 @@ def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch
         Attempt 3/3 -- ... / (r)etry carrying 3 review concerns / ...: r
         No image kept for this beat after 3 attempt(s).
     """
-    # Four retries -- one more than _MAX_PREVIZ_ATTEMPTS -- then accept.
+    # Four retries -- one more than MAX_PREVIZ_ATTEMPTS -- then accept.
     responses = iter(["r", "r", "r", "r", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -316,7 +323,7 @@ def test_an_unattended_run_accepts_the_first_attempt(tmp_path):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -339,7 +346,7 @@ def test_generate_beats_with_choices_passes_style_through(tmp_path):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -363,7 +370,7 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -382,7 +389,7 @@ def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_r
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -405,13 +412,13 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
     assert results[0]["image_path"] is not None
     # Both cycles are recorded. The restarted cycle is a fresh
-    # _generate_image_with_retries call, and its own attempt log used to be
+    # generate_image_with_retries call, and its own attempt log used to be
     # the only one kept -- so choosing (e)dit silently discarded the
     # rejected attempt that prompted the edit, which is the judgement
     # worth keeping (docs/decisions/0053).
@@ -446,7 +453,7 @@ def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_pat
         captured.update(kwargs)
         return SimpleNamespace(data=[SimpleNamespace(b64_json=TINY_PNG_B64)])
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan,
         character_refs={"influencer": char_ref, "second": second_char_ref},
         location_refs={"street": loc_ref},
@@ -461,7 +468,7 @@ def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_pat
 def test_image_review_loop_calls_on_image_generated_before_review(tmp_path):
     calls = []
 
-    result, _ = _generate_image_with_retries(
+    result, _ = generate_image_with_retries(
         _previz_generate_fn(tmp_path),
         **_retry_loop_kwargs(tmp_path),
         on_image_generated=calls.append,
@@ -490,7 +497,7 @@ def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
     """Regression test for a real data-loss bug found in a paid run.
 
     A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
-    fresh `_generate_image_with_retries` call against the same directory
+    fresh `generate_image_with_retries` call against the same directory
     and the same `archive_prefix`. Its attempt counter restarts at 1, so
     it reused `<prefix>_1_rejected.png` -- and `Path.rename` replaces the
     destination silently on POSIX, destroying the earlier cycle's already
@@ -507,7 +514,7 @@ def test_rejected_attempts_survive_a_second_cycle_on_the_same_beat(tmp_path):
     # and an overwrite can't hide behind identical content.
     generate_fn = _rejecting_generate_fn(out_dir)
     for _ in range(2):
-        _generate_image_with_retries(
+        generate_image_with_retries(
             generate_fn,
             # Keep saying retry so every attempt is archived, which is
             # what this test is about.
@@ -535,7 +542,7 @@ def test_each_finished_beat_is_persisted_immediately(tmp_path):
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
     snapshots = []
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -567,7 +574,7 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -592,7 +599,7 @@ def test_rejected_reference_images_are_kept_not_overwritten(tmp_path, monkeypatc
         counter["n"] += 1
         return SimpleNamespace(data=[SimpleNamespace(b64_json=TINY_PNG_B64)])
 
-    character_refs, _ = _generate_scene_references(
+    character_refs, _ = generate_scene_references(
         ScenePlan(characters=[a_character()], locations=[], beats=[]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _image_fn},
@@ -614,7 +621,7 @@ def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, m
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -630,7 +637,7 @@ def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -650,7 +657,7 @@ def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -671,7 +678,7 @@ def test_rejecting_every_candidate_rejects_the_attempt_not_the_beat(tmp_path, mo
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -698,7 +705,7 @@ def test_one_candidate_is_the_previous_behaviour(tmp_path, monkeypatch):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    _generate_beats_with_choices(
+    generate_beats_with_choices(
         scene_plan, character_refs={}, location_refs={}, **kwargs
     )
 
@@ -713,7 +720,7 @@ def test_unattended_runs_take_the_first_candidate(tmp_path):
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -745,7 +752,7 @@ def test_reference_generation_can_be_turned_off_per_kind(
         calls["n"] += 1
         return SimpleNamespace(data=[SimpleNamespace(b64_json=TINY_PNG_B64)])
 
-    character_refs, location_refs = _generate_scene_references(
+    character_refs, location_refs = generate_scene_references(
         ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _image_fn},
@@ -776,7 +783,7 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_image_fn)
     kwargs["image_kwargs"]["edit_fn"] = _edit_fn
 
-    results = _generate_beats_with_choices(
+    results = generate_beats_with_choices(
         scene_plan,
         character_refs={},
         location_refs={},
@@ -786,18 +793,3 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     assert results[0]["image_path"] is not None
     # The character's own description still reaches the model as text.
     assert "white crop top" in seen[0]["prompt"]
-
-
-def test_references_default_to_none(monkeypatch):
-    """docs/decisions/0050: a measured run held style, camera variety and
-    the location's fixed props with no references, so paying for them --
-    in money and in pinned composition -- is no longer the default."""
-    import sys
-
-    from historical_video_ai.cli.app import _build_arg_parser
-
-    monkeypatch.setattr(sys, "argv", ["historical-video-ai"])
-    args = _build_arg_parser().parse_args([])
-    assert args.references == "none"
-
-

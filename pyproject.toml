@@ -48,10 +48,13 @@ extend-select = [
 testpaths = ["tests"]
 
 # A floor, not a target: it exists to stop coverage sliding, not to chase
-# a number. Raised as each seam comes out of the old cli.py -- moving code
-# changes no coverage number by itself, but a module small enough to test
-# on its own gets tested, and the floor follows. Every stage module is at
-# 95-100%; effectively all of the uncovered code is in cli/app.py.
+# a number. It went 84 -> 86 over the cli.py split, one seam at a time --
+# moving code changes no coverage number by itself, but a module small
+# enough to test on its own gets tested, and the floor follows.
+#
+# What is left uncovered is almost entirely main(), which CI's smoke job
+# does run end to end -- offline, every push -- but under `uv run
+# historical-video-ai`, not under pytest, so none of it is measured here.
 [tool.coverage.run]
 source = ["src/historical_video_ai"]
 

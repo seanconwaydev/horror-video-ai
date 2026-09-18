@@ -74,8 +74,9 @@ jobs:
       - name: Types
         run: uv run mypy
 
-      # A floor to stop coverage sliding, not a target to chase. All of
-      # the uncovered code is in cli/app.py; the stage modules are 95-100%.
+      # A floor to stop coverage sliding, not a target to chase. What it
+      # does not see: main(), which the smoke job below runs end to end
+      # but not under coverage.
       - name: Coverage
         run: uv run pytest --cov --cov-report=term-missing
 

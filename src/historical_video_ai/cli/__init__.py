@@ -1,9 +1,8 @@
-"""The interactive CLI, split across modules by seam.
+"""The interactive CLI.
 
-`historical-video-ai` resolves to `main` below (pyproject.toml). The
-package is being split one seam at a time out of what was a single
-2,500-line module -- see docs/playbook/open-tasks.md for what has moved
-and what has not.
+`historical-video-ai` resolves to `main` below (pyproject.toml), which
+lives in app.py alongside the argument parser. The rest is one module per
+seam: research_flow, beats, review, video_gen, runlog, mocks.
 """
 
 from __future__ import annotations
