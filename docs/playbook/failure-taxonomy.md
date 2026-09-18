@@ -343,3 +343,28 @@ Twelve images, two arms, three scenarios taken from `run_20260918-221017`'s own 
 
 **One scene-writing consequence, in the owner's own words:** "his hiding is just a bit stiff and awkward, mainly due to him being so close to her and the camera. if he were further off, taking a moment to notice, i think it'd be much more effective." If depth cannot be prompted, the alternative is to stop writing beats that depend on it.
 
+**2026-09-18** · Blind eval, second run with a third arm (`results/blocking-20260918-232815`) · *category: the authoring space is not the lever; distance is not promptable at all* · genre: horror, embodied threat — **inconclusive between arms, conclusive about distance**
+
+Eighteen images: `frame`, `world`, and `world_size` (world placement plus the frame arm's own apparent-size figures), three scenarios, scored blind. Pooling both runs, 30 images:
+
+| | frame | world | world_size |
+|---|---|---|---|
+| far figure reads as FAR | 1/4 | 0/4 | 0/2 |
+| far figure hidden by the pillar | 2/4 | **4/4** | 1/2 |
+| near figure between camera and her | 2/4 | **0/4** | **2/2** |
+| looking at her (near_lurker) | 1/4 | 0/4 | 1/2 |
+
+**The design cannot separate the arms at two candidates per cell.** The clearest evidence is that the *same arm on an identical prompt* flipped between runs: `frame` scored 2/2 on "hidden by the pillar" in run one and 0/2 in run two, with the owner's note on the failures reading "he's blatantly in front of the pillar" and "in front of the pillar AND facing the wrong way". Between-candidate variance is larger than the between-arm difference, so most of the table above is noise. The overall preference flipped too -- `world` produced the fewest images the owner liked in run one and the most in run two.
+
+**Two things were consistent across both runs and are worth keeping.**
+
+*Distance is not promptable.* "Does the far figure read as far away" is **1 success in 10 images** across every arm. "Far down at the unlit end, several pillars beyond her", "a sliver in the far background", and the same with an explicit "roughly a twentieth of the image" all produced a man standing about five feet away. No authoring space fixes this, which means it is not a schema problem.
+
+*World placement alone never gets near-field depth ordering, and apparent size fixes it.* "Is he between the camera and her" scored `world` **0/4** across both runs, against `frame` 2/4 and `world_size` **2/2**. This is the one arm effect that held. It is direct support for the hypothesis the third arm was added to test: the working instruction is *how much of the image someone occupies*, which is a frame-space quantity, not the frame coordinates themselves. `world_size` is still only n=2 and needs confirming.
+
+**The owner judged one scenario unfit rather than one arm.** On `near_lurker`: "i wouldn't accept any of these... i think the prompt is probably just bad for creating a nice scene, even if all these variables worked perfectly." A scenario that cannot produce a good image under any condition is not a useful test bed, and it consumed a third of both runs. `--scenarios` and `--arms` flags were added so candidates can be spent on the comparison still in question instead.
+
+**A new artifact worth naming:** one `world_size` image rendered "seen from behind" as a first-person point of view -- "there are two girls, one standing in front, one who the camera seems to be looking through the eyes of (thus the extra arm and keyfob in her hand)". The subject was duplicated into both a third-person figure and a POV body. Not seen before, and a reminder that "from behind" is ambiguous between over-the-shoulder and through-the-eyes.
+
+**Gaze, again.** Unscoreable more often than not -- "hard to tell because his eyes are white", "hard to tell because his eyes are quite small", "impossible to tell what he's looking at, but it passes because of his body language + black visage". Every time the owner could read gaze, he read it off posture. This is now observed across two independent runs and should be treated as settled: a gaze field has to be written as body orientation, because the eyes are not reliably rendered at all.
+

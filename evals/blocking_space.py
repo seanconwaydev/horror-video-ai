@@ -308,16 +308,37 @@ def main() -> None:
         default=2,
         help="images per cell. More than one so a single fluke is visible as one.",
     )
+    parser.add_argument(
+        "--scenarios",
+        help="comma-separated subset to run, e.g. distant_figure,confrontation. "
+        "Dropping a scenario that cannot produce a good image regardless buys "
+        "candidates for the ones that can.",
+    )
+    parser.add_argument(
+        "--arms",
+        help="comma-separated subset of arms, e.g. world,world_size. Narrowing to "
+        "the one comparison still in question is how a cell gets enough candidates "
+        "to rise above the between-candidate variance.",
+    )
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
-    total = len(SCENARIOS) * len(ARMS) * args.candidates
+    scenarios = (
+        {k: SCENARIOS[k] for k in args.scenarios.split(",")} if args.scenarios else SCENARIOS
+    )
+    arms = tuple(args.arms.split(",")) if args.arms else ARMS
+    for arm in arms:
+        if arm not in ARMS:
+            parser.error(f"unknown arm {arm!r} -- choose from {', '.join(ARMS)}")
+
+    total = len(scenarios) * len(arms) * args.candidates
     print(
-        f"{len(SCENARIOS)} scenario(s) x {len(ARMS)} arm(s) x "
+        f"{len(scenarios)} scenario(s) x {len(arms)} arm(s) x "
         f"{args.candidates} candidate(s) = {total} images"
     )
     print(f"  model: {MODEL}, text-to-image, no reference conditioning")
-    for name in SCENARIOS:
+    print(f"  arms: {', '.join(arms)}")
+    for name in scenarios:
         print(f"  scenario: {name}")
     if args.dry_run:
         print("\n--dry-run: nothing called, nothing spent.")
@@ -334,12 +355,12 @@ def main() -> None:
 
     # Which arm is which must not be readable off the filename.
     rng = random.Random(args.seed)
-    labels = [f"a{n}" for n in range(1, len(ARMS) + 1)]
+    labels = [f"a{n}" for n in range(1, len(arms) + 1)]
     rng.shuffle(labels)
-    key = dict(zip(labels, ARMS, strict=True))
+    key = dict(zip(labels, arms, strict=True))
 
     manifest = []
-    for scenario_name, scenario in SCENARIOS.items():
+    for scenario_name, scenario in scenarios.items():
         for label, arm in key.items():
             prompt = _build_prompt(scenario, arm)
             prompts_dir.mkdir(exist_ok=True)
@@ -387,7 +408,7 @@ def main() -> None:
         "which arm is which; they are saved for reading afterwards.",
         "",
     ]
-    for scenario_name, scenario in SCENARIOS.items():
+    for scenario_name, scenario in scenarios.items():
         questions = list(scenario["questions"])  # type: ignore[call-overload]
         lines += [f"## {scenario_name}", ""]
         for qi, question in enumerate(questions, 1):

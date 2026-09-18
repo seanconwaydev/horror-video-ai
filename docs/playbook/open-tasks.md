@@ -32,44 +32,41 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Run `blocking_space.py`'s third arm, then decide
+## 1. Confirm whether apparent size is the depth lever
 
-The first run is done (`results/blocking-20260918-224824`, written up in
-[failure-taxonomy.md](./failure-taxonomy.md)). **World-space blocking
-lost** -- every image the owner favoured was a frame-coordinate one. It
-also showed that *distance failed in both arms*, so the projection problem
-is real and world-space authoring does not fix it.
+Two blind runs are done (30 images, written up in
+[failure-taxonomy.md](./failure-taxonomy.md)). They did **not** settle
+frame-space versus world-space authoring, and the reason is worth stating
+plainly: at two candidates per cell the noise is larger than the effect --
+the same arm on an identical prompt scored 2/2 then 0/2 on the same
+question between runs. No ADR can be written on that.
 
-What is left is one uncontrolled variable. The frame arm states an
-explicit apparent size ("roughly a twentieth of the image") because that
-is how `frame_position` is written; the world arm stated none; and
-apparent size is the strongest depth cue an image has. The run's only two
-depth successes were in the arm holding it. A third arm, `world_size` --
-world placement plus the same size figures -- is written and unrun:
+One thread survived both runs. `world` scored **0/4** on "is he between
+the camera and her"; `world_size` -- the same world placement with an
+apparent-size figure added -- scored **2/2**. If that holds, the
+instruction doing the work is *how much of the image someone occupies*,
+not the frame coordinates, and `frame_position` becomes "where they stand"
+plus "how much of the frame they fill". Still n=2.
+
+The focused confirmation, with candidates spent where they can separate
+something rather than spread across a scenario the owner judged unfit:
 
 ```
-uv run python evals/blocking_space.py
+uv run python evals/blocking_space.py \
+  --scenarios distant_figure,confrontation --arms world,world_size --candidates 6
 ```
 
-18 images now, about $0.70, scored blind the same way. If `world_size`
-matches `frame`, the lever is apparent size and not frame coordinates, and
-`frame_position` can become world placement plus a size -- a far smaller
-schema change than giving `Location` a floor plan. If it matches `world`,
-frame coordinates stay and the ADR is short.
+24 images, about $0.95. Score the same way, blind.
 
-Two separate findings from the first run that need their own decisions
-either way:
+Settled and not worth re-testing:
 
-- **Gaze may not be expressible as gaze.** It failed in every cell, and is
-  often not even scoreable -- the model renders a horror figure's eyes as
-  featureless white or black, so where they look cannot be read off the
-  image. The one time the owner could tell, he credited body position and
-  clothing. A gaze field probably has to be written as body orientation.
-- **Shadow is doing work nothing controls.** The owner repeatedly credited
-  shadow for rescuing an occlusion the pillar did not achieve. No field
-  asks for it. That makes it a confound in the result above and, on its
-  own, a hint that occlusion-by-shadow may be cheaper and more reliable
-  than occlusion-by-object.
+- **Distance is not promptable.** 1 success in 10 images across every arm
+  and every phrasing. Beats that depend on a figure reading as genuinely
+  far away should be rewritten rather than re-prompted.
+- **Gaze has to be written as body orientation.** Observed across both
+  runs: the model renders a horror figure's eyes as featureless white or
+  black, so gaze is frequently not recoverable from the image at all, and
+  every time the owner could read it he read it off posture.
 
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 

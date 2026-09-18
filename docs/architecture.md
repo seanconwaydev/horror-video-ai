@@ -108,24 +108,26 @@ three renderable terms, and does not author frame position at all -- the image m
 the projection. The latter is what a production's blocking diagram is, and this project
 already uses "coverage" and screen direction, which are that model's vocabulary.
 
-**Partly answered, 2026-09-18.** `evals/blocking_space.py` ran the two architectures
-head to head -- twelve images, three scenarios from that same run, scored blind. World-space
-blocking **lost**: every image the owner picked out favourably was a frame-coordinate one,
-including the only image he said he would keep. But the finding that matters is that
-*distance failed in both arms* -- "far down at the unlit end, several pillars beyond her"
-and "a sliver in the far background" both rendered a figure about five feet away. The model
-is not converting either description into depth, so re-authoring placement in world-space
-does not fix the projection problem; it relocates it.
+**Partly answered, 2026-09-18, over two blind runs (30 images).** `evals/blocking_space.py`
+put the two architectures head to head and then added a third arm. The honest result is that
+**the authoring space is not the lever** -- at two candidates per cell the between-candidate
+variance is larger than the between-arm difference, and the same arm on an identical prompt
+scored 2/2 and then 0/2 on the same question across the two runs. Neither architecture can be
+adopted on this evidence, and the ADR that would have replaced `frame_position` with world
+blocking is not being written.
 
-The experiment also exposed an asymmetry it did not control, and that is now the live
-hypothesis: the frame arm carries an explicit apparent size ("roughly a twentieth of the
-image") because that is how `frame_position` is written, the world arm carried none, and
-apparent size is the strongest depth cue a rendered image has. The only two depth successes
-in the run sat in the arm holding the size. A third arm (`world_size` -- world placement plus
-the same size figures) is added and unrun. If it matches the frame arm, the lever is apparent
-size rather than frame coordinates, and world placement can replace `frame_position` provided
-size travels with it -- a far smaller change than giving `Location` a floor plan. Full result
-in [playbook/failure-taxonomy.md](./playbook/failure-taxonomy.md).
+Two findings did hold across both runs. **Distance is not promptable at all**: "does the far
+figure read as far away" succeeded in 1 image out of 10, across every arm -- world-space
+prose, frame coordinates, and an explicit "roughly a twentieth of the image" alike all
+rendered a man about five feet away. That is not a schema problem and no field design fixes
+it. And **world placement alone never achieved near-field depth ordering** (0/4 on "is he
+between the camera and her") while world placement *plus an apparent-size figure* scored 2/2.
+The working instruction is how much of the image someone occupies -- a frame-space quantity,
+but not the frame *coordinates*. That is the one live thread, and it is still n=2.
+
+So the open question narrows from "which space should placement be authored in" to "does
+apparent size carry the depth information, independent of coordinates". Full result in
+[playbook/failure-taxonomy.md](./playbook/failure-taxonomy.md).
 
 Two things had to be established before choosing, and one was already answered.
 *Answered:* this is not caused by reference-image conditioning. 0044's live hypothesis was
