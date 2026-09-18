@@ -2,7 +2,12 @@
 
 A resume queue for a fresh session. Each entry is meant to be actionable
 without reading the rest of the conversation that produced it. Roughly in
-priority order; 1 is decided and ready, 2-5 are not all decided.
+priority order. None of the four is fully decided: 1 needs scoping before
+any code moves, 2 and 3 are the owner's calls, and 4 needs a real run.
+
+Finished entries are deleted rather than ticked off -- git history is the
+record. Most recently done: broadening the CI trigger to every branch,
+which is what let five commits ship with no CI at all.
 
 Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 [eval-loop-plan.md](./eval-loop-plan.md) and
@@ -10,20 +15,7 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Broaden the CI trigger — decided, just do it
-
-`.github/workflows/ci.yml` triggers on `push: branches: [main]` and
-`pull_request`. A branch with no PR open therefore gets **no CI at all**.
-This was found the hard way: five commits (ADRs 0054, 0055, 0056, the
-mypy expansion, the coverage floor) sat on a branch with zero CI runs
-while being reported as verified from local runs only.
-
-The owner has approved broadening it. Add `push` on all branches, accept
-that PR branches then run twice, or use a `concurrency` group to cancel
-the duplicate. The `concurrency` block already in the workflow keys on
-`github.ref`, so check it still behaves with both triggers firing.
-
-## 2. Split `cli.py`
+## 1. Split `cli.py`
 
 2,413 lines, 46% of the codebase, and **every one of the 190 uncovered
 statements in the repo is in it** — each stage module sits at 95-100%,
@@ -36,7 +28,7 @@ retry loop, the `--video-gen-from` path, the `--mock` fakes, argument
 parsing, and the run-log/persistence helpers. Not yet designed — scope it
 before moving code.
 
-## 3. Decide the prompt rule registry
+## 2. Decide the prompt rule registry
 
 Fully scoped in
 [prompt-rule-registry-scope.md](./prompt-rule-registry-scope.md) (also
@@ -53,7 +45,7 @@ Two questions, both the owner's:
   at all now, which changes what ablation would be measured *against*.
   Resolve that before starting.
 
-## 4. Fix `previz.py`'s 2:1 prompt weighting
+## 3. Fix `previz.py`'s 2:1 prompt weighting
 
 The owner's longest-standing complaint: the non-focal character is "just
 standing there… a permanent issue since extra characters were added."
@@ -70,7 +62,7 @@ states who is behind whom, how far apart, or where each is looking.
 Deciding between "drop the duplicate `ACTION:` line" and "add a relational
 field to `Staging`" is an ADR-sized call.
 
-## 5. Validate ADR 0054 against a real run
+## 4. Validate ADR 0054 against a real run
 
 [0054](../decisions/0054-one-fact-per-field.md) gave occlusion its own
 field and its own `HIDDEN BY:` prompt line, on the evidence that
