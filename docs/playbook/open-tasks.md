@@ -32,35 +32,44 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Run `evals/blocking_space.py` and decide the authoring space
+## 1. Run `blocking_space.py`'s third arm, then decide
 
-The largest open design question (`architecture.md`): where a character
-appears in the frame is a *projection* of where they stand and where the
-camera is, and the pipeline authors all three legs independently. Two
-coherent architectures exist and the current one is neither -- frame-space
-authoring (`frame_position` authoritative, world prose derived or dropped)
-or world-space blocking (author the room and the marks, let the camera
-imply the frame).
+The first run is done (`results/blocking-20260918-224824`, written up in
+[failure-taxonomy.md](./failure-taxonomy.md)). **World-space blocking
+lost** -- every image the owner favoured was a frame-coordinate one. It
+also showed that *distance failed in both arms*, so the projection problem
+is real and world-space authoring does not fix it.
 
-`evals/blocking_space.py` decides it on images rather than argument. Three
-scenarios, taken from `run_20260918-221017`'s own beats including the one
-that produced the floating figure, each authored both ways with everything
-else held constant. 12 images, about $0.50, scored blind:
+What is left is one uncontrolled variable. The frame arm states an
+explicit apparent size ("roughly a twentieth of the image") because that
+is how `frame_position` is written; the world arm stated none; and
+apparent size is the strongest depth cue an image has. The run's only two
+depth successes were in the arm holding it. A third arm, `world_size` --
+world placement plus the same size figures -- is written and unrun:
 
 ```
 uv run python evals/blocking_space.py
 ```
 
-Read `prompts/` afterwards before trusting the result -- the validity risk
-is that the world arm says something the frame arm does not and wins for
-being more specific rather than for being world-space.
+18 images now, about $0.70, scored blind the same way. If `world_size`
+matches `frame`, the lever is apparent size and not frame coordinates, and
+`frame_position` can become world placement plus a size -- a far smaller
+schema change than giving `Location` a floor plan. If it matches `world`,
+frame coordinates stay and the ADR is short.
 
-Whichever way it comes out, an ADR follows, and it is a large one. If
-world blocking wins, `Location` needs a geometry it does not have -- it is
-`architecture`, `fixed_props` and `ambient_light`, all prose, so there is
-no floor plan to place anyone against. Gaze has no field either way
-(`run_20260918-221017` had the antagonist staring at camera mid-lunge, and
-his staging describes weight, torso and arm but not his eyes).
+Two separate findings from the first run that need their own decisions
+either way:
+
+- **Gaze may not be expressible as gaze.** It failed in every cell, and is
+  often not even scoreable -- the model renders a horror figure's eyes as
+  featureless white or black, so where they look cannot be read off the
+  image. The one time the owner could tell, he credited body position and
+  clothing. A gaze field probably has to be written as body orientation.
+- **Shadow is doing work nothing controls.** The owner repeatedly credited
+  shadow for rescuing an occlusion the pillar did not achieve. No field
+  asks for it. That makes it a confound in the result above and, on its
+  own, a hint that occlusion-by-shadow may be cheaper and more reliable
+  than occlusion-by-object.
 
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 

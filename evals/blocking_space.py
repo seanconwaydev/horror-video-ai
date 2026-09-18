@@ -12,11 +12,23 @@ invented a concrete slab to hide him behind.
 
 Two arms, one variable:
 
-    frame  what the pipeline emits today -- POSITION IN FRAME / HIDDEN BY,
-           taken close to verbatim from that run's beats.
-    world  the same scene with NO frame coordinates at all. Where each
-           character stands relative to the location's own features and to
-           each other, which way each faces, and how far from camera.
+    frame       what the pipeline emits today -- POSITION IN FRAME / HIDDEN
+                BY, taken close to verbatim from that run's beats.
+    world       the same scene with NO frame coordinates at all. Where each
+                character stands relative to the location's own features and
+                to each other, which way each faces, and how far from camera.
+    world_size  world placement plus one frame-space quantity: how much of
+                the image each character occupies.
+
+The third arm exists because the first run (`results/blocking-20260918-224824`)
+exposed an asymmetry the first two arms did not control. `frame` carries an
+explicit apparent size ("roughly a twentieth of the image") because that is
+how `frame_position` is written, and `world` carried none -- and apparent
+size is the strongest depth cue a rendered image has. So that run compared
+"frame coordinates plus size" against "world position, no size", and its
+only two depth successes were in the arm holding the size. `world_size`
+separates the two: if it matches `frame`, the lever is apparent size and
+not frame coordinates, which is a much smaller change to the schema.
 
 Everything else is held constant, the camera line included -- in both arms
 it stays in ADR 0044's three renderable terms, because that ADR's finding
@@ -133,6 +145,19 @@ watcher STANDS: on the same aisle floor, far down at the unlit end, several pill
 beyond her, behind one of the pillars in the left-hand row. He is looking along the \
 aisle toward her. The pillars between him and the camera cover him except for the \
 outer edge of one shoulder and a slice of his coat.""",
+        "world_size": """\
+mara DOING: her right hand closed around a car key fob with the thumb pressed down on \
+the lock button, her weight on the front foot mid-step along the yellow bay line.
+mara STANDS: on the aisle floor a few metres ahead of the camera, walking away from \
+it down the middle of the aisle. Nothing is in front of her. She occupies roughly a \
+tenth of the image width.
+watcher DOING: his shoulder pressed flat to the far face of a pillar, one flat palm \
+held against the concrete, keeping the pillar between himself and her sightline.
+watcher STANDS: on the same aisle floor, far down at the unlit end, several pillars \
+beyond her, behind one of the pillars in the left-hand row. He is looking along the \
+aisle toward her. The pillars between him and the camera cover him except for the \
+outer edge of one shoulder and a slice of his coat. He occupies roughly a twentieth \
+of the image.""",
         "questions": [
             "Is the far figure STANDING ON THE FLOOR (not floating, not up near the ceiling)?",
             (
@@ -176,6 +201,20 @@ watcher STANDS: behind a pillar part-way down the aisle, closer than the far end
 well behind her, on the same floor. He is looking at her past the pillar's edge. The \
 pillar covers everything below his chest and half his face -- one eye, one shoulder \
 and the hooked hand clear it.""",
+        "world_size": """\
+mara DOING: her weight settled onto her back foot with the front toe barely touching \
+down, her right hand stopped halfway to her jacket pocket with the fingers spread and \
+frozen, chin lifted toward the pillars.
+mara STANDS: close to the camera, in the aisle beside a parked car whose roof and wing \
+mirror pass between her waist and the camera. She is turned toward the pillars. Her \
+head and shoulders fill roughly a third of the image.
+watcher DOING: his right hand gripping the vertical corner of a pillar with the \
+fingers hooked around the edge, torso twisted about forty degrees from the hips, \
+holding the pillar corner between his face and her.
+watcher STANDS: behind a pillar part-way down the aisle, closer than the far end but \
+well behind her, on the same floor. He is looking at her past the pillar's edge. The \
+pillar covers everything below his chest and half his face -- one eye, one shoulder \
+and the hooked hand clear it. He is about a quarter of the image height.""",
         "questions": [
             "Is the man BEHIND A PILLAR with the pillar covering half his face?",
             "Do the two read as being in ONE SPACE at a believable distance apart?",
@@ -213,6 +252,17 @@ her face.
 watcher STANDS: on the same floor directly between her and the camera, near enough to \
 touch her, side-on, facing her. He is looking at her face. Nothing is in front of \
 either of them.""",
+        "world_size": """\
+mara DOING: her upper body recoiling backwards from the waist away from the extended \
+arm, her raised left forearm across her cheekbone, chin tucked in, eyes stretched wide.
+mara STANDS: on the aisle floor an arm's length from the man, side-on to the camera, \
+facing him. Her head and shoulder fill the image in close-up.
+watcher DOING: his weight on his front foot with the torso stooped forward and \
+twisted, his right arm extended at her chest height with the knuckles turned toward \
+her face.
+watcher STANDS: on the same floor directly between her and the camera, near enough to \
+touch her, side-on, facing her. He is looking at her face. Nothing is in front of \
+either of them. He is large and soft-focused, roughly a third of the image.""",
         "questions": [
             "Are they close enough to TOUCH, reacting to each other?",
             "Is the man BETWEEN the camera and her (nearer to camera than she is)?",
@@ -221,7 +271,7 @@ either of them.""",
     },
 }
 
-ARMS = ("frame", "world")
+ARMS = ("frame", "world", "world_size")
 
 
 def _build_prompt(scenario: dict[str, object], arm: str) -> str:
@@ -284,7 +334,7 @@ def main() -> None:
 
     # Which arm is which must not be readable off the filename.
     rng = random.Random(args.seed)
-    labels = ["a1", "a2"]
+    labels = [f"a{n}" for n in range(1, len(ARMS) + 1)]
     rng.shuffle(labels)
     key = dict(zip(labels, ARMS, strict=True))
 
@@ -360,9 +410,9 @@ def main() -> None:
 
     print(f"\nImages in {run_dir}")
     print(f"Score in {run_dir / 'SCORING.md'} -- blind; the key is blocking_key.json.")
-    print("\nIf the world-blocking arm places people on the floor at believable")
-    print("distances where the frame-coordinate arm does not, frame_position is")
-    print("asking the planner for a projection it cannot do, and should stop.")
+    print("\nThe question the third arm settles: if world_size matches frame, the")
+    print("lever is apparent size rather than frame coordinates, and world")
+    print("placement can replace frame_position as long as size comes with it.")
 
 
 if __name__ == "__main__":

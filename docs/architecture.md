@@ -108,7 +108,26 @@ three renderable terms, and does not author frame position at all -- the image m
 the projection. The latter is what a production's blocking diagram is, and this project
 already uses "coverage" and screen direction, which are that model's vocabulary.
 
-Two things have to be established before choosing, and one is already answered.
+**Partly answered, 2026-09-18.** `evals/blocking_space.py` ran the two architectures
+head to head -- twelve images, three scenarios from that same run, scored blind. World-space
+blocking **lost**: every image the owner picked out favourably was a frame-coordinate one,
+including the only image he said he would keep. But the finding that matters is that
+*distance failed in both arms* -- "far down at the unlit end, several pillars beyond her"
+and "a sliver in the far background" both rendered a figure about five feet away. The model
+is not converting either description into depth, so re-authoring placement in world-space
+does not fix the projection problem; it relocates it.
+
+The experiment also exposed an asymmetry it did not control, and that is now the live
+hypothesis: the frame arm carries an explicit apparent size ("roughly a twentieth of the
+image") because that is how `frame_position` is written, the world arm carried none, and
+apparent size is the strongest depth cue a rendered image has. The only two depth successes
+in the run sat in the arm holding the size. A third arm (`world_size` -- world placement plus
+the same size figures) is added and unrun. If it matches the frame arm, the lever is apparent
+size rather than frame coordinates, and world placement can replace `frame_position` provided
+size travels with it -- a far smaller change than giving `Location` a floor plan. Full result
+in [playbook/failure-taxonomy.md](./playbook/failure-taxonomy.md).
+
+Two things had to be established before choosing, and one was already answered.
 *Answered:* this is not caused by reference-image conditioning. 0044's live hypothesis was
 that conditioning overrides camera direction, but `run_20260918-221017` ran with
 `--references none` ([0050](./decisions/0050-no-reference-images-by-default.md)) and took
