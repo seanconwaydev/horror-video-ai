@@ -130,3 +130,15 @@ jobs:
             --genre horror --tone dread --candidates 2 --max-beats 2 \
             --time "present day" --place "an underground car park at night" \
             --description "a woman notices someone standing between the pillars"
+
+      # Stage 9 is a separate invocation by design (docs/decisions/0010),
+      # so the run above never reaches it. It reads a finished run
+      # directory back off disk, which is exactly what the previous step
+      # just produced -- the one place the two halves meet is the run-log
+      # shape, and nothing else checks that they still agree.
+      - name: Video generation runs offline against that run
+        run: |
+          set -e
+          run_dir=$(ls -d outputs/run_* | head -1)
+          echo "--- $run_dir"
+          uv run historical-video-ai --mock --yes --video-gen-from "$run_dir"

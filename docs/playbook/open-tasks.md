@@ -32,8 +32,8 @@ came out (0% to 100%, floor 84 to 85; then review.py's input loops took it to 86
 | the `--mock` fakes | `cli/mocks.py` | done |
 | run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | done |
 | review widgets (`confirm`, `review_*`, `edit_item_fields`) | `cli/review.py` | done |
-| `--video-gen-from` | `cli/video_gen.py` | next |
-| research + fact-check + premise conflict | `cli/research_flow.py` | to do |
+| `--video-gen-from` | `cli/video_gen.py` | done |
+| research + fact-check + premise conflict | `cli/research_flow.py` | next |
 | the beat generation loop | `cli/beats.py` | to do |
 | flags, arg parser, `main` | stays in `cli/app.py` | — |
 

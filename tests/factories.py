@@ -9,6 +9,13 @@ field different should say so at the call site.
 
 from historical_video_ai.stages.scene_planning import Beat, Character, Location
 
+#: A 1x1 PNG. Anything that only needs *a* real image file on disk uses
+#: this; the mock pipeline's own stand-in is 9:16 and lives in cli/mocks.py.
+TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+
 
 def a_character() -> Character:
     return Character(
