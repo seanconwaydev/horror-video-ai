@@ -5,29 +5,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from factories import a_beat, a_character, a_location
 from PIL import Image
 
 from historical_video_ai.cli.app import (
     _beat_gallery_dir,
     _check_video_prompt_practices,
-    _confirm,
     _generate_beats_with_choices,
     _generate_image_with_retries,
     _generate_scene_references,
     _link_beat_into_gallery,
     _load_previz_output,
     _load_video_gen_targets,
-    _prompt_if_missing,
     _resolve_flags,
     _resolve_premise_conflict,
-    _review_scene_plan,
     _run_research_and_fact_check,
     _run_video_generation_only,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.previz import PrevizResult
 from historical_video_ai.stages.research import Claim, FactSheet
-from historical_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
+from historical_video_ai.stages.scene_planning import Character, ScenePlan
 
 _TINY_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -45,26 +43,6 @@ def _fact_sheet_with_two_claims() -> FactSheet:
             Claim(text="Claim B", source="Source B"),
         ],
     )
-
-
-def test_confirm_auto_yes_returns_true_without_calling_input(monkeypatch):
-    def _explode(_prompt):
-        raise AssertionError("input() should not be called under auto_yes")
-
-    monkeypatch.setattr("builtins.input", _explode)
-
-    assert _confirm("Proceed?", auto_yes=True) is True
-
-
-def test_prompt_if_missing_auto_yes_raises_on_empty_value():
-    with pytest.raises(ValueError, match="Time is required"):
-        _prompt_if_missing(None, "Time", auto_yes=True)
-
-
-def test_prompt_if_missing_auto_yes_passes_through_a_given_value():
-    # auto_yes only matters when the value is missing -- an already-given
-    # value (e.g. from a CLI flag) is returned as-is.
-    assert _prompt_if_missing("July 1969", "Time", auto_yes=True) == "July 1969"
 
 
 def test_resolve_flags_auto_yes_accepts_uncertain_flags_without_calling_input(monkeypatch):
@@ -573,100 +551,11 @@ def test_image_review_loop_gives_up_after_max_attempts(tmp_path):
         assert (tmp_path / f"previz_attempt_{n}_rejected.png").exists()
 
 
-def _character() -> Character:
-    return Character(
-        id="influencer",
-        face_build="young woman, mid-20s",
-        hair="light brown wavy",
-        wardrobe_signature="white crop top, gray leggings",
-        wardrobe_flexible="accessories may vary",
-        distinguishing_detail="a glowing phone",
-    )
-
-
-def _location() -> Location:
-    return Location(
-        id="street",
-        architecture="stone-paved Pompeii street",
-        fixed_props="an archway entrance",
-        ambient_light="bright midday sun",
-    )
-
-
-def _beat(location_id="street", action="checks her phone") -> Beat:
-    return Beat(
-        location_id=location_id,
-        subject="The influencer",
-        action=action,
-        camera="medium shot",
-        lighting="bright midday sun",
-        audio="street ambience",
-        duration_seconds="3",
-    )
-
-
-def test_review_scene_plan_accepts_everything_under_auto_yes():
-    plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
-
-    reviewed = _review_scene_plan(plan, auto_yes=True)
-
-    assert reviewed == plan
-
-
-def test_review_scene_plan_recatches_a_beat_edited_to_an_unknown_location(monkeypatch):
-    # docs/decisions/0028: editing a beat's location_id to something that
-    # doesn't match any reviewed location must not silently drop all
-    # location grounding -- it should re-prompt for that beat specifically.
-    # Each failed round re-enters _review_item from the top (a)ccept/(e)dit
-    # choice, so recovering means editing *again* with a valid id, not
-    # just re-accepting the still-broken beat.
-    plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
-    responses = iter(
-        ["a"]  # location: accept
-        + ["e", "nonexistent-typo", "", "", "", "", "", "", ""]  # beat round 1: bad location_id
-        + ["e", "street", "", "", "", "", "", "", ""]  # beat round 2: fixed
-    )
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-
-    reviewed = _review_scene_plan(plan, auto_yes=False)
-
-    assert reviewed.beats[0].location_id == "street"
-
-
-def test_review_scene_plan_recatches_duplicate_location_ids_after_edit(monkeypatch):
-    # docs/decisions/0028: editing a second location's id to collide with
-    # the first must not silently corrupt character_refs/location_refs.
-    plan = ScenePlan(
-        characters=[],
-        locations=[_location(), Location(id="other", architecture="x", fixed_props="y", ambient_light="z")],
-        beats=[_beat()],
-    )
-    # Location 1: accept. Location 2: edit id to collide with location 1,
-    # blank the rest -- caught, re-reviewed: accept location 1, then edit
-    # location 2's id back to something unique.
-    responses = iter(
-        [
-            "a",  # location 1: accept
-            "e", "street", "", "", "",  # location 2: edit id to collide ("street")
-            "a",  # re-review location 1: accept
-            "e", "other-fixed", "", "", "",  # re-review location 2: fix id
-            "a",  # beat: accept
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _: next(responses))
-
-    reviewed = _review_scene_plan(plan, auto_yes=False)
-
-    ids = [loc.id for loc in reviewed.locations]
-    assert len(ids) == len(set(ids))
-    assert "other-fixed" in ids
-
-
 def test_generate_scene_references_generates_and_accepts(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "y")
 
     character_refs, location_refs = _generate_scene_references(
-        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _fake_image_fn},
         out_dir=tmp_path,
@@ -686,7 +575,7 @@ def test_generate_scene_references_passes_style_through_to_both_prompts(tmp_path
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
     _generate_scene_references(
-        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _capturing_image_fn},
         out_dir=tmp_path,
@@ -708,7 +597,7 @@ def test_generate_scene_references_regenerates_until_accepted(tmp_path, monkeypa
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
     character_refs, _ = _generate_scene_references(
-        ScenePlan(characters=[_character()], locations=[], beats=[_beat()]),
+        ScenePlan(characters=[a_character()], locations=[], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _counting_image_fn},
         out_dir=tmp_path,
@@ -770,7 +659,7 @@ def _generate_beats_with_choices_kwargs(out_dir, *, image_fn=_fake_image_fn, edi
 
 
 def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
-    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()])
     char_ref = _write_reference_png(tmp_path, "char_ref.png")
     loc_ref = _write_reference_png(tmp_path, "loc_ref.png")
 
@@ -796,7 +685,7 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
 def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_path, monkeypatch):
     responses = iter(["r", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     calls = {"n": 0}
 
     def _counting_image_fn(**kwargs):
@@ -818,11 +707,11 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
 
 def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(tmp_path, monkeypatch):
     # "e" to edit -- a beat's edit is restricted to action/camera/lighting
-    # (_BEAT_QUICK_EDIT_FIELDS), not every field -- then a new action,
+    # (BEAT_QUICK_EDIT_FIELDS), not every field -- then a new action,
     # blank for camera/lighting, then "a" to accept.
     responses = iter(["e", "smiles warmly", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -844,7 +733,7 @@ def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch
     # Four retries -- one more than _MAX_PREVIZ_ATTEMPTS -- then accept.
     responses = iter(["r", "r", "r", "r", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -858,7 +747,7 @@ def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch
 def test_an_unattended_run_accepts_the_first_attempt(tmp_path):
     """--yes has nobody to ask and nothing to grade the image, so it takes
     attempt 1 rather than spending the cap (docs/decisions/0055)."""
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -881,7 +770,7 @@ def test_generate_beats_with_choices_passes_style_through(tmp_path):
         captured_prompts.append(kwargs["prompt"])
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_capturing_image_fn)
 
     _generate_beats_with_choices(
@@ -905,7 +794,7 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
     # rather than burning the remaining automatic attempts.
     responses = iter(["g"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -924,7 +813,7 @@ def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_r
     # for the common case where the plan was mostly right.
     responses = iter(["f", "make her noticeably smaller", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -942,12 +831,12 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     # something baked into the beat's own text (not bad luck) needs an
     # edit-and-retry path, not just three guaranteed-to-fail blind
     # attempts. (e)dit at the on-rejection prompt, then blank through
-    # action/camera/lighting (_BEAT_QUICK_EDIT_FIELDS, keep as-is for
+    # action/camera/lighting (BEAT_QUICK_EDIT_FIELDS, keep as-is for
     # this test), should restart a fresh attempt cycle that can then be
     # accepted normally.
     responses = iter(["e", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -980,7 +869,7 @@ def test_generate_beats_with_choices_uses_first_character_for_every_beat(tmp_pat
         distinguishing_detail="a beard",
     )
     scene_plan = ScenePlan(
-        characters=[_character(), second_character], locations=[_location()], beats=[_beat()]
+        characters=[a_character(), second_character], locations=[a_location()], beats=[a_beat()]
     )
     char_ref = _write_reference_png(tmp_path, "char.png")
     second_char_ref = _write_reference_png(tmp_path, "char2.png")
@@ -1426,7 +1315,7 @@ def test_each_finished_beat_is_persisted_immediately(tmp_path):
     paid for. The images survived; the metadata pairing them with their
     prompts -- what --video-gen-from needs -- did not."""
     scene_plan = ScenePlan(
-        characters=[], locations=[_location()], beats=[_beat(), _beat(), _beat()]
+        characters=[], locations=[a_location()], beats=[a_beat(), a_beat(), a_beat()]
     )
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
     snapshots = []
@@ -1460,7 +1349,7 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     # An (e)dit restarts the cycle; a plain (r)etry now stays inside it.
     responses = iter(["e", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     _generate_beats_with_choices(
@@ -1523,7 +1412,7 @@ def test_rejected_reference_images_are_kept_not_overwritten(tmp_path, monkeypatc
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
     character_refs, _ = _generate_scene_references(
-        ScenePlan(characters=[_character()], locations=[], beats=[]),
+        ScenePlan(characters=[a_character()], locations=[], beats=[]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _image_fn},
         out_dir=tmp_path,
@@ -1541,7 +1430,7 @@ def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, m
     silently overwritten by the next one."""
     responses = iter(["r", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     _generate_beats_with_choices(
@@ -1557,7 +1446,7 @@ def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     was the one that spent money. Blank input is now simply re-prompted."""
     responses = iter(["", "   ", "g"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -1577,7 +1466,7 @@ def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "builtins.input", lambda prompt: "2" if "Keep which" in prompt else "a"
     )
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -1598,7 +1487,7 @@ def test_rejecting_every_candidate_rejects_the_attempt_not_the_beat(tmp_path, mo
     offer the usual choices rather than silently abandoning the beat."""
     responses = iter(["n", "g"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -1625,7 +1514,7 @@ def test_one_candidate_is_the_previous_behaviour(tmp_path, monkeypatch):
         return "a"
 
     monkeypatch.setattr("builtins.input", _capturing_input)
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     _generate_beats_with_choices(
@@ -1640,7 +1529,7 @@ def test_one_candidate_is_the_previous_behaviour(tmp_path, monkeypatch):
 def test_unattended_runs_take_the_first_candidate(tmp_path):
     """--yes has nobody to ask. Taking the first is arbitrary, and is at
     least honest about being arbitrary."""
-    scene_plan = ScenePlan(characters=[], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
 
     results = _generate_beats_with_choices(
@@ -1676,7 +1565,7 @@ def test_reference_generation_can_be_turned_off_per_kind(
         return SimpleNamespace(data=[SimpleNamespace(b64_json=_TINY_PNG_B64)])
 
     character_refs, location_refs = _generate_scene_references(
-        ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()]),
+        ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()]),
         previz_model="gemini/gemini-2.5-flash-image",
         image_kwargs={"image_fn": _image_fn},
         out_dir=tmp_path,
@@ -1702,7 +1591,7 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     def _edit_fn(**kwargs):
         raise AssertionError("image_edit must not be called with no references")
 
-    scene_plan = ScenePlan(characters=[_character()], locations=[_location()], beats=[_beat()])
+    scene_plan = ScenePlan(characters=[a_character()], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path, image_fn=_image_fn)
     kwargs["image_kwargs"]["edit_fn"] = _edit_fn
 
@@ -1731,33 +1620,3 @@ def test_references_default_to_none(monkeypatch):
     assert args.references == "none"
 
 
-def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
-    """staging is a list of dataclasses; the editor must prompt per
-    character rather than asking for a repr back (docs/decisions/0049)."""
-    from historical_video_ai.cli.app import _edit_item_fields
-    from historical_video_ai.stages.scene_planning import Beat, Staging
-
-    beat = Beat(
-        location_id="carpark", subject="w1", action="she reaches the car",
-        camera="medium", lighting="one hard strip light", audio="hum",
-        duration_seconds="4",
-        staging=[
-            Staging(character_id="w1", action="stands", frame_position="centre"),
-            Staging(character_id="fig1", action="stands", frame_position="left"),
-        ],
-    )
-    prompts = []
-
-    def _fake_input(prompt):
-        prompts.append(prompt)
-        # Rewrite only the antagonist's action; keep everything else.
-        return "leans around the pillar toward her" if "fig1 action" in prompt else ""
-
-    monkeypatch.setattr("builtins.input", _fake_input)
-    edited = _edit_item_fields(beat, fields=("staging",))
-
-    assert any("w1 action" in p for p in prompts)
-    assert any("fig1 in frame" in p for p in prompts)
-    assert edited.staging[0].action == "stands"
-    assert edited.staging[1].action == "leans around the pillar toward her"
-    assert edited.staging[1].frame_position == "left"

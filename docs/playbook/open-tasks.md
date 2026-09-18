@@ -25,14 +25,14 @@ effectively all of the uncovered code in the repo.
 Be clear about what the split does and does not buy: moving code changes
 no coverage number at all. The floor rises because a module small enough
 to test on its own gets tested — which is what happened when `mocks.py`
-came out (0% to 100%, floor 84 to 85).
+came out (0% to 100%, floor 84 to 85; then review.py's input loops took it to 86).
 
 | Seam | Lands in | Status |
 |---|---|---|
 | the `--mock` fakes | `cli/mocks.py` | done |
 | run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | done |
-| review widgets (`_confirm`, `_review_*`, `_edit_item_fields`) | `cli/review.py` | next |
-| `--video-gen-from` | `cli/video_gen.py` | after review.py, which it uses |
+| review widgets (`confirm`, `review_*`, `edit_item_fields`) | `cli/review.py` | done |
+| `--video-gen-from` | `cli/video_gen.py` | next |
 | research + fact-check + premise conflict | `cli/research_flow.py` | to do |
 | the beat generation loop | `cli/beats.py` | to do |
 | flags, arg parser, `main` | stays in `cli/app.py` | — |
