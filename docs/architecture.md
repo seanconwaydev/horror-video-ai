@@ -80,6 +80,45 @@ the previz-image level — requires a new provider (Flux via Replicate, ~$0.03-0
 comparable to current previz cost) — but the video-stage angle looks like the more direct
 fit and adds no new image provider.
 
+**Camera, character and environment are authored in two different spaces, and nothing
+reconciles them.** The largest open design question this project has. Where a character
+appears in the frame is a *projection* -- a function of where they stand in the world,
+where the camera is, and the lens -- but the planner is asked to author all three legs
+independently. Character world position is demanded in `action` prose ("near the top step"
+vs "three steps from the bottom"); character frame position is authored separately in
+`frame_position` ("upper-left of frame"); and `camera` was deliberately stripped of any
+world position by [0044](./decisions/0044-camera-specified-at-a-granularity-models-follow.md),
+which forbids it for good measured reasons. So two legs are world-space, one is
+frame-space, the thing that would connect them is frame-relative only, and no validator
+compares any of them. They can only agree if the planning model performs the projection
+correctly in its head.
+
+Observed directly (`run_20260918-221017`, `playbook/failure-taxonomy.md`): a beat placed a
+character "far background, **upper-left of frame**" under a `wide, low, from behind`
+camera. Far background down a receding aisle projects near the vanishing point, roughly
+frame centre. The image model obeyed the frame instruction, found nothing at ceiling
+height to hide the figure behind, and invented a concrete slab. The project owner's
+summary: "as long as that's true, these will never turn out good on purpose, only luck."
+
+Two coherent architectures exist and the current one is neither. **Frame-space authoring**
+makes `frame_position` authoritative and derives or drops the world-space prose --
+storyboarding. **World-space blocking** authors where each character stands relative to
+the location's features and to each other, plus where each looks, plus a camera in 0044's
+three renderable terms, and does not author frame position at all -- the image model does
+the projection. The latter is what a production's blocking diagram is, and this project
+already uses "coverage" and screen direction, which are that model's vocabulary.
+
+Two things have to be established before choosing, and one is already answered.
+*Answered:* this is not caused by reference-image conditioning. 0044's live hypothesis was
+that conditioning overrides camera direction, but `run_20260918-221017` ran with
+`--references none` ([0050](./decisions/0050-no-reference-images-by-default.md)) and took
+the plain text-to-image branch, and the conflict appeared anyway. `evals/camera_obedience.py`
+is still worth running to find out whether conditioning makes it *worse*, but it is no
+longer the prior question. *Unanswered:* `Location` has no geometry either -- it is
+`architecture`, `fixed_props` and `ambient_light`, all prose -- so world-space blocking has
+no floor plan to position anyone against. Something has to carry the space itself before a
+character can be placed in it.
+
 **Documentation and instruction rot.** Several decisions have outlived the premise that
 justified them, and the pattern is now frequent enough to be worth a deliberate sweep
 rather than case-by-case discovery: a dead model constant survived a month past
