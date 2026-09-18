@@ -33,8 +33,8 @@ came out (0% to 100%, floor 84 to 85; then review.py's input loops took it to 86
 | run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | done |
 | review widgets (`confirm`, `review_*`, `edit_item_fields`) | `cli/review.py` | done |
 | `--video-gen-from` | `cli/video_gen.py` | done |
-| research + fact-check + premise conflict | `cli/research_flow.py` | next |
-| the beat generation loop | `cli/beats.py` | to do |
+| research + fact-check + the flag gate and refusal path | `cli/research_flow.py` | done |
+| the beat generation loop | `cli/beats.py` | next, and last |
 | flags, arg parser, `main` | stays in `cli/app.py` | — |
 
 Order is set by import direction, not by size: `video_gen.py` calls the
