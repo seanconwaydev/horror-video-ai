@@ -30,20 +30,33 @@ came out (0% to 100%, floor 84 to 85).
 | Seam | Lands in | Status |
 |---|---|---|
 | the `--mock` fakes | `cli/mocks.py` | done |
-| `--video-gen-from` | `cli/video_gen.py` | next |
-| review widgets (`_confirm`, `_review_*`, `_edit_item_fields`) | `cli/review.py` | to do |
-| run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | to do |
+| run dirs, slugs, run-log read/write, fixtures | `cli/runlog.py` | done |
+| review widgets (`_confirm`, `_review_*`, `_edit_item_fields`) | `cli/review.py` | next |
+| `--video-gen-from` | `cli/video_gen.py` | after review.py, which it uses |
 | research + fact-check + premise conflict | `cli/research_flow.py` | to do |
 | the beat generation loop | `cli/beats.py` | to do |
 | flags, arg parser, `main` | stays in `cli/app.py` | — |
 
-One hazard to keep handling: `tests/test_cli.py` (2,000 lines) imports
-private names from the module directly and monkeypatches
-`"historical_video_ai.cli.app._project_root"` by string in three places.
-When a patched function moves, patching the old binding stops affecting
-the real caller and the test goes green while testing nothing — so the
-test file has to be split alongside each move, not papered over with
-re-exports from `__init__`.
+Order is set by import direction, not by size: `video_gen.py` calls the
+run-log helpers and the confirm prompt, so those seams come out first or
+the two modules import each other.
+
+One hazard to keep handling: `tests/test_cli.py` imports private names
+from the module directly and monkeypatches them by string
+(`"historical_video_ai.cli.app._project_root"` in three places). The test
+file has to be split alongside each move rather than papered over with
+re-exports from `__init__` — and that is the reason why. `monkeypatch.setattr`
+on a string target raises when the attribute is absent, so a moved
+function fails loudly; but a re-export keeps the old name alive, the patch
+lands on a binding nothing calls, and the test passes while testing
+nothing.
+
+Two things to get right when renaming during a move, both of which went
+wrong once and were caught by the test run: rename whole identifiers only
+(a plain search-and-replace of `_load_fixture` rewrites
+`test_load_fixture_reconstructs_...` into `testload_fixture_...`, which
+pytest still collects), and remember that a module which imports a name
+holds its own binding — patching the source module does not reach it.
 
 ## 2. Decide the prompt rule registry
 

@@ -64,11 +64,20 @@ from historical_video_ai.cli.mocks import (
     mock_prediction,
     mock_scene_planning_completion,
 )
+from historical_video_ai.cli.runlog import (
+    load_fact_sheet_from_fixture,
+    load_fixture,
+    new_run_dir,
+    next_archive_path,
+    read_log,
+    safe_path_component,
+    slugify,
+    write_log,
+)
 from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import (
     ClaimFlag,
     FactCheckResult,
-    PremiseConflict,
     run_fact_check_stage,
 )
 from historical_video_ai.stages.moderation import run_moderation_policy_check
@@ -430,7 +439,7 @@ def _record_research_claims(
     """
     log["research_model"] = research_model
     log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
 
 def _run_research_and_fact_check(
@@ -615,18 +624,6 @@ def _resolve_premise_conflict(
     return new_fact_sheet, new_fact_check_result, "corrected"
 
 
-def _safe_path_component(value: str) -> str:
-    """Make a scene-plan id safe to use as a directory name.
-
-    Ids come from a planning model and can be changed by hand at review
-    time, so they are not guaranteed to be single path components. An id
-    containing a separator -- "a/../../evil" being the worst shape --
-    resolved outside the run directory entirely.
-    """
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")
-    return cleaned or "unnamed"
-
-
 def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     """The plan text a candidate image is being judged against.
 
@@ -688,32 +685,6 @@ def _choose_candidate(
             f"  Keep which? [1-{len(candidates)}] or (n)one of them: "
         ).strip().lower()
     return None if choice == "n" else candidates[int(choice) - 1]
-
-
-def _next_archive_path(out_dir: Path, prefix: str, *, suffix: str = "rejected") -> Path:
-    """First unused `<prefix>_<n>_rejected.png` in `out_dir`.
-
-    Deliberately not derived from the retry loop's own attempt counter.
-    A (r)eroll, or an (e)dit-and-retry whose attempts then fail, starts a
-    *fresh* `_generate_image_with_retries` call against the same directory
-    -- its counter restarts at 1, so deriving the name from it reused
-    `<prefix>_1_rejected.png`, and `Path.rename` replaces the destination
-    silently on POSIX. That destroyed the earlier cycle's already-paid-for
-    images with no warning, found in a real run.
-
-    The index is therefore a monotonic count of rejected images kept for
-    this beat, not the "attempt N/3" shown while generating -- those are
-    genuinely different things once a beat has had more than one cycle.
-    Each attempt's own record in the run log carries its real image path,
-    so nothing depends on the two agreeing.
-    """
-    # Globs on the index rather than the full name: the same index must not
-    # be reused under a different suffix, or a superseded image would
-    # overwrite a rejected one with the same number.
-    n = 1
-    while any(out_dir.glob(f"{prefix}_{n}_*.png")):
-        n += 1
-    return out_dir / f"{prefix}_{n}_{suffix}.png"
 
 
 def _generate_image_with_retries(
@@ -894,7 +865,7 @@ def _generate_image_with_retries(
 
         # Archived rather than overwritten: the human passed over this
         # image, and the next attempt must not silently destroy it.
-        archived_path = _next_archive_path(out_dir, archive_prefix, suffix="rejected")
+        archived_path = next_archive_path(out_dir, archive_prefix, suffix="rejected")
         previz_result.image_path.rename(archived_path)
         attempts.append(
             {
@@ -921,159 +892,6 @@ def _generate_image_with_retries(
 
     print(f"\nNo image kept for this beat after {len(attempts)} attempt(s).")
     return None, attempts
-
-
-def _slugify(text: str, max_length: int = 40) -> str:
-    """Turn free text into a short, filesystem-safe fragment for a run
-    directory name -- lowercase, every run of non-alphanumeric characters
-    collapsed to a single hyphen, trimmed to `max_length` without cutting
-    a word in half where a hyphen boundary is nearby, and hyphens stripped
-    from both ends.
-
-    Returns "" if nothing usable remains (empty input, or input that's
-    entirely punctuation) -- callers should treat an empty slug as "no
-    context available" rather than tack on a trailing separator with
-    nothing after it.
-    """
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    if len(slug) <= max_length:
-        return slug
-    truncated = slug[:max_length]
-    if "-" in truncated:
-        truncated = truncated.rsplit("-", 1)[0]
-    return truncated
-
-
-def _project_root() -> Path:
-    """Walk up from this file looking for pyproject.toml, so outputs/
-    always lands in the same place regardless of the directory the command
-    was invoked from. (Previously outputs/ was created relative to the
-    current working directory, which silently nested outputs/outputs/ if
-    you happened to be inside a prior run's outputs/ folder when you ran
-    the command again.)
-
-    Raises RuntimeError if no ancestor has a pyproject.toml -- fail loud
-    rather than guess at a directory (e.g. a fixed parents[2] offset) that
-    was never actually confirmed to be the project root, which would risk
-    reintroducing the exact silent-nesting bug this function exists to
-    prevent."""
-    here = Path(__file__).resolve()
-    for candidate in (here, *here.parents):
-        if (candidate / "pyproject.toml").exists():
-            return candidate
-    raise RuntimeError(
-        f"Could not find pyproject.toml in any ancestor directory of {here} -- "
-        "outputs/ needs a real, confirmed project root."
-    )
-
-
-def _run_dir(slug: str | None = None) -> Path:
-    """Create (and return) this run's output directory, named
-    `run_<timestamp>` or `run_<timestamp>_<slug>` if `slug` is given and
-    non-empty. The timestamp alone told you *when* a run happened but
-    nothing about *what* it was -- telling scenes apart meant opening
-    run_log.json in each candidate folder. `slug` should already be a
-    filesystem-safe fragment (see `_slugify`) -- this function doesn't
-    sanitize it itself, so callers building one from free text must slugify
-    it first."""
-    run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    base = f"run_{run_id}_{slug}" if slug else f"run_{run_id}"
-    outputs = _project_root() / "outputs"
-
-    # Second precision alone is not unique: re-running the same command
-    # right after a failed attempt -- routine while iterating -- lands in
-    # the same second with the same slug, and `exist_ok=True` then let the
-    # second run write its images and log straight over the first one's.
-    # A numeric suffix keeps the readable name while making a collision
-    # impossible. (video_generation.py already reached for microsecond
-    # precision against this same hazard; this keeps folder names legible
-    # instead.)
-    dir_name, n = base, 1
-    while (outputs / dir_name).exists():
-        n += 1
-        dir_name = f"{base}-{n}"
-
-    d = outputs / dir_name
-    d.mkdir(parents=True)
-    return d
-
-
-def _write_log(out_dir: Path, log: dict) -> None:
-    (out_dir / "run_log.json").write_text(json.dumps(log, indent=2, default=str))
-
-
-def _read_log(out_dir: Path) -> dict:
-    return json.loads((out_dir / "run_log.json").read_text())
-
-
-def _load_fact_sheet_from_fixture(path: Path) -> FactSheet:
-    """Reconstruct just the FactSheet (time/place/description/claims) from
-    a saved run_log.json -- the part every fixture has, whether or not
-    fact-check ever ran against it (docs/decisions/0015 persists research
-    before fact-check, so a run that crashed at fact-check still has a
-    usable fixture here, just not a full one -- see `_load_fixture`).
-
-    Raises ValueError if time/place/description are missing or empty
-    (docs/decisions/0006), and KeyError as-is if research_claims is absent.
-    """
-    data = json.loads(path.read_text())
-    for required_field in ("time", "place", "description"):
-        if not data.get(required_field):
-            raise ValueError(f"Fixture {path} is missing a non-empty '{required_field}'")
-    claims = [Claim(**c) for c in data["research_claims"]]
-    return FactSheet(
-        time=data["time"],
-        place=data["place"],
-        description=data["description"],
-        claims=claims,
-    )
-
-
-def _load_fixture(path: Path) -> FactCheckResult:
-    """Reconstruct a real FactSheet + FactCheckResult from a previously
-    saved run_log.json (or anything matching its shape), so research and
-    fact-check don't need to run -- and cost nothing -- again. Requires the
-    fixture to have a completed fact-check result already (a
-    `fact_check_flags` key) -- for a fixture that only has research so
-    far, use `_load_fact_sheet_from_fixture` and run fact-check for real.
-
-    Raises FileNotFoundError / KeyError as-is if the fixture is missing or
-    malformed, rather than silently degrading into an empty scene.
-    """
-    data = json.loads(path.read_text())
-    fact_sheet = _load_fact_sheet_from_fixture(path)
-    claims = fact_sheet.claims
-    flags = [ClaimFlag(**f) for f in data["fact_check_flags"]]
-
-    # Same invariant fact_check.py's _parse_flags enforces on a live model
-    # response -- a fixture captured before that validation existed (or
-    # hand-edited) could still have a flag whose claim_text doesn't match
-    # any claim verbatim, which would otherwise crash _resolve_flags with a
-    # raw KeyError instead of a clear, actionable error.
-    known_claim_texts = {c.text for c in claims}
-    for flag in flags:
-        if flag.claim_text not in known_claim_texts:
-            raise ValueError(
-                f"Fixture {path} has a flag whose claim_text doesn't exactly "
-                f"match any research claim: {flag.claim_text!r}"
-            )
-
-    raw_premise_conflict = data.get("premise_conflict")
-    premise_conflict = (
-        PremiseConflict(**raw_premise_conflict) if raw_premise_conflict is not None else None
-    )
-    # docs/decisions/0027: read back alongside premise_conflict -- a
-    # fixture saved before this ADR won't have this key, so .get() rather
-    # than a required field, same graceful-absence handling as
-    # premise_conflict itself.
-    acknowledged_fiction = data.get("acknowledged_fiction")
-
-    return FactCheckResult(
-        fact_sheet=fact_sheet,
-        flags=flags,
-        premise_conflict=premise_conflict,
-        acknowledged_fiction=acknowledged_fiction,
-    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1201,7 +1019,7 @@ def _record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> N
     multi-beat run, so a beat's video/moderation history stays co-located
     with that beat's own record instead of mixed into one flat list
     across every beat."""
-    log = _read_log(target.run_dir)
+    log = read_log(target.run_dir)
     if target.beat_index is None:
         log.setdefault(key, []).append(entry)
     else:
@@ -1209,7 +1027,7 @@ def _record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> N
             if beat_result["index"] == target.beat_index:
                 beat_result.setdefault(key, []).append(entry)
                 break
-    _write_log(target.run_dir, log)
+    write_log(target.run_dir, log)
 
 
 def _load_previz_output(run_dir: Path, *, prompt_override: str | None = None) -> tuple[Path, str]:
@@ -1466,7 +1284,7 @@ def _generate_scene_references(
             result = run_reference_image_stage(
                 prompt,
                 model=previz_model,
-                output_dir=out_dir / f"character_{_safe_path_component(character.id)}",
+                output_dir=out_dir / f"character_{safe_path_component(character.id)}",
                 on_transient_retry=lambda n, exc: print(
                     f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
                 ),
@@ -1480,7 +1298,7 @@ def _generate_scene_references(
             # References wrote to a fixed "reference.png", so every
             # rejected one was destroyed with no way to compare or go
             # back -- while beats had archived their rejects all along.
-            archived = _next_archive_path(result.image_path.parent, "reference_attempt")
+            archived = next_archive_path(result.image_path.parent, "reference_attempt")
             result.image_path.rename(archived)
             print(f"Previous attempt kept at {archived.name}. Regenerating...")
 
@@ -1492,7 +1310,7 @@ def _generate_scene_references(
             result = run_reference_image_stage(
                 prompt,
                 model=previz_model,
-                output_dir=out_dir / f"location_{_safe_path_component(location.id)}",
+                output_dir=out_dir / f"location_{safe_path_component(location.id)}",
                 on_transient_retry=lambda n, exc: print(
                     f"Transient error ({exc}) -- retrying (attempt {n + 1})..."
                 ),
@@ -1502,7 +1320,7 @@ def _generate_scene_references(
             if _confirm("Accept this reference?", auto_yes=auto_yes):
                 location_refs[location.id] = result.image_path
                 break
-            archived = _next_archive_path(result.image_path.parent, "reference_attempt")
+            archived = next_archive_path(result.image_path.parent, "reference_attempt")
             result.image_path.rename(archived)
             print(f"Previous attempt kept at {archived.name}. Regenerating...")
 
@@ -2094,16 +1912,16 @@ def main() -> None:
         # research before fact-check runs) -- that's a real, valid,
         # cheaper-to-resume case, not a malformed fixture: run fact-check
         # for real against the loaded research instead of requiring a full
-        # fixture. `_load_fixture` needs a completed fact-check result;
+        # fixture. `load_fixture` needs a completed fact-check result;
         # peek at the raw fixture first to tell which case this is.
         has_fact_check = "fact_check_flags" in json.loads(args.fixture.read_text())
 
-        fact_sheet = _load_fact_sheet_from_fixture(args.fixture)
+        fact_sheet = load_fact_sheet_from_fixture(args.fixture)
         time, place, description = fact_sheet.time, fact_sheet.place, fact_sheet.description
-        # Computed here, not before the scene is known -- see _run_dir's
+        # Computed here, not before the scene is known -- see new_run_dir's
         # docstring on why the directory name now carries a content hint,
         # not just a timestamp.
-        out_dir = _run_dir(_slugify(description))
+        out_dir = new_run_dir(slugify(description))
         _beat_gallery_dir(out_dir)  # exists from the very start -- see its own docstring
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
@@ -2115,7 +1933,7 @@ def main() -> None:
         log["tone"] = args.tone
 
         if has_fact_check:
-            fact_check_result = _load_fixture(args.fixture)
+            fact_check_result = load_fixture(args.fixture)
             print(f"\n--- research (loaded from fixture: {args.fixture}) ---")
             for c in fact_sheet.claims:
                 print(f"- {c.text} [source: {c.source}]")
@@ -2139,7 +1957,7 @@ def main() -> None:
                 fact_sheet=fact_sheet,
             )
             if result is None:
-                _write_log(out_dir, log)
+                write_log(out_dir, log)
                 print(f"Stopped by user. Run artifacts saved in {out_dir}")
                 return
             fact_sheet, fact_check_result = result
@@ -2149,7 +1967,7 @@ def main() -> None:
         description = _prompt_if_missing(
             args.description, "What the main character does", auto_yes=args.yes
         )
-        out_dir = _run_dir(_slugify(description))
+        out_dir = new_run_dir(slugify(description))
         _beat_gallery_dir(out_dir)  # exists from the very start -- see its own docstring
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         # docs/decisions/0035: genre, not a binary flag, is what determines
@@ -2183,7 +2001,7 @@ def main() -> None:
                 ),
             )
             if result is None:
-                _write_log(out_dir, log)
+                write_log(out_dir, log)
                 print(f"Stopped by user. Run artifacts saved in {out_dir}")
                 return
             fact_sheet, fact_check_result = result
@@ -2196,7 +2014,7 @@ def main() -> None:
     log["premise_conflict"] = (
         dataclasses.asdict(original_premise_conflict) if original_premise_conflict else None
     )
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     resolved = _resolve_premise_conflict(
         fact_sheet,
@@ -2213,7 +2031,7 @@ def main() -> None:
     )
     if resolved is None:
         log["stopped_reason"] = "premise_conflict_unresolved"
-        _write_log(out_dir, log)
+        write_log(out_dir, log)
         print(f"Stopped. Run artifacts saved in {out_dir}")
         return
     fact_sheet, fact_check_result, resolution_type = resolved
@@ -2235,17 +2053,17 @@ def main() -> None:
     log["description"] = fact_sheet.description
     log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
     log["fact_check_flags"] = [dataclasses.asdict(f) for f in fact_check_result.flags]
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     resolved_fact_sheet = _resolve_flags(fact_sheet, fact_check_result.flags, auto_yes=args.yes)
     if resolved_fact_sheet is None:
         log["stopped_reason"] = "contradicted_flag_unresolved"
-        _write_log(out_dir, log)
+        write_log(out_dir, log)
         print(f"Stopped. Run artifacts saved in {out_dir}")
         return
     fact_check_result = dataclasses.replace(fact_check_result, fact_sheet=resolved_fact_sheet)
     log["research_claims"] = [dataclasses.asdict(c) for c in resolved_fact_sheet.claims]
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     # Wording (and whether to ask at all) depends on whether there's
     # actually a fact-check result to confirm -- a genre that skipped
@@ -2278,11 +2096,11 @@ def main() -> None:
         **scene_planning_kwargs,
     )
     log["scene_plan"] = dataclasses.asdict(scene_plan)
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     scene_plan = _review_scene_plan(scene_plan, auto_yes=args.yes)
     log["scene_plan"] = dataclasses.asdict(scene_plan)
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     previz_model = get_stage_model("previz")
     log["previz_model"] = previz_model
@@ -2316,7 +2134,7 @@ def main() -> None:
     )
     if not _confirm("Proceed with reference and beat image generation?", auto_yes=args.yes):
         log["stopped_reason"] = "declined_before_image_generation"
-        _write_log(out_dir, log)
+        write_log(out_dir, log)
         print(f"Stopped by user. Run artifacts saved in {out_dir}")
         return
 
@@ -2345,13 +2163,13 @@ def main() -> None:
         )
     log["character_references"] = {k: str(v) for k, v in character_refs.items()}
     log["location_references"] = {k: str(v) for k, v in location_refs.items()}
-    _write_log(out_dir, log)
+    write_log(out_dir, log)
 
     def _persist_beats(results: list[dict]) -> None:
         """Write the log after every finished beat, so an interrupted run
         still has a record of what it already produced and paid for."""
         log["previz_beats"] = results
-        _write_log(out_dir, log)
+        write_log(out_dir, log)
 
     beat_results = _generate_beats_with_choices(
         scene_plan,
