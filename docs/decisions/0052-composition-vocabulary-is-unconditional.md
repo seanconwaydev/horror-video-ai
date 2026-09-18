@@ -7,6 +7,11 @@ Date: 2026-09-16
 Accepted. Narrows [0036](0036-genre-resolves-to-early-routing-signals.md), which
 stays in force for everything else it routes.
 
+Rule text superseded by [0054](./0054-one-fact-per-field.md): the decision
+to make composition unconditional stands, but asking for it as prose in
+`camera` contradicted [0044](./0044-camera-specified-at-a-granularity-models-follow.md)
+and produced every camera failure in the 2026-09-17 run.
+
 ## Context
 
 Found by the repo audit (`docs/playbook/repo-audit-brief.md`), not by a

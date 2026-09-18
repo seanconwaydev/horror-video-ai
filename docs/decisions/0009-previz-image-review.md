@@ -5,8 +5,11 @@ Date: 2026-08-24
 Status: Accepted
 
 Superseded by [0043](./0043-one-review-prompt-the-human-decides.md) on the review
-flow and by [0051](./0051-remove-the-single-image-previz-flow.md) on the
-single-image flow it reviewed.
+flow, by [0051](./0051-remove-the-single-image-previz-flow.md) on the
+single-image flow it reviewed, and finally by
+[0055](./0055-delete-the-automated-previz-reviewer.md), which deletes the
+automated review outright -- measured agreeing with the owner on 56% of 78
+images against 79% for accepting everything.
 
 ## Context
 

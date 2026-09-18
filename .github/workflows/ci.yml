@@ -10,9 +10,23 @@
 # for the pipeline, --dry-run for the eval scripts.
 name: CI
 
+# Every branch, not just main and open PRs. A branch with no PR matched
+# neither trigger before, so five commits (ADRs 0054-0056, the mypy
+# expansion, the coverage floor) shipped with zero CI runs while being
+# reported as verified -- exactly the failure mode this workflow exists
+# to catch.
+#
+# A branch that also has a PR open now runs twice, once per event. That
+# is deliberate: the `pull_request` run tests the merge with main, which
+# the `push` run does not, and the concurrency groups below are keyed on
+# `github.ref` -- distinct per event (`refs/heads/x` vs
+# `refs/pull/N/merge`), so the two never cancel each other. Cancelling
+# the duplicate would leave a "Cancelled" check sitting on every PR, and
+# a check nobody can read at a glance is the thing this repo keeps
+# getting wrong.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
 
 # A new push to the same branch makes the previous run's answer obsolete.
@@ -59,6 +73,12 @@ jobs:
       # would be the same mistake in a new place.
       - name: Types
         run: uv run mypy
+
+      # A floor to stop coverage sliding, not a target to chase. What it
+      # does not see: main(), which the smoke job below runs end to end
+      # but not under coverage.
+      - name: Coverage
+        run: uv run pytest --cov --cov-report=term-missing
 
   smoke:
     name: offline smoke
@@ -111,3 +131,15 @@ jobs:
             --genre horror --tone dread --candidates 2 --max-beats 2 \
             --time "present day" --place "an underground car park at night" \
             --description "a woman notices someone standing between the pillars"
+
+      # Stage 9 is a separate invocation by design (docs/decisions/0010),
+      # so the run above never reaches it. It reads a finished run
+      # directory back off disk, which is exactly what the previous step
+      # just produced -- the one place the two halves meet is the run-log
+      # shape, and nothing else checks that they still agree.
+      - name: Video generation runs offline against that run
+        run: |
+          set -e
+          run_dir=$(ls -d outputs/run_* | head -1)
+          echo "--- $run_dir"
+          uv run historical-video-ai --mock --yes --video-gen-from "$run_dir"

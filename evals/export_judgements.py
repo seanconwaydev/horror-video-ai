@@ -74,8 +74,16 @@ def _beat_rows(run_path: Path, log: dict) -> Iterator[dict]:
         # A beat with no image and no attempt that the human accepted was
         # given up on. `image_path` is None for both that and a run cut off
         # mid-beat, so it alone can't distinguish them.
-        gave_up = beat_result.get("image_path") is None
+        # An interrupted beat also has no image_path, but the human never
+        # ruled on it -- treating that as a give-up would invent a label
+        # (docs/decisions/0056).
+        gave_up = beat_result.get("image_path") is None and not beat_result.get("in_progress")
         for attempt in beat_result.get("attempts", []):
+            # `accepted: None` means the attempt was recorded before the
+            # human answered. Its candidates carry no judgement at all, so
+            # they are not negatives.
+            if attempt.get("accepted") is None:
+                continue
             candidates = attempt.get("candidates") or []
             # Before docs/decisions/0053 this was a list of bare path
             # strings with no prompt attached. Those images exist on disk

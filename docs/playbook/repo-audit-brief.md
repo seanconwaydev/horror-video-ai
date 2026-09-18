@@ -149,13 +149,12 @@ capability, with ADR 0048's constraint that only a decidable predicate may
 fail a run, and ADR 0049's lesson that *an instruction which already
 exists and is losing should move tier rather than be sharpened*.
 
-Three specific suspects: the lit-screen rules (a phone's brightness,
-hiding a screen face from camera) read as instance patches from a specific
-failure, and it is unclear they earn their place in horror; the "character
-who doesn't belong to the historical setting (a modern-day visitor, time
-traveler)" wardrobe rule is written for a historical pipeline this project
-no longer is; and 0052's own new rule should be judged alongside the rest
-rather than grandfathered in because it is recent.
+Three specific suspects were named here. All three were resolved on
+2026-09-18 by [ADR 0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md):
+the two lit-screen rules and the historical-visitor wardrobe rule are
+deleted, and 0052's own rule is deliberately kept, since deleting it
+unmeasured would be the same mistake in the other direction. The prompt is
+31 rules. The remaining 31 have still not been audited one by one.
 
 Order matters as much as content: in the failure ADR 0049 diagnosed, a
 buried conditional clause lost to a more concrete, more emphatic rule
@@ -179,7 +178,10 @@ has entries logged as open that may have been fixed since.
 `docs/dry-runs/` holds one historical dry run. Both may be worth keeping
 as history — but decide deliberately rather than leaving them ambiguous.
 
-**`previz_review`'s future.** Measured as anti-correlated with human
-judgement, and it still gates the retry loop. Rescope it, grade on a
-scale, or drop it. This is a decision, not an audit item, but the audit
-should not silently pass over it.
+**`previz_review`'s future — closed.** Measured against 78 images the
+owner had already ruled on: 56% agreement, against 79% for accepting
+everything, and it rejected 31 of the 62 images the owner kept. Deleted by
+[ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md). The
+earlier "exact reverse" claim measured a different task (ranking by
+quality) and was overstated; on accept/reject it is weakly positive but
+still worse than no gate.

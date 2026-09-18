@@ -44,6 +44,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import FactCheckResult
@@ -148,7 +149,7 @@ STYLE: {style} No on-screen text, no logos, no watermark."""
 
 _SHEETS = {"dramatic": _DRAMATIC_SHEET, "portrait": _PORTRAIT_SHEET, "dramatic_locked": _DRAMATIC_LOCKED_SHEET}
 
-ARMS = {
+ARMS: dict[str, dict[str, Any]] = {
     "current": {"character_ref": "neutral", "location_ref": True},
     "portrait": {"character_ref": "portrait", "location_ref": True},
     "dramatic_locked": {"character_ref": "dramatic_locked", "location_ref": True},
@@ -301,9 +302,9 @@ def main() -> None:
         for index, beat in enumerate(beats, start=1):
             beat_result = run_beat_image_stage(
                 beat,
-                character=character,
+                characters=[character],
                 location=locations_by_id.get(beat.location_id),
-                character_reference=character_ref,
+                character_references=[character_ref] if character_ref else (),
                 location_reference=location_refs.get(beat.location_id),
                 style=STYLE,
                 model=previz_model,
@@ -316,7 +317,7 @@ def main() -> None:
             review = run_previz_review_stage(
                 final,
                 fact_check,
-                character=character,
+                characters=[character],
                 beat=beat,
                 requires_grounding=False,
                 model=review_model,

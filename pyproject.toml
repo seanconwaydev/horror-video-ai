@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "AI pipeline for generating historical educational YouTube videos, stage by stage with human review gates."
 requires-python = ">=3.11"
 dependencies = [
-    "litellm",
+    "litellm>=1.98.0",
     "pyyaml",
     "python-dotenv",
     "pillow",
@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "mypy>=2.3.1",
     "pytest",
+    "pytest-cov>=7.1.0",
     "ruff",
     "types-pyyaml>=6.0.12.20260906",
 ]
@@ -46,6 +47,21 @@ extend-select = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+# A floor, not a target: it exists to stop coverage sliding, not to chase
+# a number. It went 84 -> 86 over the cli.py split, one seam at a time --
+# moving code changes no coverage number by itself, but a module small
+# enough to test on its own gets tested, and the floor follows.
+#
+# What is left uncovered is almost entirely main(), which CI's smoke job
+# does run end to end -- offline, every push -- but under `uv run
+# historical-video-ai`, not under pytest, so none of it is measured here.
+[tool.coverage.run]
+source = ["src/historical_video_ai"]
+
+[tool.coverage.report]
+fail_under = 86
+show_missing = true
+
 # ruff's ANN rules enforce that annotations *exist*; nothing checked they
 # were *true*, so the project paid the cost of writing them without
 # collecting the benefit. Turning mypy on found 25 errors, including a
@@ -57,7 +73,7 @@ testpaths = ["tests"]
 # (pytest fixtures are conventionally unannotated), so checking it would
 # be noise.
 [tool.mypy]
-files = ["src"]
+files = ["src", "evals", "tests"]
 python_version = "3.11"
 
 # litellm ships no usable types for its response objects. Stage code

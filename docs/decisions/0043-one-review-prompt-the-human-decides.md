@@ -4,6 +4,11 @@ Date: 2026-09-16
 
 Status: Accepted
 
+Superseded in part by [0055](./0055-delete-the-automated-previz-reviewer.md):
+its "previz_review informs" half is gone, since the reviewer is deleted
+outright. The half that matters -- one prompt, asked every time, the human
+decides -- stands and is now the only thing deciding.
+
 Supersedes the two-prompt review flow introduced by [0009](./0009-previz-image-review.md) and extended by [0029](./0029-on-rejection-edit-and-retry.md).
 
 ## Context

@@ -8,7 +8,7 @@ historical claims without paying for a Perplexity/Gemini call every time.
 
 The `research` and `fact_check` stages are the two paid, network-dependent
 stages upstream of everything else in the pipeline. `--mock`
-(`src/historical_video_ai/cli.py`) avoids that cost too, but with synthetic
+(`src/historical_video_ai/cli/`) avoids that cost too, but with synthetic
 placeholder text ("[MOCK] A placeholder claim...") that isn't useful for
 judging how a real fact sheet reads once it reaches previz's prompt-building
 or a future narrative/shot-list stage. A fixture is the middle ground: real

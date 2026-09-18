@@ -80,7 +80,7 @@ def _staging(cid, action="reaches for the door handle", frame_position="left thi
 
 
 def _beat(**overrides) -> Beat:
-    fields = {
+    fields: dict[str, object] = {
         "location_id": "street",
         "subject": "The influencer",
         "action": "checks her phone",
@@ -90,7 +90,9 @@ def _beat(**overrides) -> Beat:
         "duration_seconds": "3",
     }
     fields.update(overrides)
-    return Beat(**fields)
+    # Splatting a fixture dict into a typed dataclass is not checkable;
+    # overrides legitimately carry a staging list among the strings.
+    return Beat(**fields)  # type: ignore[arg-type]
 
 
 def _fake_completion(content: str):
@@ -755,14 +757,72 @@ def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, t
     )
 
     prompt = captured["messages"][0]["content"]
-    assert "one deliberate compositional choice about the whole frame" in prompt
-    assert "the subject placed well off-centre" in prompt
+    assert "one deliberate compositional choice" in prompt
+    assert "a subject well off-centre" in prompt
+    # docs/decisions/0054: the rule used to ask for this as prose in
+    # `camera`, contradicting 0044's "three terms and nothing else" and
+    # duplicating frame_position. Each part now names its own field.
+    assert "never as extra prose in `camera`" in prompt
 
 
 # docs/decisions/0049 diagnosed a buried conditional losing to a concrete
 # rule elsewhere. Two rules still ended with an "unless X is the point"
 # hatch -- the stillness one licensed exactly the T-posing 0049 exists to
 # stop (docs/playbook/repo-audit-brief.md, finding 1).
+# docs/decisions/0054: occlusion moved out of frame_position's prose into
+# its own field. These assert the move actually happened rather than being
+# described -- a second statement of the same rule is the failure mode
+# this ADR exists to stop.
+def test_staging_parses_occlusion_and_defaults_it_for_older_plans():
+    from historical_video_ai.stages.scene_planning import load_scene_plan
+
+    payload = _valid_payload()
+    payload["beats"][0]["staging"] = [
+        {
+            "character_id": payload["characters"][0]["id"],
+            "action": "presses a palm flat to the wall",
+            "frame_position": "right third, a quarter of the frame",
+            "occlusion": "the pillar covers all but one shoulder",
+        }
+    ]
+    plan = load_scene_plan(payload)
+    assert plan.beats[0].staging[0].occlusion == "the pillar covers all but one shoulder"
+
+    # A plan captured before the field still loads, same allowance
+    # `staging` itself carries (docs/decisions/0049).
+    del payload["beats"][0]["staging"][0]["occlusion"]
+    assert load_scene_plan(payload).beats[0].staging[0].occlusion == ""
+
+
+def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    # occlusion is asked for as its own field, in the schema and the rules
+    assert '"occlusion"' in prompt
+    assert "`frame_position` is WHERE, `occlusion` is WHAT" in prompt
+    # the frozen-instant rule, which process verbs kept defeating
+    assert "the frozen instant, not the movement through it" in prompt
+    # and the old instruction is gone rather than duplicated: nothing may
+    # still tell the planner to put occlusion inside frame_position
+    assert "In `frame_position` state concretely" not in prompt
+
+
 def test_planning_rules_carry_no_unless_its_the_point_escape_hatches():
     captured = {}
 
