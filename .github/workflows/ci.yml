@@ -111,7 +111,7 @@ jobs:
       - name: Eval scripts still import and parse their fixtures
         run: |
           set -e
-          for script in camera_obedience conditioning_bakeoff \
+          for script in blocking_space camera_obedience conditioning_bakeoff \
                         reference_anchor run_eval; do
             echo "--- $script"
             uv run python "evals/$script.py" --dry-run

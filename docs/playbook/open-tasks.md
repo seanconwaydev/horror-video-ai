@@ -32,34 +32,35 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Give `Staging` the facts it is missing: ground, depth, gaze
+## 1. Run `evals/blocking_space.py` and decide the authoring space
 
-Now measured against a real run rather than reasoned about
-(`run_20260918-221017`, logged in
-[failure-taxonomy.md](./failure-taxonomy.md)). ADR 0057 worked -- the
-antagonist acts instead of standing there, and beat 3 produced the first
-image the owner called genuinely acceptable. Three facts have no field,
-and each produced a visible defect in the same run:
+The largest open design question (`architecture.md`): where a character
+appears in the frame is a *projection* of where they stand and where the
+camera is, and the pipeline authors all three legs independently. Two
+coherent architectures exist and the current one is neither -- frame-space
+authoring (`frame_position` authoritative, world prose derived or dropped)
+or world-space blocking (author the room and the marks, let the camera
+imply the frame).
 
-- **Where someone stands in the space.** `frame_position` is a 2D fact.
-  Beat 1 said "far background, upper-left of frame" under a `wide, low,
-  from behind` camera, which in that shot is the ceiling -- so the model
-  put a standing man in the air and invented a roof slab to hide him
-  behind. The planner was not wrong on its own terms; it had nowhere to
-  write "forty metres down the aisle, on the floor".
-- **Who is where relative to whom.** Still nothing states who is behind
-  whom or how far apart they are. The planner currently smuggles this
-  into `action` prose ("keeping the concrete between himself and her
-  sightline"), which is exactly where 0049 and 0054 found it losing.
-- **Where each is looking.** One beat-3 candidate had the antagonist
-  staring at camera mid-lunge. His staging describes weight, torso and
-  arm, and says nothing about his eyes. The prompt's multi-character line
-  asks that "gazes, distances and body angles have to agree" -- three
-  facts, no fields, which is the pattern ADR 0054 exists to stop.
+`evals/blocking_space.py` decides it on images rather than argument. Three
+scenarios, taken from `run_20260918-221017`'s own beats including the one
+that produced the floating figure, each authored both ways with everything
+else held constant. 12 images, about $0.50, scored blind:
 
-ADR-sized: new fields on `Staging`, the planner prompt that fills them,
-the parser, the eval fixtures. Worth deciding whether these are three
-fields or one, and 0054's evidence argues for separate ones.
+```
+uv run python evals/blocking_space.py
+```
+
+Read `prompts/` afterwards before trusting the result -- the validity risk
+is that the world arm says something the frame arm does not and wins for
+being more specific rather than for being world-space.
+
+Whichever way it comes out, an ADR follows, and it is a large one. If
+world blocking wins, `Location` needs a geometry it does not have -- it is
+`architecture`, `fixed_props` and `ambient_light`, all prose, so there is
+no floor plan to place anyone against. Gaze has no field either way
+(`run_20260918-221017` had the antagonist staring at camera mid-lunge, and
+his staging describes weight, torso and arm but not his eyes).
 
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 
