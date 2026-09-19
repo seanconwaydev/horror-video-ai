@@ -39,6 +39,7 @@ from historical_video_ai.stages.moderation import run_moderation_policy_check
 
 EVALS_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVALS_DIR))
+from selection import require_known, select
 from variants import VARIANTS
 
 ASPECT_RATIO = "9:16"  # this project is Shorts-only (docs/decisions/0002)
@@ -163,11 +164,13 @@ def main() -> None:
 
     scenes = yaml.safe_load((EVALS_DIR / "scenes.yaml").read_text())["scenes"]
     if args.scenes:
-        wanted = set(args.scenes.split(","))
+        wanted = require_known(
+            parser, (s["id"] for s in scenes), args.scenes, flag="scenes"
+        )
         scenes = [s for s in scenes if s["id"] in wanted]
 
-    models = {k: MODELS[k] for k in args.models.split(",")}
-    variants = {k: VARIANTS[k] for k in args.variants.split(",")}
+    models = select(parser, MODELS, args.models, flag="models")
+    variants = select(parser, VARIANTS, args.variants, flag="variants")
     cells = [(m, v) for m in models for v in variants]
 
     print(f"{len(scenes)} scene(s) x {len(cells)} cell(s) = {len(scenes) * len(cells)} images")

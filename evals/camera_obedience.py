@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import litellm
+from selection import select
 
 from historical_video_ai.config import load_environment
 from historical_video_ai.replicate_client import download_output, run_prediction
@@ -152,7 +153,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
-    models: dict[str, dict[str, Any]] = {k: MODELS[k] for k in args.models.split(",")}
+    models: dict[str, dict[str, Any]] = select(parser, MODELS, args.models, flag="models")
     n_conditions = 2 if args.reference else 1
     total = len(models) * len(CAMERA_SPECS) * n_conditions
     print(

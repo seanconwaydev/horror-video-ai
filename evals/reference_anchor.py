@@ -53,6 +53,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from selection import select
+
 from historical_video_ai.config import get_stage_model, load_environment
 from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import (
@@ -206,7 +208,7 @@ def main() -> None:
     args = parser.parse_args()
 
     scene, character, locations, beats = _load_scene()
-    arms = {name: ARMS[name] for name in args.arms.split(",")}
+    arms = select(parser, ARMS, args.arms, flag="arms")
 
     character_sheets = len({a["character_ref"] for a in arms.values() if a["character_ref"]})
     shared_locations = (
