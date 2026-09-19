@@ -368,3 +368,23 @@ Eighteen images: `frame`, `world`, and `world_size` (world placement plus the fr
 
 **Gaze, again.** Unscoreable more often than not -- "hard to tell because his eyes are white", "hard to tell because his eyes are quite small", "impossible to tell what he's looking at, but it passes because of his body language + black visage". Every time the owner could read gaze, he read it off posture. This is now observed across two independent runs and should be treated as settled: a gaze field has to be written as body orientation, because the eyes are not reliably rendered at all.
 
+**2026-09-18** · Blind eval, focused third run (`results/blocking-20260918-235518`) · *category: apparent size is the depth instruction; world placement alone carries none* · genre: horror, embodied threat — **apparent size confirmed; distance confirmed unpromptable**
+
+Twenty-four images, six candidates per cell, two arms (`world` and `world_size`), scored blind. The separation is total on the question that matters. Pooled across all three runs:
+
+| "is he between the camera and her" | |
+|---|---|
+| `world` -- world placement, no size | **0/10** |
+| `world_size` -- same placement plus "roughly a third of the image" | **8/8** |
+| `frame` -- frame coordinates plus size (not re-run here) | 2/4 |
+
+In the focused run itself it was 0/6 against 6/6, with no partials in either direction. Adding one clause about how much of the image a character occupies took a question that world placement had **never once** got right to a clean sweep. This is the effect the previous two runs were too small to see, and it is large enough that between-candidate variance no longer hides it.
+
+Note what this does *not* say. It is not "frame coordinates win" -- `world_size` states its depth relation in world terms ("directly between her and the camera") and adds a size, while the `frame` arm states a frame coordinate ("large and soft-focused in the left third of the frame") and adds the same size, and `frame` scored 2/4 where `world_size` scored 8/8. The working pair looks like **world placement + apparent size**, which is two facts in two fields rather than one composite `frame_position` -- ADR 0054's rule applied once more. The direct head-to-head against the incumbent at six candidates has not been run.
+
+**Distance is now settled beyond argument: 1 success in 22 images**, across every arm and every phrasing tried. The owner's note gives the scale of the miss: "he's never more than ~10 feet in front of her, i don't consider that 'far away', a parking garage could have him 50-100+ feet away easily." A beat whose effect depends on a figure reading as genuinely distant cannot be delivered by this model at this prompt length, and should be rewritten rather than re-prompted.
+
+**Correct depth ordering appears to produce correct gaze for free.** `confrontation` Q3 was "yes" in all twelve images, and the owner's explanation is mechanical rather than lucky: "it always does look like he's looking at her from his body positioning. this is especially true in the a2* set where he's actually closer to the camera and thus partially turned away from the camera to look at her." Placing him nearer the camera than her *forces* the turn, and the turn is what reads as gaze. That is a second reason to prefer explicit depth ordering, and it weakens the case for a separate gaze field -- the earlier finding that gaze must be written as body orientation may be satisfied by getting the blocking right rather than by adding a field.
+
+**The POV-duplication artifact recurred, and both occurrences are in the same arm.** `distant_figure__a2_6`: "the camera is a second woman's eyes looking at woman #1, with the POV woman holding a fob". The same artifact appeared in run two, also in a `world_size` `distant_figure` cell -- 2 occurrences in 12 `world_size` images of that scenario against 0 in the 10 non-`world_size` ones. Weak, but the mechanism is plausible: that arm states an apparent size for a character who is simultaneously described as "seen from behind", and a size instruction may push the model toward rendering the body it is measuring. Worth watching rather than acting on.
+

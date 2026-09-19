@@ -108,26 +108,28 @@ three renderable terms, and does not author frame position at all -- the image m
 the projection. The latter is what a production's blocking diagram is, and this project
 already uses "coverage" and screen direction, which are that model's vocabulary.
 
-**Partly answered, 2026-09-18, over two blind runs (30 images).** `evals/blocking_space.py`
-put the two architectures head to head and then added a third arm. The honest result is that
-**the authoring space is not the lever** -- at two candidates per cell the between-candidate
-variance is larger than the between-arm difference, and the same arm on an identical prompt
-scored 2/2 and then 0/2 on the same question across the two runs. Neither architecture can be
-adopted on this evidence, and the ADR that would have replaced `frame_position` with world
-blocking is not being written.
+**Largely answered, 2026-09-18, over three blind runs (54 images).**
+`evals/blocking_space.py` put the two architectures head to head, then isolated the one
+variable the first two runs had not controlled. The result did not go the way this section
+originally argued.
 
-Two findings did hold across both runs. **Distance is not promptable at all**: "does the far
-figure read as far away" succeeded in 1 image out of 10, across every arm -- world-space
-prose, frame coordinates, and an explicit "roughly a twentieth of the image" alike all
-rendered a man about five feet away. That is not a schema problem and no field design fixes
-it. And **world placement alone never achieved near-field depth ordering** (0/4 on "is he
-between the camera and her") while world placement *plus an apparent-size figure* scored 2/2.
-The working instruction is how much of the image someone occupies -- a frame-space quantity,
-but not the frame *coordinates*. That is the one live thread, and it is still n=2.
+Neither "frame-space" nor "world-space" is the axis that matters. What matters is whether a
+character's **apparent size** is stated at all. Pooled across all three runs, on "is he
+between the camera and her": world placement with no size scored **0/10**; the identical
+world placement with one clause about how much of the image he occupies scored **8/8**; the
+current `frame_position`, which is coordinates plus a size, scored 2/4. The working pair is
+world placement *plus* apparent size -- two facts, which by
+[0054](./decisions/0054-one-fact-per-field.md)'s rule means two fields rather than today's
+single composite `frame_position`. The direct head-to-head against the incumbent at six
+candidates has not been run, and is the last thing outstanding before an ADR.
 
-So the open question narrows from "which space should placement be authored in" to "does
-apparent size carry the depth information, independent of coordinates". Full result in
-[playbook/failure-taxonomy.md](./playbook/failure-taxonomy.md).
+Two things are settled and should not be re-tested. **Distance is not promptable**: 1 success
+in 22 images across every arm and phrasing, with the owner noting the figure never reads as
+more than ten feet away in a garage that could plausibly put him a hundred. Beats depending
+on real distance have to be rewritten, not re-prompted. And **correct depth ordering appears
+to deliver gaze for free** -- placing a character nearer the camera than another forces the
+turn, and the turn is what reads as looking at her; gaze scored 12/12 in the focused run.
+Full results in [playbook/failure-taxonomy.md](./playbook/failure-taxonomy.md).
 
 Two things had to be established before choosing, and one was already answered.
 *Answered:* this is not caused by reference-image conditioning. 0044's live hypothesis was
