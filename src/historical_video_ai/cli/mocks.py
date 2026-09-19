@@ -10,6 +10,7 @@ only automated coverage the cross-stage wiring has (.github/workflows/ci.yml).
 from __future__ import annotations
 
 import json
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -112,9 +113,15 @@ def mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
 
 def mock_prediction(*args: object, **kwargs: object) -> dict:
     """Already 'succeeded', so --video-gen-from --mock exercises payload
-    building and output handling without the real poll loop."""
+    building and output handling without the real poll loop.
+
+    A fresh id per call, because Replicate never returns the same one
+    twice and the run log now supersedes an entry by prediction_id
+    (docs/decisions/0068). A constant id here made two separate mock runs
+    look like one attempt written twice.
+    """
     return {
-        "id": "mock-prediction-id",
+        "id": f"mock-prediction-{uuid.uuid4().hex[:12]}",
         "status": "succeeded",
         "output": "https://example.invalid/mock-video.mp4",
         "error": None,

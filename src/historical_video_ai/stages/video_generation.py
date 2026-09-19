@@ -77,6 +77,10 @@ class VideoGenerationResult:
     source_image_path: Path
     seconds_requested: float
     seconds_actual: float
+    #: Replicate's own id for the prediction that produced this clip. The
+    #: handle for anything after the fact -- finding the run that was
+    #: billed, or re-fetching an output whose download failed.
+    prediction_id: str = ""
 
 
 def _resolve_replicate_model(model: str) -> str:
@@ -124,6 +128,7 @@ def run_video_generation_stage(
     resolution: str = _DEFAULT_RESOLUTION,
     prediction_fn: Callable = run_prediction,
     download_fn: Callable = download_output,
+    on_prediction: Callable[[str, str], None] | None = None,
     output_dir: Path = Path("outputs"),
     output_filename: str = "video.mp4",
     **prediction_kwargs: object,
@@ -134,6 +139,14 @@ def run_video_generation_stage(
     `prediction_fn`/`download_fn` are injection points for tests; any
     extra `prediction_kwargs` (e.g. `sleep_fn`, `max_poll_attempts`) pass
     straight through to the Replicate client's polling loop.
+
+    `on_prediction`, if given, is called with `(prediction_id, output_url)`
+    as soon as the clip exists on Replicate and *before* it is downloaded
+    -- the same reasoning as previz's `on_image_generated`
+    (docs/decisions/0056): the spend has already happened by then, and the
+    fetch that follows can still fail. Without it a failed download left
+    nothing at all on disk pointing at a clip that was generated and
+    billed. See docs/decisions/0068.
 
     Raises VideoGenerationError if `seconds`/`resolution` are out of
     range, `image_path` doesn't exist, or the finished prediction has no
@@ -175,6 +188,10 @@ def run_video_generation_stage(
             f"usable video URL (output was {prediction.get('output')!r})."
         )
 
+    prediction_id = str(prediction.get("id") or "")
+    if on_prediction is not None:
+        on_prediction(prediction_id, output)
+
     video_bytes = download_fn(output)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -187,4 +204,5 @@ def run_video_generation_stage(
         source_image_path=image_path,
         seconds_requested=seconds,
         seconds_actual=num_frames / _FPS,
+        prediction_id=prediction_id,
     )

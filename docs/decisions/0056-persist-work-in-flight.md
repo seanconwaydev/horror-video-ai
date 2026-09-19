@@ -4,6 +4,9 @@ Date: 2026-09-17
 
 Status: Accepted
 
+Extended to stage 9 by [0068](./0068-record-the-clip-before-fetching-it.md): a generated clip is
+recorded before the download that can lose it.
+
 ## Context
 
 The run log was written after every *finished* beat

@@ -19,6 +19,7 @@ from historical_video_ai.cli.video_gen import (
     load_video_gen_targets,
     run_video_generation_only,
 )
+from historical_video_ai.replicate_client import ReplicateError
 
 
 def _write_previz_run_log(run_dir, *, image_path=None, prompt="A prompt from previz."):
@@ -387,3 +388,45 @@ def test_video_gen_targets_resolve_after_the_run_folder_is_moved(tmp_path):
     assert len(targets) == 1
     assert targets[0].image_path == moved / "beat_1" / "previz.png"
     assert targets[0].image_path.exists()
+
+
+def test_a_failed_download_still_leaves_the_paid_prediction_in_the_log(tmp_path, monkeypatch):
+    """Stage 9's spend happens when Replicate finishes the clip, not when
+    the bytes land. The prediction used to be written only after a
+    successful download, so a dropped connection discarded a generated,
+    billed clip and left nothing pointing at it -- not even its id
+    (docs/decisions/0068)."""
+    run_dir = tmp_path / "source_run"
+    _write_previz_run_log(run_dir, prompt="A prompt from previz.")
+
+    def _exploding_download(*args, **kwargs):
+        raise ReplicateError("bad record mac")
+
+    monkeypatch.setattr(
+        "historical_video_ai.cli.video_gen.mock_download", _exploding_download
+    )
+
+    with pytest.raises(ReplicateError):
+        run_video_generation_only(
+            [run_dir], mock=True, video_model="replicate/owner/model"
+        )
+
+    log = json.loads((run_dir / "run_log.json").read_text())
+    recorded = log["videos"][0]
+    assert recorded["downloaded"] is False
+    assert recorded["prediction_id"].startswith("mock-prediction-")
+    assert recorded["output_url"] == "https://example.invalid/mock-video.mp4"
+
+
+def test_a_successful_download_supersedes_its_own_in_flight_record(tmp_path):
+    """One entry per clip, not two: the pre-download write and the final
+    one are the same attempt, matched on prediction_id."""
+    run_dir = tmp_path / "source_run"
+    _write_previz_run_log(run_dir, prompt="A prompt from previz.")
+
+    run_video_generation_only([run_dir], mock=True, video_model="replicate/owner/model")
+
+    log = json.loads((run_dir / "run_log.json").read_text())
+    assert len(log["videos"]) == 1
+    assert log["videos"][0]["downloaded"] is True
+    assert log["videos"][0]["video_path"].endswith(".mp4")

@@ -151,20 +151,41 @@ def load_video_gen_targets(
     return targets
 
 
-def _record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> None:
+def _record_video_gen_result(
+    target: VideoGenTarget, key: str, entry: dict, *, supersede_on: str | None = None
+) -> None:
     """Append `entry` to list `key` in this target's run_log.json -- at
     the top level for an old-style single-image run, or nested under the
     matching beat's own entry in "previz_beats" for a new-style
     multi-beat run, so a beat's video/moderation history stays co-located
     with that beat's own record instead of mixed into one flat list
-    across every beat."""
+    across every beat.
+
+    `supersede_on` names a field that identifies one attempt across
+    several writes: an existing entry carrying the same value is replaced
+    rather than a second one appended. That is what lets a clip be
+    recorded the moment it exists on Replicate and then filled in once it
+    is on disk, without the log growing two entries per video
+    (docs/decisions/0056's "later writes for the same attempt supersede
+    earlier ones", applied to stage 9 -- see docs/decisions/0068).
+    """
+
+    def _merge(entries: list) -> None:
+        if supersede_on is not None:
+            marker = entry.get(supersede_on)
+            for i, existing in enumerate(entries):
+                if marker and existing.get(supersede_on) == marker:
+                    entries[i] = entry
+                    return
+        entries.append(entry)
+
     log = read_log(target.run_dir)
     if target.beat_index is None:
-        log.setdefault(key, []).append(entry)
+        _merge(log.setdefault(key, []))
     else:
         for beat_result in log["previz_beats"]:
             if beat_result["index"] == target.beat_index:
-                beat_result.setdefault(key, []).append(entry)
+                _merge(beat_result.setdefault(key, []))
                 break
     write_log(target.run_dir, log)
 
@@ -358,12 +379,34 @@ def run_video_generation_only(
         seconds_kwarg: dict[str, Any] = (
             {"seconds": video_seconds} if video_seconds is not None else {}
         )
+        # Written the moment the clip exists on Replicate, before the
+        # download that can still fail -- otherwise a dropped connection
+        # discards a generated, billed clip leaving nothing that points at
+        # it (docs/decisions/0068). Superseded below by the full entry.
+        def _record_prediction(
+            prediction_id: str, output_url: str, target: VideoGenTarget = target
+        ) -> None:
+            _record_video_gen_result(
+                target,
+                "videos",
+                {
+                    "prediction_id": prediction_id,
+                    "output_url": output_url,
+                    "video_generation_model": video_model,
+                    "prompt_used": target.prompt_used,
+                    "mock": mock,
+                    "downloaded": False,
+                },
+                supersede_on="prediction_id",
+            )
+
         result = run_video_generation_stage(
             target.image_path,
             target.prompt_used,
             model=video_model,
             output_dir=target.output_dir,
             output_filename=f"video_{timestamp}.mp4",
+            on_prediction=_record_prediction,
             **seconds_kwarg,
             **video_kwargs,
         )
@@ -376,17 +419,20 @@ def run_video_generation_only(
             target,
             "videos",
             {
+                "prediction_id": result.prediction_id,
                 "video_generation_model": video_model,
                 "video_path": str(result.video_path),
                 "seconds_requested": result.seconds_requested,
                 "seconds_actual": result.seconds_actual,
                 "mock": mock,
+                "downloaded": True,
                 # Recorded per attempt, not just once for the run, so
                 # comparing several --video-prompt overrides against the
                 # same image stays traceable -- which prompt produced
                 # which file -- instead of only the latest being visible.
                 "prompt_used": target.prompt_used,
             },
+            supersede_on="prediction_id",
         )
 
     print("\nDone.")

@@ -89,6 +89,23 @@ def resolve_api_token(api_token: str | None = None) -> str:
     return token
 
 
+def _is_retryable(method: str, *, status: int | None) -> bool:
+    """The one place the retry policy lives. `status=None` means the call
+    raised instead of returning -- a dropped connection or TLS error.
+
+    A throttle is safe to repeat on any method: 429 means the request was
+    rejected before it was processed. Everything else retryable here is
+    ambiguous about whether the request already took effect, so it is
+    repeated only on methods that change nothing. See docs/decisions/0067.
+    """
+    repeatable = method.upper() in _SAFE_TO_REPEAT_METHODS
+    if status is None:
+        return repeatable
+    if status == _THROTTLE_STATUS:
+        return True
+    return repeatable and status in _RETRYABLE_STATUSES
+
+
 def _default_request_fn(
     method: str,
     url: str,
@@ -109,7 +126,6 @@ def _default_request_fn(
     What is retried depends on the method, not just the failure -- see
     `_SAFE_TO_REPEAT_METHODS` above and docs/decisions/0067.
     """
-    repeatable = method.upper() in _SAFE_TO_REPEAT_METHODS
     for attempt in range(1, _MAX_TRANSPORT_RETRIES + 1):
         try:
             response = httpx.request(
@@ -125,15 +141,16 @@ def _default_request_fn(
             # Not retried on a POST: the connection can drop after Replicate
             # has accepted the prediction, and a retry would then pay for a
             # second one.
-            if not repeatable or attempt == _MAX_TRANSPORT_RETRIES:
+            if not _is_retryable(method, status=None) or attempt == _MAX_TRANSPORT_RETRIES:
                 raise ReplicateError(f"Replicate {method} {url} failed: {exc}") from exc
             sleep_fn(_FALLBACK_RETRY_DELAY_SECONDS)
             continue
         if response.status_code < 400:
             return response.json()
-        throttled = response.status_code == _THROTTLE_STATUS
-        retryable = throttled or (repeatable and response.status_code in _RETRYABLE_STATUSES)
-        if not retryable or attempt == _MAX_TRANSPORT_RETRIES:
+        if (
+            not _is_retryable(method, status=response.status_code)
+            or attempt == _MAX_TRANSPORT_RETRIES
+        ):
             raise ReplicateError(
                 f"Replicate {method} {url} failed with HTTP {response.status_code}: "
                 f"{response.text}"
@@ -159,16 +176,43 @@ def _retry_delay(response: httpx.Response) -> float:
     return _FALLBACK_RETRY_DELAY_SECONDS
 
 
-def _default_download_fn(url: str) -> bytes:
-    """Fetch a finished prediction's output file. Separate seam from
-    `_default_request_fn` because this returns raw bytes from Replicate's
-    CDN, not JSON from the API."""
-    response = httpx.get(url, timeout=_DEFAULT_TIMEOUT_SECONDS, follow_redirects=True)
-    if response.status_code >= 400:
-        raise ReplicateError(
-            f"Downloading prediction output from {url} failed with HTTP {response.status_code}"
-        )
-    return response.content
+def _default_download_fn(
+    url: str, *, sleep_fn: Callable[[float], None] = time.sleep
+) -> bytes:
+    """Fetch a finished prediction's output file, retrying on the same
+    policy as any other GET. Separate seam from `_default_request_fn`
+    because this returns raw bytes from Replicate's CDN, not JSON from
+    the API.
+
+    This is the most valuable retry in the module and was the last to get
+    one. By the time it runs the clip is generated, paid for and polled
+    through; a dropped connection here discards work that cannot be
+    recovered, because the prediction is not written to the run log until
+    the download succeeds. Repeating it is free of consequence -- a GET of
+    a static CDN object.
+    """
+    for attempt in range(1, _MAX_TRANSPORT_RETRIES + 1):
+        try:
+            response = httpx.get(url, timeout=_DEFAULT_TIMEOUT_SECONDS, follow_redirects=True)
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            if attempt == _MAX_TRANSPORT_RETRIES:
+                raise ReplicateError(
+                    f"Downloading prediction output from {url} failed: {exc}"
+                ) from exc
+            sleep_fn(_FALLBACK_RETRY_DELAY_SECONDS)
+            continue
+        if response.status_code < 400:
+            return response.content
+        if (
+            not _is_retryable("GET", status=response.status_code)
+            or attempt == _MAX_TRANSPORT_RETRIES
+        ):
+            raise ReplicateError(
+                f"Downloading prediction output from {url} failed with HTTP "
+                f"{response.status_code}"
+            )
+        sleep_fn(_retry_delay(response))
+    raise AssertionError("unreachable")  # loop always returns or raises
 
 
 def file_to_data_uri(path: Path) -> str:
