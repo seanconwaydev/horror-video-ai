@@ -450,3 +450,100 @@ def test_resolve_premise_conflict_stops_if_reverify_research_declined(monkeypatc
 
 
 # --- archived attempts must never be overwritten by a later cycle ---
+
+
+def _one_claim_sheet(text="Apollo 11 launched in July."):
+    return FactSheet(
+        time="1969",
+        place="Florida",
+        description="she watches",
+        claims=[Claim(text=text, source="s", date="1969")],
+    )
+
+
+def test_two_flags_on_one_claim_ask_once_and_show_both(monkeypatch, capsys):
+    """Nothing in the fact-check prompt limits a model to one concern per
+    claim, and two is an ordinary answer. Resolving by matching claim_text
+    consumed the claim on the first flag and then raised a bare
+    StopIteration on the second -- mid-review, after the human had already
+    answered one prompt."""
+    fact_sheet = _one_claim_sheet()
+    flags = [
+        ClaimFlag(
+            claim_text=fact_sheet.claims[0].text,
+            concern="the date is uncertain",
+            severity="uncertain",
+            claim_number=1,
+        ),
+        ClaimFlag(
+            claim_text=fact_sheet.claims[0].text,
+            concern="the launch site is wrong",
+            severity="uncertain",
+            claim_number=1,
+        ),
+    ]
+    answers = iter(["a"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    resolved = resolve_flags(fact_sheet, flags)
+
+    assert [c.text for c in resolved.claims] == [fact_sheet.claims[0].text]
+    out = capsys.readouterr().out
+    assert "the date is uncertain" in out
+    assert "the launch site is wrong" in out
+    assert next(answers, None) is None, "should have asked exactly once"
+
+
+def test_cutting_a_claim_with_two_flags_cuts_it_once(monkeypatch):
+    fact_sheet = _one_claim_sheet()
+    flags = [
+        ClaimFlag(claim_text=fact_sheet.claims[0].text, concern="a", severity="uncertain", claim_number=1),
+        ClaimFlag(claim_text=fact_sheet.claims[0].text, concern="b", severity="uncertain", claim_number=1),
+    ]
+    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+
+    assert resolve_flags(fact_sheet, flags).claims == []
+
+
+def test_flags_from_a_log_without_claim_numbers_still_resolve_by_text(monkeypatch):
+    """--fixture replays a run log, and one written before claim_number
+    existed reconstructs flags with claim_number 0. resolve_flags is
+    called on that path too (cli/app.py), so the text fallback is load
+    bearing, not decoration."""
+    fact_sheet = _one_claim_sheet()
+    flags = [ClaimFlag(claim_text=fact_sheet.claims[0].text, concern="a", severity="uncertain")]
+    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+
+    assert resolve_flags(fact_sheet, flags).claims == []
+
+
+def test_two_same_text_claims_with_one_flag_each_resolve_independently(monkeypatch):
+    """The case the old text-matching logic existed for: nothing upstream
+    stops two distinct claims sharing identical text, and cutting one must
+    not cut the other."""
+    fact_sheet = FactSheet(
+        time="t",
+        place="p",
+        description="d",
+        claims=[Claim(text="same", source="a"), Claim(text="same", source="b")],
+    )
+    flags = [
+        ClaimFlag(claim_text="same", concern="first", severity="uncertain"),
+        ClaimFlag(claim_text="same", concern="second", severity="uncertain"),
+    ]
+    answers = iter(["c", "a"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    resolved = resolve_flags(fact_sheet, flags)
+
+    assert [c.source for c in resolved.claims] == ["b"]
+
+
+def test_a_flag_naming_a_missing_claim_is_reported_not_fatal(capsys):
+    fact_sheet = _one_claim_sheet()
+    flags = [ClaimFlag(claim_text="a claim that is not here", concern="orphan", severity="uncertain")]
+
+    resolved = resolve_flags(fact_sheet, flags, auto_yes=True)
+
+    assert len(resolved.claims) == 1
+    assert "no longer in this fact sheet" in capsys.readouterr().out

@@ -35,11 +35,23 @@ class FactCheckError(Exception):
 
 @dataclass(frozen=True)
 class ClaimFlag:
-    """A concern raised about one claim from the research stage."""
+    """A concern raised about one claim from the research stage.
+
+    One claim can carry several flags -- nothing in the fact-check prompt
+    limits a model to one concern per claim, and two ("the date is
+    uncertain", "the location is wrong") is an ordinary answer.
+    """
 
     claim_text: str
     concern: str
     severity: str  # "contradicted" | "uncertain"
+    #: 1-based position in the fact sheet's claim list -- which claim this
+    #: is about, kept rather than re-derived by matching `claim_text`.
+    #: Text matching cannot tell two flags on one claim apart from one
+    #: flag each on two same-text claims, and used to raise a bare
+    #: StopIteration on the first case. 0 means "unknown", which is what a
+    #: run log written before this field existed replays as.
+    claim_number: int = 0
 
 
 @dataclass(frozen=True)
@@ -155,8 +167,9 @@ def _parse_flags(raw_flags: list, claims: list[Claim]) -> list[ClaimFlag]:
     claims-by-number.md for why this replaced asking the model to copy
     claim_text back verbatim. `ClaimFlag.claim_text` is populated from our
     own claims list, not the model's response, so it's always exactly
-    right by construction; nothing downstream (cli/research_flow.py's `resolve_flags`,
-    previz, --fixture loading) needed to change."""
+    right by construction. The number is kept on the flag as well as the
+    text, because `resolve_flags` needs to know *which* claim a flag is
+    about and text alone cannot say when two flags share one claim."""
     flags: list[ClaimFlag] = []
     for i, raw_flag in enumerate(raw_flags):
         if not isinstance(raw_flag, dict):
@@ -187,6 +200,7 @@ def _parse_flags(raw_flags: list, claims: list[Claim]) -> list[ClaimFlag]:
                 claim_text=claims[claim_number - 1].text,
                 concern=raw_flag["concern"],
                 severity=severity,
+                claim_number=claim_number,
             )
         )
 

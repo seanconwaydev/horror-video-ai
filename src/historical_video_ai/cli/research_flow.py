@@ -28,6 +28,44 @@ from historical_video_ai.stages.fact_check import (
 from historical_video_ai.stages.research import Claim, FactSheet, run_research_stage
 
 
+def _flags_by_claim_index(
+    fact_sheet: FactSheet, flags: list[ClaimFlag]
+) -> tuple[dict[int, list[ClaimFlag]], list[ClaimFlag]]:
+    """Group flags by the claim they are about, plus any that match no
+    claim at all.
+
+    Prefers `ClaimFlag.claim_number`, which fact-check sets from the
+    numbered list it was given. Falls back to matching `claim_text` only
+    for a flag replayed out of a run log written before that field
+    existed (`--fixture`), where the number is 0.
+
+    The fallback consumes each matched position once, because nothing
+    upstream stops two distinct claims sharing identical text and
+    resolving one must not silently affect the other.
+    """
+    by_index: dict[int, list[ClaimFlag]] = {}
+    unresolved: list[ClaimFlag] = []
+    consumed: set[int] = set()
+    for flag in flags:
+        if 1 <= flag.claim_number <= len(fact_sheet.claims):
+            by_index.setdefault(flag.claim_number - 1, []).append(flag)
+            continue
+        idx = next(
+            (
+                i
+                for i, c in enumerate(fact_sheet.claims)
+                if i not in consumed and c.text == flag.claim_text
+            ),
+            None,
+        )
+        if idx is None:
+            unresolved.append(flag)
+            continue
+        consumed.add(idx)
+        by_index.setdefault(idx, []).append(flag)
+    return by_index, unresolved
+
+
 def resolve_flags(
     fact_sheet: FactSheet, flags: list[ClaimFlag], *, auto_yes: bool = False
 ) -> FactSheet | None:
@@ -58,26 +96,25 @@ def resolve_flags(
             print("\nStopping -- rerun without --yes to review this claim.")
             return None
 
-    # Indexed, not keyed by text: nothing upstream prevents two distinct
-    # claims from sharing identical text, and resolving one must not
-    # silently affect an unrelated claim that merely happens to match.
-    # `claimed_indices` tracks which original positions a flag has already
-    # consumed, so each flag resolves exactly one claim -- the first
-    # not-yet-consumed match -- rather than every claim with that text.
+    flags_by_index, unresolved = _flags_by_claim_index(fact_sheet, flags)
+    for flag in unresolved:
+        # Visible rather than silent, and not fatal: the claim a flag
+        # names is gone, so there is nothing for the human to accept, cut
+        # or soften -- but the concern itself is still worth reading.
+        print(f"\nFlag [{flag.severity}] about a claim no longer in this fact sheet: {flag.concern}")
+
     resolved_claims: list[Claim | None] = list(fact_sheet.claims)
-    claimed_indices: set[int] = set()
 
     print("\nResolve flagged claims:")
-    for flag in flags:
-        idx = next(
-            i
-            for i, c in enumerate(fact_sheet.claims)
-            if i not in claimed_indices and c.text == flag.claim_text
-        )
-        claimed_indices.add(idx)
+    for idx in sorted(flags_by_index):
         claim = fact_sheet.claims[idx]
+        claim_flags = flags_by_index[idx]
         print(f"\nClaim: {claim.text}")
-        print(f"Flag [{flag.severity}]: {flag.concern}")
+        # Every concern about this claim before the prompt, so one
+        # decision is made knowing all of them. Asking once per flag would
+        # ask again about a claim the human just cut.
+        for flag in claim_flags:
+            print(f"Flag [{flag.severity}]: {flag.concern}")
         if auto_yes:
             print("(a)ccept / (c)ut / (s)often this claim? [a/c/s]: a (--yes)")
             continue
