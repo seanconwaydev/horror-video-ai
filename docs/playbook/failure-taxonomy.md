@@ -1,6 +1,19 @@
 # Image/video generation failure taxonomy — playbook
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
+
+> **Before trusting an "→ Addressed" line below:** several of them were
+> addressed by something that has since been deleted, which makes a
+> solved-looking entry more dangerous than an open one. Two deletions
+> account for nearly all of it.
+> [ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md)
+> removed `previz_review` from the pipeline, so any entry whose fix was a
+> change to *how the reviewer behaves* is no longer in force -- the
+> failure is open again, now caught (or not) by the human at the review
+> prompt. [ADR 0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)
+> deleted three planning rules on their merits, and the entries they
+> addressed are annotated in place. Entries fixed by a *field*, a schema
+> change or an ADR are unaffected.
 
 A running log of real, observed oddities in generated previz images/video, and what (if anything) was done about each one. This is the raw material for eventually building a genuinely sustainable answer to "AI generation keeps producing small, specific oddities" — see the Methodology section for why a log, not just a growing pile of one-off prompt tweaks, is the point.
 
@@ -10,7 +23,7 @@ Sourced from Hamel Husain & Shreya Shankar's error-analysis process for evaluati
 
 1. **Open coding** (where this doc lives right now): a human looks at a real output and writes a free-form note on what's wrong. This step can't be handed to an LLM — it requires actually knowing what a correct result looks like for this specific project. Every entry below is one open-coding note.
 2. **Axial coding** (future, once there's enough volume): group the accumulated notes into a small taxonomy of ~5-10 recurring failure categories, rather than treating every note as its own permanent, isolated case. Husain's own guidance is to wait for **30-50 real traces** before this step is worth doing — clustering 6 entries would just be guessing at categories that don't have enough evidence yet.
-3. **Golden eval set** (further out): once real categories exist, build a small fixed set of test scenes that get run whenever a prompt template changes, scored automatically (an LLM-as-judge — which `previz_review` already structurally is), to catch a regression before it costs a real image-generation run to discover.
+3. **Golden eval set** (further out): once real categories exist, build a small fixed set of test scenes that get run whenever a prompt template changes, scored automatically (an LLM-as-judge), to catch a regression before it costs a real image-generation run to discover. **`previz_review` is not the judge to reach for here**, despite being the obvious candidate and having been named as one when this was written: [ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md) measured it against 78 images the owner had already ruled on and got 56% agreement, against 79% for a judge that accepts everything. A golden set scored by it would be measuring the grader. Building this step means first finding a grader that beats accept-everything, which is itself the harder half of the work.
 
 Practically: **keep adding entries below as they're found, in the field's natural free-form-note style — don't force a rigid category onto the `tentative category` field either. It'll be revisited for real once there's enough here to cluster.**
 
@@ -46,7 +59,7 @@ Real report (2026-09-15): beats read as emotionally wrong for a horror scene -- 
 ### A blind retry reused the identical prompt, throwing away the reviewer's own diagnosis
 
 Real observation (2026-09-15): a rejected beat showed the character looking angry instead of scared; the project owner manually typed "she should look scared, not angry" via the (f)eedback option and got a fixed result on the retry -- then noticed that note was nearly identical to what `previz_review`'s own rejection text had already said. Checking the actual retry mechanism confirmed why manual feedback was needed at all: every automatic blind retry called the image model with the *exact same prompt text*, on the theory that a new random roll might do better -- the rejection reason was only ever fed back into the *next review call* (`previous_concerns`, so the reviewer holds a consistent standard), never into the generation call itself. A blind retry was strictly wasting the one piece of real information already paid for and sitting right there.
-→ Addressed: `_generate_image_with_review`'s `generate_fn` now receives the concerns accumulated so far on every call, and the beat-path caller (`_generate_beats_with_choices`) folds them into that attempt's prompt via `_beat_with_review_corrections` -- each rejection reason gets appended to the beat's `action` text as an imperative correction ("Fix this: <concern>"), reframing the reviewer's third-person critique into a direct instruction, the same shape as the manual feedback note that already worked. Applied automatically on every retry now, not only when a human manually intervenes with (f)eedback/(e)dit -- those two remain for adding a human's own note beyond what the reviewer already said. The recorded `beat` field in `run_log.json` stays the original, unmodified text; only the ephemeral per-attempt prompt (visible via the accepted attempt's `prompt_used`) carries the correction. Not extended to the older single-scene previz flow (`_generate_previz_with_review`) -- `run_previz_stage` has no per-attempt correction-injection point today, and that flow is markedly less active now that scene-plan beats exist; left as a known, documented gap rather than force-fit.
+→ Addressed **then undone**: this described `generate_fn` receiving the reviewer's accumulated concerns on every call. [ADR 0055](../decisions/0055-delete-the-automated-previz-reviewer.md) deleted the reviewer that produced them, so there are no automatic concerns to feed back and `generate_fn` now takes no arguments at all. What survives is the human's own (f)eedback and (e)dit text, which `generate_beats_with_choices` carries across attempt cycles. Historically this was `_generate_image_with_review`'s `generate_fn`, folded in by `_beat_with_review_corrections` -- each rejection reason gets appended to the beat's `action` text as an imperative correction ("Fix this: <concern>"), reframing the reviewer's third-person critique into a direct instruction, the same shape as the manual feedback note that already worked. Applied automatically on every retry now, not only when a human manually intervenes with (f)eedback/(e)dit -- those two remain for adding a human's own note beyond what the reviewer already said. The recorded `beat` field in `run_log.json` stays the original, unmodified text; only the ephemeral per-attempt prompt (visible via the accepted attempt's `prompt_used`) carries the correction. Not extended to the older single-scene previz flow (`_generate_previz_with_review`) -- `run_previz_stage` has no per-attempt correction-injection point today, and that flow is markedly less active now that scene-plan beats exist; left as a known, documented gap rather than force-fit.
 
 ### The beat gallery only ever appeared at the very end of a run
 
@@ -126,7 +139,7 @@ Across a full 12-beat run, the character stayed in the same standing position, o
 
 **2026-09-02** · Pompeii influencer run · *tentative category: attribute vagueness* · genre: modern-visitor-in-historical-setting
 The character was meant to read as a modern-day visitor but came across ambiguous/not-clearly-modern — traced to vague wardrobe field text ("casual clothes" style phrasing) rather than concrete, specific clothing items.
-→ Addressed: scene_planning.py prompt rule requiring specific, concrete, contemporary clothing items for out-of-era characters (PR #23).
+→ Addressed: scene_planning.py prompt rule requiring specific, concrete, contemporary clothing items for out-of-era characters (PR #23). **That rule was deleted again on 2026-09-18** ([ADR 0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)): it was written for a pipeline whose subject was historical accuracy, which [ADR 0031](../decisions/0031-goal-is-quality-video-not-historical-accuracy.md) settled this project is not. The failure it describes is only reachable if a run sets up an out-of-era character again, which the current horror genre does not.
 
 **2026-09-02** · Pompeii influencer run · *tentative category: prop lighting realism* · genre: modern-visitor-in-historical-setting
 A held smartphone rendered as an unrealistically bright, star-like light source. Traced to escalating "glow" language across beats' own `action`/`lighting` text ("a glowing smartphone" → "cool electric glow" → "phone-screen light"), not the Character's own description — nothing told the model to keep it subtle relative to the scene's real light source.
@@ -134,7 +147,7 @@ A held smartphone rendered as an unrealistically bright, star-like light source.
 
 **2026-09-02** · Pompeii influencer run · *tentative category: prop spatial/orientation consistency* (matches T2I-CompBench's own "spatial relationships" category) · genre: modern-visitor-in-historical-setting
 A held phone's screen rendered facing the camera in a shot where the described geometry (over-the-shoulder from behind her) should have shown its back instead. Image models default to rendering a phone's iconic "screen-facing-viewer" view regardless of described camera geometry unless told the opposite outright.
-→ Addressed: scene_planning.py prompt rule requiring an explicit "screen not visible to camera" statement whenever the described camera angle would naturally hide it (PR #24).
+→ Addressed: scene_planning.py prompt rule requiring an explicit "screen not visible to camera" statement whenever the described camera angle would naturally hide it (PR #24). **That rule was deleted again on 2026-09-18** ([ADR 0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)): it asked the *planner* to write a sentence about what the *image model* should not draw, and the run logs show the planner obeying it while the image came back with the screen facing the viewer anyway. So this failure is open again, not solved -- if it recurs it needs a field, not a re-added bullet ([ADR 0054](../decisions/0054-one-fact-per-field.md)).
 
 **2026-09-02** · Pompeii influencer run · *tentative category: review-scope / acknowledged-exception coverage* · genre: modern-visitor-in-historical-setting
 A human acknowledged one specific anachronism (a time-travel smartphone) as intentional fiction. previz_review correctly followed that literal acknowledgment, but then separately rejected the character's modern *clothing* as an unacknowledged anachronism the moment a wider beat framing actually showed it clearly — even though "keep as intentional fiction" for a time-traveling visitor obviously implies her whole modern appearance, not just her phone.

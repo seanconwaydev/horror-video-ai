@@ -507,7 +507,8 @@ def run_beat_image_stage(
     `location` supply the text description woven into the prompt (see
     `_build_beat_prompt`); `character_reference`/`location_reference`
     (docs/decisions/0024) additionally condition the generation on those
-    images, same mechanism and same retry behavior as `run_previz_stage`.
+    images, with the same transient-retry behaviour as every other call
+    here (see `_call_with_transient_retry`).
     `style` (docs/decisions/0033) is the run's single authoritative
     realism-level source -- see `_build_beat_prompt`.
     """
