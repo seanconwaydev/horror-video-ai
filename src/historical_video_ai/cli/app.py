@@ -272,20 +272,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--max-references",
-        type=int,
-        help=(
-            "Cap characters + locations combined -- these, not beats, set "
-            "a run's real minimum image cost (one reference image each, "
-            "before a single beat generates). Same soft-target-plus-"
-            "enforcement idea as --max-beats, but the enforcement is "
-            "best-effort, not guaranteed: only references no beat actually "
-            "uses get dropped, so a scene where every character/location "
-            "is genuinely in use may still land over this number -- see "
-            "the printed cost estimate before confirming either way."
-        ),
-    )
-    parser.add_argument(
         "--experiment-model",
         help=(
             "Override the pinned research + fact_check models for this run "
@@ -520,7 +506,6 @@ def main() -> None:
         fact_check_result,
         model=scene_planning_model,
         max_beats=args.max_beats,
-        max_references=args.max_references,
         requires_grounding=requires_grounding,
         genre=args.genre,
         tone=args.tone,

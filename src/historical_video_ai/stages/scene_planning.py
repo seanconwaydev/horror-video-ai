@@ -800,50 +800,6 @@ def check_beat_location_references(beats: list, locations: list) -> None:
             )
 
 
-def _truncate_references_safely(plan: ScenePlan, max_references: int) -> ScenePlan:
-    """Drop characters/locations to fit `max_references` total, but only
-    ones it's provably safe to drop -- never orphans a beat. Best-effort,
-    not a hard guarantee like `max_beats`'s truncation: if every remaining
-    reference is actually in use, this stops short of the target rather
-    than silently breaking a beat's location_id (the same class of bug
-    docs/decisions/0027/0028 fixed elsewhere).
-
-    Safe to drop, in order: any character no beat's `staging` names, then
-    any location no beat's `location_id` references.
-
-    The character half used to drop everything past `characters[0]`
-    unconditionally, on the premise that beats could only ever condition
-    on the first character. docs/decisions/0049 ended that -- `staging`
-    names characters by id -- so the unconditional version deleted staged
-    characters, and popping from the end takes the antagonist first. The
-    result failed this module's own `check_beat_character_references`,
-    which runs at parse time and not again after truncation, and previz
-    builds its prompt by iterating `characters`, so the dropped character
-    simply vanished from it while `len(beat.staging) > 1` still told the
-    model two people had to react to each other.
-    """
-    characters = list(plan.characters)
-    locations = list(plan.locations)
-
-    used_character_ids = {s.character_id for b in plan.beats for s in b.staging}
-    i = len(characters) - 1
-    while len(characters) + len(locations) > max_references and i >= 0:
-        if characters[i].id not in used_character_ids and len(characters) > 1:
-            characters.pop(i)
-        i -= 1
-
-    used_location_ids = {b.location_id for b in plan.beats}
-    i = len(locations) - 1
-    while len(characters) + len(locations) > max_references and i >= 0:
-        if locations[i].id not in used_location_ids:
-            locations.pop(i)
-        i -= 1
-
-    if len(characters) + len(locations) == len(plan.characters) + len(plan.locations):
-        return plan  # nothing was safe to drop
-    return ScenePlan(characters=characters, locations=locations, beats=plan.beats)
-
-
 def _parse_staging(item: dict, characters: list, *, strict: bool) -> list[Staging]:
     """Parse one beat's `staging` list.
 
@@ -976,7 +932,6 @@ def run_scene_planning_stage(
     *,
     model: str | None = None,
     max_beats: int | None = None,
-    max_references: int | None = None,
     requires_grounding: bool = True,
     genre: str | None = None,
     tone: str | None = None,
@@ -997,11 +952,6 @@ def run_scene_planning_stage(
     enforced afterward by truncating the parsed beat list -- a cost-control
     flag (useful while iterating on image/video quality) needs a real
     guarantee, not just hope that the model honored the instruction.
-
-    `max_references` (characters + locations combined -- these, not
-    beats, are what a scene can't generate a single image without) gets
-    the same soft-target prompt treatment, but its enforcement is
-    best-effort, not guaranteed -- see `_truncate_references_safely`.
 
     `requires_grounding` (docs/decisions/0034) selects which preamble is
     used -- historical-accuracy framing is actively wrong for a scene that
@@ -1038,12 +988,6 @@ def run_scene_planning_stage(
         if max_beats is not None
         else ""
     )
-    if max_references is not None:
-        max_beats_line += (
-            f"\nAlso keep the cast and setting minimal: at most {max_references} "
-            "character(s) and location(s) combined -- prefer one character and "
-            "one location unless the scene genuinely needs more.\n"
-        )
     genre_tone_parts = []
     if not requires_grounding and genre:
         genre_tone_parts.append(f"Genre: {genre}.")
@@ -1089,6 +1033,4 @@ def run_scene_planning_stage(
         plan = ScenePlan(
             characters=plan.characters, locations=plan.locations, beats=plan.beats[:max_beats]
         )
-    if max_references is not None and len(plan.characters) + len(plan.locations) > max_references:
-        plan = _truncate_references_safely(plan, max_references)
     return plan
