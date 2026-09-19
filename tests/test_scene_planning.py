@@ -873,6 +873,32 @@ def test_threat_rule_asks_for_occlusion_rather_than_distance():
 # VICTIM reacting, which left the threat free to act on scenery -- a real
 # run gave it three beats of hands on upholstery and read as two people
 # sitting in a car together.
+# docs/decisions/0062: the owner named both of these as the difference
+# between a near-miss beat and an effective one.
+def test_threat_rule_requires_concealment_to_change_when_noticed():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "the threat's CONCEALMENT must change" in prompt
+    assert "the moment \\\nit is noticed is the hinge" in prompt or "is the hinge" in prompt
+    assert "visibly smaller `occlusion` than the one before" in prompt
+
+
 def test_interaction_rule_binds_the_non_focal_character_not_just_any_entry():
     captured = {}
 
@@ -1242,6 +1268,8 @@ def test_a_staging_entry_missing_its_action_is_rejected():
         # can't quietly drop one (docs/decisions/0049).
         "are states, not actions",
         "must take another character as its OBJECT",
+        "State WHERE THE EYES ARE POINTED",
+
         "must show in the BODY",
         "Never encode",
         "the field that makes depth render",

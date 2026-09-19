@@ -445,3 +445,17 @@ The second is a regression introduced by [0059](../decisions/0059-blocking-and-s
 
 **And the stage itself was the wrong choice.** The owner: "there isn't too much to 'do' with such a confined space." A sedan cabin permits posture changes on a bench and little else, so the planned escalation -- lying, then kneeling up, then leaning over the seat back -- had nowhere to go. No rule here fixes that. Scene selection is a lever on image quality in its own right and this project has never treated it as one.
 
+**2026-09-19** · Same car-cabin run, the near-misses · *category: what almost worked, and the one change each needed* · genre: horror, embodied threat — **[ADR 0062](../decisions/0062-eyes-point-somewhere-and-concealment-changes.md)**
+
+Recorded separately from that run's failure entry because it is a different kind of evidence. The owner, explicitly: "i'm trying to share more 'what DOES work', 'what almost works', because we need some positive signals here, and they have been more common as we've been working."
+
+**Beat 2, third candidate -- the closest the threat came to working.** "the monster is drooling and has a 'zombie about to lunge' posture over the chair behind her." A coiled, pre-lunge posture over an object is readable and effective. Worth noting the threat was still not touching her; a body *about to* act on someone apparently carries much of what acting on them would.
+
+**What beat 2 needed:** "she looks scared but is just looking randomly... if she was 'trying to look behind herself to the right' where humans will move their eyeballs as far right as they can when they sense something is behind them and they're slowly turning to see it, and the enemy was doing something more interesting and clearly the position she's looking towards, this could be an effective beat."
+
+This refines the gaze finding rather than reversing it. Two evals established that a *horror figure's* gaze is unreadable, because the model renders its eyes as featureless white or black -- so the threat's gaze must be carried by posture. The human character's eyes render normally, and hers were simply never specified, so they pointed nowhere. Gaze is unspecifiable for the monster and unspecified for the protagonist; only the second is fixable.
+
+**Beat 3, second candidate -- "almost quite good".** What it needed: "if the monster looked more sinister and like he was 'ok she sees me, i'm going to stop sort of hiding and go all out!', it'd be pretty cool." A concealment *arc*, hinged on being noticed. [0060](../decisions/0060-threat-is-hidden-not-distant.md) established the threat should be hidden and nothing said its hiddenness should ever change, so a plan can hide it identically in every beat -- three poses instead of a scene.
+
+Also worth keeping for the record: the owner's overall positives on a run he rejected. "the two characters are being rendered in unique ways, their seating positions and arms and legs are all at least possible. the overall vibe is scary, the figure is scary and the girl usually looks believably concerned and/or scared." Character identity, limb plausibility, mood and expression are all things this document has open entries about from earlier runs, and none of them failed here.
+

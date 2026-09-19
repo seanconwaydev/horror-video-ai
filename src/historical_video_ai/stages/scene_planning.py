@@ -321,6 +321,13 @@ behind the near edge of a pillar, a door frame, a parked car, with \
 `occlusion` naming exactly how much of it survives. That is the version \
 this pipeline renders reliably, and it is scarier: a thing thirty metres \
 away is a thing you have time to escape.
+- Across the scene the threat's CONCEALMENT must change, and the moment \
+it is noticed is the hinge. While unseen it stays hidden; once the \
+protagonist registers it, it stops hiding and commits -- give that beat a \
+visibly smaller `occlusion` than the one before, and an `action` that \
+comes out from behind whatever was covering it: weight onto the front \
+foot, shoulders squared at her, no longer holding still. A threat equally \
+hidden in every beat has no story in it, only three poses.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
 decaying, a sound growing louder), give EVERY beat its own explicit, \
@@ -478,6 +485,13 @@ models default to a flat, neutral expression unless a specific emotion is \
 named outright (e.g. "her jaw tightens, eyes wide with fear" rather than \
 just "she listens"). Never write a beat's `action` describing only body \
 movement or position with no stated facial expression or emotional state.
+- State WHERE THE EYES ARE POINTED as well as what the face is doing, and \
+point them at something named in the beat. A person who senses something \
+behind them strains their eyes toward it before their head arrives -- \
+"her eyes cut hard to the right, whites showing on the far side, her head \
+only starting to follow". Fear with the eyes aimed at nothing reads as \
+distraction, not fear: a real run produced a woman who "looks scared but \
+is just looking randomly" while the threat stood behind her.
 - If the scene describes or implies a character's emotional state \
 building or shifting over its course (fear or dread escalating, \
 excitement rising, calm curdling into panic), give every beat its own \
