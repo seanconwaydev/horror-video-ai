@@ -832,18 +832,26 @@ def _truncate_references_safely(plan: ScenePlan, max_references: int) -> ScenePl
     return ScenePlan(characters=characters, locations=locations, beats=plan.beats)
 
 
-def _parse_staging(item: dict, characters: list) -> list[Staging]:
+def _parse_staging(item: dict, characters: list, *, strict: bool) -> list[Staging]:
     """Parse one beat's `staging` list.
 
-    Falls back to a single entry for the first character, not for
-    `subject`: `subject` is not reliably an id -- real plans have used both
-    a bare id ("w1") and a description ("The influencer") there. The first
-    character is who a beat was rendered with before docs/decisions/0041,
-    so a planning model that ignores this field still yields a usable
-    single-character beat rather than failing the run.
+    `strict` is the difference between reading a model's answer and
+    reading an archived file -- see `load_scene_plan` and
+    docs/decisions/0065. Lenient parsing falls back to a single entry for
+    the first character, not for `subject`: `subject` is not reliably an
+    id -- real plans have used both a bare id ("w1") and a description
+    ("The influencer") there. The first character is who a beat was
+    rendered with before docs/decisions/0041, so an archived pre-0049 plan
+    still loads as a usable single-character beat.
     """
     raw = item.get("staging")
     if not raw:
+        if strict:
+            raise ScenePlanningError(
+                f"A beat has no 'staging' entries (beat subject: {item.get('subject')!r}). "
+                "Every character visible in the beat needs one, including the threat "
+                "(docs/decisions/0049)."
+            )
         if not characters:
             return []
         return [Staging(character_id=characters[0].id, action=item.get("action", ""),
@@ -867,6 +875,12 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
         _require_str_fields(
             entry, ["character_id", "action", "blocking"], item_desc="A staging entry"
         )
+        if strict and not entry.get("size_in_frame"):
+            raise ScenePlanningError(
+                f"Staging for {entry['character_id']!r} has no 'size_in_frame'. It is the "
+                "field that carries depth -- world placement without it never once "
+                "rendered the right depth ordering (docs/decisions/0059)."
+            )
         optional = {"occlusion", "size_in_frame"}
         staging.append(
             Staging(
@@ -880,12 +894,21 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
 
 def _parse_scene_plan(raw_content: str) -> ScenePlan:
     data = parse_json_response(raw_content, ScenePlanningError, "Scene-planning response")
-    return load_scene_plan(data)
+    return load_scene_plan(data, strict=True)
 
 
-def load_scene_plan(data: object) -> ScenePlan:
+def load_scene_plan(data: object, *, strict: bool = False) -> ScenePlan:
     """Build a ScenePlan from an already-decoded plan object -- the model's
     response and a saved plan read back off disk take the same path.
+
+    `strict=True` is for a live model response and refuses the
+    backward-compatibility fallbacks: a beat with no `staging`, or a
+    staging entry with no `size_in_frame`, is a planner that ignored the
+    prompt, and accepting it costs a paid image and a human review of a
+    beat whose prompt silently lost its STANDS:/SIZE IN FRAME: lines. The
+    default stays lenient so an archived pre-0049 plan still loads, which
+    is what `--fixture`, `--video-gen-from` and the eval harness need.
+    See docs/decisions/0065.
 
     Public because the eval harness reads plans from JSON too; it built
     beats with `Beat(**beat)` and so got plain dicts where `staging`
@@ -924,7 +947,7 @@ def load_scene_plan(data: object) -> ScenePlan:
         beats.append(
             Beat(
                 **{f: item[f] for f in Beat.__dataclass_fields__ if f != "staging"},
-                staging=_parse_staging(item, characters),
+                staging=_parse_staging(item, characters, strict=strict),
             )
         )
     check_beat_location_references(beats, locations)

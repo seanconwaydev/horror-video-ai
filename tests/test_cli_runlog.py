@@ -19,8 +19,10 @@ from historical_video_ai.cli.runlog import (
     load_fixture,
     new_run_dir,
     project_root,
+    read_log,
     safe_path_component,
     slugify,
+    write_log,
 )
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
@@ -259,3 +261,35 @@ def test_ids_used_as_directory_names_cannot_escape_the_run_folder(raw_id, expect
 
 
 # --- one review prompt, asked every time (ADR 0043) ---
+
+
+def test_a_failed_write_leaves_the_previous_run_log_intact(tmp_path, monkeypatch):
+    """The whole point of writing through a temp file. Before this,
+    `write_text` truncated run_log.json first, so an interruption part-way
+    destroyed every earlier stage's record -- and docs/decisions/0056
+    makes these writes frequent precisely because runs get abandoned
+    part-way."""
+    write_log(tmp_path, {"time": "1969", "research_claims": ["kept"]})
+
+    # Interrupt *during* the write, after truncation -- not before it.
+    # A fake that raises before any bytes are written passes against the
+    # old truncate-in-place implementation too, and so proves nothing.
+    real_write_text = Path.write_text
+
+    def half_then_interrupt(self, data, *args, **kwargs):
+        real_write_text(self, data[: len(data) // 2], *args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "write_text", half_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        write_log(tmp_path, {"time": "1969", "research_claims": ["lost"]})
+    monkeypatch.undo()
+
+    assert read_log(tmp_path) == {"time": "1969", "research_claims": ["kept"]}
+
+
+def test_write_log_round_trips_and_leaves_no_temp_file_behind(tmp_path):
+    write_log(tmp_path, {"beats": [{"id": "b1"}]})
+
+    assert read_log(tmp_path) == {"beats": [{"id": "b1"}]}
+    assert [p.name for p in tmp_path.iterdir()] == ["run_log.json"]

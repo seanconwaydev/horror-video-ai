@@ -62,6 +62,7 @@ def _valid_payload(**overrides) -> dict:
                         "character_id": "influencer",
                         "action": "thumbs the screen awake and angles it away from the sun",
                         "blocking": "right third, filling half the frame height",
+                        "size_in_frame": "roughly a third of the image",
                     }
                 ],
                 "camera": "medium shot",
@@ -1032,9 +1033,25 @@ def test_check_beat_character_references_rejects_an_unknown_id():
         check_beat_character_references([beat], known)
 
 
-def test_a_beat_without_staging_falls_back_to_the_first_character():
-    """A planning model that ignores the new field still produces a usable
-    single-character beat -- which is what every beat was before ADR 0041."""
+def test_an_archived_beat_without_staging_falls_back_to_the_first_character():
+    """Reading a plan off disk stays lenient: a pre-ADR-0041 beat still
+    produces a usable single-character beat, which is what --fixture,
+    --video-gen-from and the eval harness replay (docs/decisions/0065)."""
+    from historical_video_ai.stages.scene_planning import load_scene_plan
+
+    payload = _valid_payload()
+    payload["beats"][0].pop("staging", None)
+
+    plan = load_scene_plan(payload)
+
+    assert [s.character_id for s in plan.beats[0].staging] == [plan.characters[0].id]
+
+
+def test_a_live_beat_without_staging_is_refused_rather_than_silently_downgraded():
+    """The same input from a *model* is a planner that ignored the prompt,
+    not an old file. Accepting it spent a paid image on a beat whose prompt
+    had silently lost its STANDS:/SIZE IN FRAME: lines, with nothing said
+    (docs/decisions/0065)."""
     payload = _valid_payload()
     payload["beats"][0].pop("staging", None)
 
@@ -1043,8 +1060,33 @@ def test_a_beat_without_staging_falls_back_to_the_first_character():
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
         )
 
-    plan = run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
-    assert [s.character_id for s in plan.beats[0].staging] == [plan.characters[0].id]
+    with pytest.raises(ScenePlanningError, match="no 'staging' entries"):
+        run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+
+
+def test_a_live_staging_entry_without_size_in_frame_is_refused():
+    """docs/decisions/0059: world placement without size_in_frame never
+    once rendered the right depth ordering (0/10), with it never failed
+    (14/14). An empty one drops the SIZE IN FRAME: line entirely."""
+    payload = _valid_payload()
+    del payload["beats"][0]["staging"][0]["size_in_frame"]
+
+    def _completion(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+        )
+
+    with pytest.raises(ScenePlanningError, match="no 'size_in_frame'"):
+        run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+
+
+def test_an_archived_staging_entry_without_size_in_frame_still_loads():
+    from historical_video_ai.stages.scene_planning import load_scene_plan
+
+    payload = _valid_payload()
+    del payload["beats"][0]["staging"][0]["size_in_frame"]
+
+    assert load_scene_plan(payload).beats[0].staging[0].size_in_frame == ""
 
 
 def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():

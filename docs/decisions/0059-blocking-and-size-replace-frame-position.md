@@ -9,6 +9,10 @@ Narrows [0049](./0049-per-character-staging-in-beats.md), which introduced
 [0054](./0054-one-fact-per-field.md)'s rule to the field 0054 itself split
 `occlusion` out of.
 
+Narrowed by [0065](./0065-strict-for-a-model-lenient-for-a-file.md): the
+backward-compatibility fallback this relies on now applies only when reading
+a stored plan, never to a live model response.
+
 ## Context
 
 The project owner, on why images only came out well by accident: "the

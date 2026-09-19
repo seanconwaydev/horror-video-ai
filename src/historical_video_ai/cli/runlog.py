@@ -15,6 +15,7 @@ counter that reused a name and silently destroyed a paid-for image) and
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -137,7 +138,31 @@ def new_run_dir(slug: str | None = None) -> Path:
 
 
 def write_log(out_dir: Path, log: dict) -> None:
-    (out_dir / "run_log.json").write_text(json.dumps(log, indent=2, default=str))
+    """Replace run_log.json atomically: write a sibling temp file, then
+    rename it over the target.
+
+    A plain `write_text` truncates the real file first, so any interruption
+    between truncate and the last chunk leaves invalid JSON and
+    `read_log` loses the whole run -- research, fact-check and every
+    finished beat, not just the write in progress. Real logs run to tens
+    of kilobytes, so that window spans several write syscalls rather than
+    one.
+
+    It is a live risk rather than a theoretical one because
+    docs/decisions/0056 deliberately made these writes frequent -- three
+    per beat attempt -- to stop an abandoned run losing its work, and
+    abandoning a run part-way is the normal way this pipeline is used.
+    `os.replace` is atomic on POSIX when both paths are on one
+    filesystem, which a sibling temp file guarantees.
+
+    No fsync: this protects against the process dying (Ctrl-C, a crash),
+    which is what actually happens here, not against power loss, which
+    would cost a flush on every one of those writes.
+    """
+    path = out_dir / "run_log.json"
+    tmp_path = path.parent / f"{path.name}.tmp"
+    tmp_path.write_text(json.dumps(log, indent=2, default=str))
+    os.replace(tmp_path, path)
 
 
 def read_log(out_dir: Path) -> dict:
