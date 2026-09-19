@@ -32,6 +32,8 @@ uv run historical-video-ai --time "July 1969" --place "Cape Canaveral, Florida" 
 
 Copy `.env.example` to `.env` and fill in real API keys before running anything that calls a model (never commit `.env`; it's gitignored).
 
+One **external, non-Python dependency**: `evals/motion_test.py` shells out to `ffmpeg` to measure frame-to-frame motion. `uv sync` cannot install it and nothing else in the repo needs it (macOS: `brew install ffmpeg`). That script checks for it up front, because the measurement runs after generation and a missing `ffmpeg` otherwise surfaced only once a clip had already been paid for.
+
 ## Verification discipline
 
 **CI runs `ruff`, `pytest` and `mypy` on every push and PR, plus an

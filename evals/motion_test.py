@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import shutil
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -71,6 +72,18 @@ def _mean_frame_delta(video_path: Path) -> float:
         return sum(deltas) / len(deltas)
 
 
+def _ffmpeg_missing() -> bool:
+    """ffmpeg is an external dependency of this script only -- it is not a
+    Python package, so `uv sync` cannot install it and nothing else in the
+    repo needs it. Checked up front because the measurement runs *after*
+    generation: without this, a missing ffmpeg surfaced as a bare
+    FileNotFoundError having already paid for the first clip, which
+    inverts the cheap-before-expensive ordering docs/architecture.md is
+    built on.
+    """
+    return shutil.which("ffmpeg") is None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("images", nargs="*", type=Path, help="still images to animate")
@@ -95,8 +108,23 @@ def main() -> None:
         print(f"  {image}")
 
     if args.dry_run:
+        if _ffmpeg_missing():
+            print(
+                "\nheads up: ffmpeg is not on PATH, so a real run could generate "
+                "clips but not measure them. Install it before spending "
+                "(macOS: brew install ffmpeg)."
+            )
         print("\n--dry-run: nothing called, nothing spent.")
         return
+
+    # Before load_environment, and well before the first paid call.
+    if _ffmpeg_missing():
+        parser.error(
+            "ffmpeg is not on PATH and this script needs it to measure the clips "
+            "it generates. Install it first (macOS: brew install ffmpeg) -- "
+            "checking now rather than after paying for a clip that could not "
+            "then be measured."
+        )
 
     load_environment()
     out_dir = EVALS_DIR / "results" / f"motion-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
