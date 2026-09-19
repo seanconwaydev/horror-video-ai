@@ -1,9 +1,10 @@
 """Shared helper for building vision-model image inputs -- every stage that
-sends a reference image to a vision-capable model (previz_review,
-moderation's policy check and risk review) base64-encodes it and wraps it
-in the same `{"type": "image_url", "image_url": {"url": "data:..."}}`
-content-block shape litellm.completion() and litellm.moderation() both
-expect for an image input part.
+sends a reference image to a vision-capable model (moderation's policy
+check, and previz_review, which survives only for evals per
+docs/decisions/0055) base64-encodes it and wraps it in the same
+`{"type": "image_url", "image_url": {"url": "data:..."}}` content-block
+shape litellm.completion() and litellm.moderation() both expect for an
+image input part.
 """
 
 from __future__ import annotations

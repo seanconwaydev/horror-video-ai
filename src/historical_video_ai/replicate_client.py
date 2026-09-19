@@ -3,9 +3,11 @@ model provider without going through litellm.
 
 Deliberate, scoped exception to docs/decisions/0003's "everything through
 litellm" convention: litellm has no video-generation support for Replicate
-(confirmed against 1.100.1 by reading its source -- only OpenAI, Azure,
-Gemini, Vertex AI and RunwayML are wired up). See docs/decisions/0037 for
-the decision and docs/decisions/0038 for this implementation.
+(re-confirmed against the installed 1.101.0 on 2026-09-19: `llms/replicate/`
+carries only `chat` and `common_utils.py`, and every `videos` provider
+directory is OpenAI, Azure, Gemini, Vertex AI, hosted_vllm or RunwayML).
+See docs/decisions/0037 for the decision and docs/decisions/0038 for this
+implementation.
 
 Replicate's prediction API is async: create a prediction, poll it to a
 terminal status, then fetch the output file from the URL it returns.

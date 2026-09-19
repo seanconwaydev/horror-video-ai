@@ -68,10 +68,11 @@ def run_moderation_policy_check(
     # at all (unlike completion()/image_generation()), so config.yaml's
     # pinned "openai/omni-moderation-latest" -- the LiteLLM format every
     # other stage uses -- gets rejected by OpenAI's own API with a real
-    # 400. Confirmed still present in litellm 1.100.1 (latest released,
-    # checked 2026-09-14); the issue itself is closed "not planned", so
-    # this strips the prefix at this one call site instead of waiting on
-    # an upstream fix that was declined.
+    # 400. Confirmed still present in litellm 1.101.0 -- the version this
+    # project runs -- by reading `litellm.moderation`'s source in the
+    # installed package (2026-09-19); the issue itself is closed "not
+    # planned", so this strips the prefix at this one call site instead of
+    # waiting on an upstream fix that was declined.
     response = moderation_fn(
         input=[
             {"type": "text", "text": prompt},

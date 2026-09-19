@@ -100,10 +100,9 @@ def _call_with_transient_retry(
     on_transient_retry: Callable[[int, Exception], None] | None,
     **kwargs: object,
 ) -> Any:
-    """Shared retry loop for both
-    run_reference_image_stage -- identical transient-error handling
-    (docs/decisions/0016), regardless of which underlying call (plain
-    generation or image-conditioned edit) is being made."""
+    """Shared transient-error retry loop (docs/decisions/0016), wrapping
+    whichever underlying call is being made -- plain generation or
+    image-conditioned edit."""
     for attempt in range(1, _MAX_TRANSIENT_RETRIES + 1):
         try:
             return fn(**kwargs)
