@@ -32,24 +32,37 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Rewrite beats that depend on distance
+## 1. Run a horror scene end to end under 0059 + 0060
 
-Not a code task. Four blind runs established that **distance is not
-promptable** -- "does the far figure read as far away" succeeded in 1 image
-out of 22, across every authoring style tried, including an explicit
-"roughly a twentieth of the image". The owner: "he's never more than ~10
-feet in front of her... a parking garage could have him 50-100+ feet away
-easily."
+Everything measured so far has been measured in pieces. What has not
+happened is a full interactive run with all of this session's changes
+live: the duplicate `ACTION:` line gone
+([0057](../decisions/0057-drop-the-duplicate-action-line.md)), three
+prompt rules deleted ([0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)),
+`blocking` + `size_in_frame` ([0059](../decisions/0059-blocking-and-size-replace-frame-position.md)),
+and the threat now written close-and-hidden rather than distant
+([0060](../decisions/0060-threat-is-hidden-not-distant.md)).
 
-[0059](../decisions/0059-blocking-and-size-replace-frame-position.md) fixed
-the near field -- whether two characters read as occupying one space in a
-believable order -- and explicitly did not fix this. The open question is
-what the planner should do instead when a scene wants a figure noticed at
-a distance: a different shot (something in the foreground the figure is
-small against), a different beat (cut to him rather than seeing him far
-off), or simply not writing the beat. Worth deciding before the next horror
-run, because the planning rules currently encourage exactly the shot that
-cannot be delivered.
+```
+uv run historical-video-ai --genre horror --tone dread --style horror-comic \
+  --candidates 3 --max-beats 3 --experiment-model deepseek/deepseek-v4-flash \
+  --time "present day" --place "an underground car park at night" \
+  --description "a woman realises someone has been standing between the pillars watching her"
+```
+
+`--max-beats 3`, because the unconstrained plan came back with 8 and three
+candidates each is ~24 paid images. Run it interactively so it produces
+labels ([0053](../decisions/0053-human-judgements-are-recorded-as-data.md)).
+
+Two specific things to watch, both of which are predictions this session
+made and has not tested:
+
+- **Does the threat now arrive close and occluded?** 0060 rewrote the rule
+  after a plan-only run put it "far down the aisle beyond her". Read the
+  scene plan at the review gate before spending.
+- **Does near-field depth ordering hold with a real planner's text?** It
+  was 14/14 on prose written by hand for the eval. The planner's own
+  `blocking` and `size_in_frame` have never been rendered.
 
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 

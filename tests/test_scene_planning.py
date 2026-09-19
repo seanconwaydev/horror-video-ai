@@ -840,6 +840,35 @@ def test_staging_parses_size_in_frame_and_defaults_it_for_older_plans():
     assert load_scene_plan(payload).beats[0].staging[0].size_in_frame == ""
 
 
+# docs/decisions/0060: the threat rule used to offer "a shape at the edge
+# of vision", and a plan-only run took it -- putting the figure "far down
+# the aisle beyond her", the shot that scored 1 in 22 measured images.
+def test_threat_rule_asks_for_occlusion_rather_than_distance():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "made ominous by OCCLUSION, not by distance" in prompt
+    assert "Put it CLOSE and HIDDEN instead" in prompt
+    # and the option that produced the unrenderable shot is gone rather
+    # than merely counterbalanced by the new rule
+    assert "a shape at the edge of vision" not in prompt
+
+
 def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
     captured = {}
 

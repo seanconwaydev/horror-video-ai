@@ -296,8 +296,8 @@ fear-appropriate.
 - This is a horror/suspense scene: the central threat must read as present \
 across a clear majority of beats, not declared once and then dropped -- \
 give most beats some concrete visual trace of it (a shadow, a disturbed \
-object, a shape at the edge of vision), even when the beat's main action \
-is just the character moving through a space.
+object, a shape partly behind a near object), even when the beat's main \
+action is just the character moving through a space.
 - If that threat is an embodied character rather than an environmental \
 effect -- a person, a creature, a figure -- define it as a Character and \
 GIVE IT ITS OWN `staging` ENTRY on every beat where any part of it is \
@@ -312,6 +312,15 @@ fraction of the image it occupies; in `blocking` say where it stands \
 relative to the camera and the other characters; in `occlusion` name the \
 specific object doing the hiding. Its `action` is a separate question and must still give it \
 something to DO.
+- An embodied threat is made ominous by OCCLUSION, not by distance. Do \
+NOT place it far away from the protagonist or deep in the background: a \
+figure written as distant rendered as merely a few feet off in 21 of 22 \
+measured images, whatever `size_in_frame` said, so the shot reads as a \
+mistake rather than as distance. Put it CLOSE and HIDDEN instead -- \
+behind the near edge of a pillar, a door frame, a parked car, with \
+`occlusion` naming exactly how much of it survives. That is the version \
+this pipeline renders reliably, and it is scarier: a thing thirty metres \
+away is a thing you have time to escape.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
 decaying, a sound growing louder), give EVERY beat its own explicit, \
