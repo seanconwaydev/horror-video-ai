@@ -223,7 +223,10 @@ def test_request_retries_a_transport_failure_not_just_a_status_code(monkeypatch)
     retrying status codes alone missed it. Observed repeatedly as
     "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert bad record mac", which
     killed two images of a paid batch after the status-code retry was
-    already in place."""
+    already in place.
+
+    A GET, because polling changes nothing and so can always be repeated.
+    The POST carve-out is below."""
     calls = {"n": 0}
 
     def _flaky(*a, **k):
@@ -236,12 +239,73 @@ def test_request_retries_a_transport_failure_not_just_a_status_code(monkeypatch)
     slept = []
 
     result = _default_request_fn(
-        "POST", "http://x", headers={}, json_body=None, sleep_fn=slept.append
+        "GET", "http://x", headers={}, json_body=None, sleep_fn=slept.append
     )
 
     assert result == {"id": "p1"}
     assert calls["n"] == 2
     assert slept, "should have waited before retrying"
+
+
+@pytest.mark.parametrize("status", [408, 500, 502, 503, 504])
+def test_a_post_is_not_retried_on_an_ambiguous_server_error(monkeypatch, status):
+    """Creating a prediction is not idempotent and Replicate has no
+    idempotency key. A 5xx or 408 may mean the prediction was accepted and
+    only the response was lost, so retrying pays for a second generation
+    and orphans the first (docs/decisions/0067)."""
+    calls = {"n": 0}
+
+    def _fails(*a, **k):
+        calls["n"] += 1
+        return _FakeResponse(status, {"detail": "boom"})
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _fails)
+
+    with pytest.raises(ReplicateError, match=f"HTTP {status}"):
+        _default_request_fn(
+            "POST", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None
+        )
+    assert calls["n"] == 1, "a POST must be sent exactly once for an ambiguous failure"
+
+
+def test_a_post_is_not_retried_on_a_transport_failure(monkeypatch):
+    """The same ambiguity: the connection can drop after Replicate has
+    accepted the prediction."""
+    calls = {"n": 0}
+
+    def _always_fails(*a, **k):
+        calls["n"] += 1
+        raise httpx.ConnectError("bad record mac")
+
+    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _always_fails)
+
+    with pytest.raises(ReplicateError, match="bad record mac"):
+        _default_request_fn(
+            "POST", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None
+        )
+    assert calls["n"] == 1
+
+
+def test_a_post_is_still_retried_on_a_throttle(monkeypatch):
+    """429 is the one failure safe to repeat on any method: it means the
+    request was rejected before being processed. It is also the case that
+    actually recurs here -- Replicate drops to 6 requests/minute under $5
+    of credit, which a clip-per-beat run walks straight into."""
+    responses = iter(
+        [
+            _FakeResponse(429, {"retry_after": 1}),
+            _FakeResponse(200, {"id": "p1", "status": "succeeded"}),
+        ]
+    )
+    monkeypatch.setattr(
+        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+    )
+
+    result = _default_request_fn(
+        "POST", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None
+    )
+
+    assert result == {"id": "p1", "status": "succeeded"}
 
 
 def test_request_gives_up_on_a_persistent_transport_failure(monkeypatch):

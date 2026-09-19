@@ -47,7 +47,21 @@ _DEFAULT_TIMEOUT_SECONDS = 60.0
 # requests while you have less than $5.0 in credit". A pipeline generating
 # one clip per beat walks straight into that, and without a retry the whole
 # run dies on a 429 that the API itself says will clear in ~3 seconds.
+#
+# 429 is the only failure safe to retry on ANY method. It means the
+# request was rejected before it was processed, so a retry cannot
+# duplicate work. Every other retryable failure here -- a 5xx, a 408, a
+# dropped connection -- is ambiguous: the request may have been accepted
+# and only the response lost. Retrying those on a POST that creates a
+# prediction starts a second paid generation while the first runs on,
+# orphaned and billed, so they are retried only on methods that change
+# nothing. Replicate has no idempotency key for prediction creation
+# (checked 2026-09-19); its documented idempotency guidance covers
+# deduplicating webhook deliveries on prediction.id, which does not help a
+# lost creation response. See docs/decisions/0067.
+_THROTTLE_STATUS = 429
 _RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+_SAFE_TO_REPEAT_METHODS = frozenset({"GET", "HEAD"})
 _MAX_TRANSPORT_RETRIES = 5
 _FALLBACK_RETRY_DELAY_SECONDS = 5.0
 
@@ -83,15 +97,19 @@ def _default_request_fn(
     json_body: dict | None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> dict:
-    """Perform one JSON API call, retrying throttling and transient server
-    errors. Injection point for tests -- every function below takes this as
-    a parameter rather than importing httpx directly, so no test ever needs
-    the network.
+    """Perform one JSON API call, retrying throttling and -- on methods that
+    change nothing -- transient server and transport errors. Injection
+    point for tests: every function below takes this as a parameter rather
+    than importing httpx directly, so no test ever needs the network.
 
     Waits for the duration Replicate itself names in `retry_after` rather
     than guessing, since the whole point of its throttle response is that
     it tells you when the window reopens.
+
+    What is retried depends on the method, not just the failure -- see
+    `_SAFE_TO_REPEAT_METHODS` above and docs/decisions/0067.
     """
+    repeatable = method.upper() in _SAFE_TO_REPEAT_METHODS
     for attempt in range(1, _MAX_TRANSPORT_RETRIES + 1):
         try:
             response = httpx.request(
@@ -103,13 +121,19 @@ def _default_request_fn(
             # repeatedly as "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert
             # bad record mac", which killed two images of a paid batch after
             # the status-code retry was already in place.
-            if attempt == _MAX_TRANSPORT_RETRIES:
+            #
+            # Not retried on a POST: the connection can drop after Replicate
+            # has accepted the prediction, and a retry would then pay for a
+            # second one.
+            if not repeatable or attempt == _MAX_TRANSPORT_RETRIES:
                 raise ReplicateError(f"Replicate {method} {url} failed: {exc}") from exc
             sleep_fn(_FALLBACK_RETRY_DELAY_SECONDS)
             continue
         if response.status_code < 400:
             return response.json()
-        if response.status_code not in _RETRYABLE_STATUSES or attempt == _MAX_TRANSPORT_RETRIES:
+        throttled = response.status_code == _THROTTLE_STATUS
+        retryable = throttled or (repeatable and response.status_code in _RETRYABLE_STATUSES)
+        if not retryable or attempt == _MAX_TRANSPORT_RETRIES:
             raise ReplicateError(
                 f"Replicate {method} {url} failed with HTTP {response.status_code}: "
                 f"{response.text}"
