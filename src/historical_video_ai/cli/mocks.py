@@ -46,7 +46,6 @@ def mock_completion(**kwargs: Any) -> SimpleNamespace:
                         "text": "[MOCK] A placeholder claim standing in for real research.",
                         "source": "[MOCK] no real source -- this is a dry run",
                         "date": None,
-                        "names": [],
                     }
                 ]
             }

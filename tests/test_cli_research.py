@@ -162,7 +162,6 @@ def _fake_reverify_completion(fact_check_payload=None):
                             "text": "A newly researched claim for the corrected scene.",
                             "source": "Some source",
                             "date": None,
-                            "names": [],
                         }
                     ]
                 }
@@ -270,7 +269,6 @@ def test_run_research_and_fact_check_on_research_completed_survives_a_fact_check
                                         "text": "A claim from research.",
                                         "source": "A source",
                                         "date": None,
-                                        "names": [],
                                     }
                                 ]
                             }

@@ -64,6 +64,7 @@ def test_a_grounded_historical_run_records_its_stages(run_in):
     # ungrounded branch being taken by accident.
     assert log["research_claims"]
     assert "fact_check_flags" in log
+    assert log["research_model"] and log["fact_check_model"]
     assert log["scene_plan"]["beats"]
     assert log["previz_beats"]
 
@@ -88,6 +89,12 @@ def test_an_ungrounded_genre_skips_research_and_says_so_in_the_log(run_in):
     assert log["genre"] == "meme"
     assert log["requires_grounding"] is False
     assert log["research_claims"] == []
+    # Neither stage ran, so neither model is recorded. The run log is the
+    # judgement dataset (docs/decisions/0053): a field naming what
+    # produced a row is worse than absent if it names something that
+    # never ran.
+    assert "research_model" not in log
+    assert "fact_check_model" not in log
     assert log["scene_plan"]["beats"]
 
 

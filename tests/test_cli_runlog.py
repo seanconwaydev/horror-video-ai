@@ -38,7 +38,6 @@ def _write_fixture(tmp_path, **overrides):
                 "text": "The dunes at Kitty Hawk were largely undeveloped in 1903.",
                 "source": "NPS",
                 "date": None,
-                "names": [],
             }
         ],
         "fact_check_flags": [],
@@ -103,7 +102,7 @@ def test_load_fact_sheet_from_fixture_works_without_fact_check_flags(tmp_path):
         "place": "Kitty Hawk, North Carolina",
         "description": "watches a flying machine lift off from the dunes.",
         "research_claims": [
-            {"text": "A claim.", "source": "A source", "date": None, "names": []}
+            {"text": "A claim.", "source": "A source", "date": None}
         ],
     }
     path = tmp_path / "fixture.json"

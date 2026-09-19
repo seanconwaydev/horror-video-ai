@@ -434,8 +434,15 @@ def main() -> None:
                 return
             fact_sheet, fact_check_result = result
 
-    log["research_model"] = research_model
-    log["fact_check_model"] = fact_check_model
+    # Only the models that actually ran. An ungrounded run
+    # (docs/decisions/0034/0035) skips research and fact-check entirely,
+    # so stamping their pinned models here recorded two calls that never
+    # happened -- and the run log is the judgement dataset
+    # (docs/decisions/0053), where a field recording what produced a row
+    # has to be true or it is worse than absent.
+    if requires_grounding:
+        log["research_model"] = research_model
+        log["fact_check_model"] = fact_check_model
     log["research_claims"] = [dataclasses.asdict(c) for c in fact_sheet.claims]
     log["fact_check_flags"] = [dataclasses.asdict(f) for f in fact_check_result.flags]
     original_premise_conflict = fact_check_result.premise_conflict

@@ -27,6 +27,9 @@ def test_run_research_stage_parses_valid_response():
                 "text": "Kitty Hawk in Dec. 1903 was a remote, sparsely populated coastal area.",
                 "source": "Smithsonian National Air and Space Museum",
                 "date": "1903-12-17",
+                # An extra key the parser does not know: research prompts
+                # asked for "names" until it was deleted as dead weight,
+                # and a model can return anything. Ignored, not fatal.
                 "names": ["Kitty Hawk"],
             }
         ],
@@ -46,7 +49,6 @@ def test_run_research_stage_parses_valid_response():
     assert len(fact_sheet.claims) == 1
     assert fact_sheet.claims[0].source == "Smithsonian National Air and Space Museum"
     assert fact_sheet.claims[0].date == "1903-12-17"
-    assert fact_sheet.claims[0].names == ["Kitty Hawk"]
 
 
 def test_run_research_stage_parses_response_wrapped_in_markdown_fence():

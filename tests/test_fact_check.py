@@ -40,7 +40,6 @@ def _sample_fact_sheet() -> FactSheet:
                 text="Kitty Hawk was a remote, sparsely populated coastal area in 1903.",
                 source="Smithsonian National Air and Space Museum",
                 date="1903-12-17",
-                names=["Kitty Hawk"],
             )
         ],
     )

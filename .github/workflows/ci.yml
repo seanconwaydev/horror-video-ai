@@ -102,12 +102,10 @@ jobs:
       # the repo's own fixture with nothing to notice. These dry-runs
       # would have failed the day the field was deleted.
       #
-      # motion_test.py is deliberately absent: it takes a previous run's
-      # images as its input and globs evals/results/, which is gitignored.
-      # It passes locally, where results from earlier runs exist, and fails
-      # in a clean checkout -- which is what happened on this workflow's
-      # first run. It has no smoke coverage as a result; covering it would
-      # mean committing image fixtures.
+      # motion_test.py is run separately below: with no arguments it globs
+      # evals/results/, which is gitignored, so it passed locally and
+      # failed in a clean checkout -- what happened on this workflow's
+      # first run. It now has a committed still to point at.
       - name: Eval scripts still import and parse their fixtures
         run: |
           set -e
@@ -116,6 +114,12 @@ jobs:
             echo "--- $script"
             uv run python "evals/$script.py" --dry-run
           done
+
+      # Given an explicit still, because with no arguments it globs the
+      # gitignored evals/results/. evals/fixtures/still_9x16.png is
+      # committed for exactly this; --dry-run never opens it.
+      - name: Motion test parses its arguments
+        run: uv run python evals/motion_test.py --dry-run evals/fixtures/still_9x16.png
 
       # No --dry-run flag because it never calls a model at all; it reads
       # finished run logs. Exercised here so a change to the run-log shape

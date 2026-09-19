@@ -14,7 +14,7 @@ be wired in here the way Gemini's grounding does (see the fact_check stage).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import litellm
 
@@ -37,7 +37,6 @@ class Claim:
     text: str
     source: str
     date: str | None = None
-    names: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -78,8 +77,7 @@ exact shape:
     {{
       "text": "<a single factual/visual claim relevant to depicting this scene>",
       "source": "<a citation or source for this specific claim -- required>",
-      "date": "<date associated with this claim, or null>",
-      "names": ["<person, place, or object names involved>"]
+      "date": "<date associated with this claim, or null>"
     }}
   ]
 }}
@@ -105,7 +103,6 @@ def _parse_claims(raw_content: str) -> list[Claim]:
                 text=raw_claim["text"],
                 source=raw_claim["source"],
                 date=raw_claim.get("date"),
-                names=list(raw_claim.get("names") or []),
             )
         )
 
