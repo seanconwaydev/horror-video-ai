@@ -19,9 +19,31 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
 from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
 from historical_video_ai.stages.research import Claim, FactSheet
+
+_T = TypeVar("_T")
+
+
+def rebuild_from_log(cls: type[_T], data: dict) -> _T:
+    """Build one of the research-side dataclasses from a run log's dict,
+    ignoring keys the class no longer has.
+
+    A plain `Cls(**data)` raises `TypeError: unexpected keyword argument`
+    the moment a field is removed or renamed, which breaks every fixture
+    ever saved. That is not hypothetical here: the same pattern as
+    `Beat(**beat)` killed both anchor eval scripts when ADR 0045 deleted
+    `Beat.cinematography`, and the fix was to route them through the real
+    parser, which ignores unknown keys
+    (docs/playbook/repo-audit-brief.md, finding 4). The research side kept
+    the splat.
+
+    A *missing* required field still raises, because that is a genuinely
+    malformed fixture rather than an older one.
+    """
+    return cls(**{f: data[f] for f in cls.__dataclass_fields__ if f in data})  # type: ignore[attr-defined]
 
 
 def safe_path_component(value: str) -> str:
@@ -183,7 +205,7 @@ def load_fact_sheet_from_fixture(path: Path) -> FactSheet:
     for required_field in ("time", "place", "description"):
         if not data.get(required_field):
             raise ValueError(f"Fixture {path} is missing a non-empty '{required_field}'")
-    claims = [Claim(**c) for c in data["research_claims"]]
+    claims = [rebuild_from_log(Claim, c) for c in data["research_claims"]]
     return FactSheet(
         time=data["time"],
         place=data["place"],
@@ -206,7 +228,7 @@ def load_fixture(path: Path) -> FactCheckResult:
     data = json.loads(path.read_text())
     fact_sheet = load_fact_sheet_from_fixture(path)
     claims = fact_sheet.claims
-    flags = [ClaimFlag(**f) for f in data["fact_check_flags"]]
+    flags = [rebuild_from_log(ClaimFlag, f) for f in data["fact_check_flags"]]
 
     # Same invariant fact_check.py's _parse_flags enforces on a live model
     # response -- a fixture captured before that validation existed (or
@@ -223,7 +245,9 @@ def load_fixture(path: Path) -> FactCheckResult:
 
     raw_premise_conflict = data.get("premise_conflict")
     premise_conflict = (
-        PremiseConflict(**raw_premise_conflict) if raw_premise_conflict is not None else None
+        rebuild_from_log(PremiseConflict, raw_premise_conflict)
+        if raw_premise_conflict is not None
+        else None
     )
     # docs/decisions/0027: read back alongside premise_conflict -- a
     # fixture saved before this ADR won't have this key, so .get() rather

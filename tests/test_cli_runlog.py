@@ -293,3 +293,59 @@ def test_write_log_round_trips_and_leaves_no_temp_file_behind(tmp_path):
 
     assert read_log(tmp_path) == {"beats": [{"id": "b1"}]}
     assert [p.name for p in tmp_path.iterdir()] == ["run_log.json"]
+
+
+def _fixture_with(tmp_path, **overrides):
+    log = {
+        "time": "1969",
+        "place": "Florida",
+        "description": "she watches",
+        "research_claims": [{"text": "Apollo 11 launched.", "source": "s"}],
+        "fact_check_flags": [],
+        "premise_conflict": None,
+    }
+    log.update(overrides)
+    path = tmp_path / "run_log.json"
+    path.write_text(json.dumps(log))
+    return path
+
+
+def test_a_fixture_carrying_a_field_the_code_no_longer_has_still_loads(tmp_path):
+    """`Cls(**data)` raises on an unexpected keyword the moment a field is
+    removed or renamed, which breaks every fixture ever saved. That is the
+    same failure `Beat(**beat)` caused when ADR 0045 deleted
+    Beat.cinematography and killed both anchor eval scripts
+    (docs/playbook/repo-audit-brief.md, finding 4). The research side kept
+    the splat until now -- and `Claim.names` is currently written by
+    research and read by nothing, so it is exactly the field someone would
+    delete next."""
+    path = _fixture_with(
+        tmp_path,
+        research_claims=[
+            {"text": "Apollo 11 launched.", "source": "s", "retired_field": "from an older schema"}
+        ],
+        fact_check_flags=[
+            {
+                "claim_text": "Apollo 11 launched.",
+                "concern": "c",
+                "severity": "uncertain",
+                "also_retired": True,
+            }
+        ],
+        premise_conflict={"explanation": "e", "suggested_alternative": None, "gone": 1},
+    )
+
+    result = load_fixture(path)
+
+    assert [c.text for c in result.fact_sheet.claims] == ["Apollo 11 launched."]
+    assert [f.concern for f in result.flags] == ["c"]
+    assert result.premise_conflict.explanation == "e"
+
+
+def test_a_fixture_missing_a_required_field_still_fails(tmp_path):
+    """Tolerating *extra* keys must not tolerate absent ones -- a claim
+    with no text is malformed, not merely older."""
+    path = _fixture_with(tmp_path, research_claims=[{"source": "s"}])
+
+    with pytest.raises(TypeError, match="text"):
+        load_fact_sheet_from_fixture(path)
