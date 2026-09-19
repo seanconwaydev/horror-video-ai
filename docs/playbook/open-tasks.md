@@ -64,6 +64,36 @@ made and has not tested:
   was 14/14 on prose written by hand for the eval. The planner's own
   `blocking` and `size_in_frame` have never been rendered.
 
+## 2. Warn when a beat's camera height cannot exist in its location
+
+Found in the car-cabin run (`--style painterly`, logged in
+[failure-taxonomy.md](./failure-taxonomy.md)): a beat asked for
+`Medium shot, high above, from behind` **inside a sedan**, whose own
+`Location.architecture` names a steel roof and a fabric headliner.
+
+Nothing connects `camera` to what the location can contain, and two rules
+drive toward the collision.
+[0044](../decisions/0044-camera-specified-at-a-granularity-models-follow.md)
+offers four camera heights unconditionally, and the coverage rule requires
+consecutive beats at one location not to repeat a combination -- so in an
+enclosed interior, where half the vocabulary is unusable, a rule demanding
+variety reaches for the impossible half.
+
+This cannot be a hard check: whether a height is possible in a given space
+is a judgement about prose, and
+[0048](../decisions/0048-heuristic-gates-warn-rather-than-fail.md) reserves
+run-failing errors for decidable predicates. The fitting shape already
+exists in the codebase -- `identity_field_pose_warnings`, a heuristic
+non-blocking warning printed at the scene-plan review gate where a human is
+already reading the plan and can edit the field for free. A keyword pass
+over `Location.architecture` for enclosure words (roof, ceiling, headliner,
+cabin, interior) against camera heights of "high above" or "ground level"
+would have caught this instance.
+
+Worth deciding at the same time whether the planning rule should say it
+too, or whether the warning alone is enough -- ADR 0058's lesson is that a
+32nd bullet is not free.
+
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 
 The owner on the 2026-09-18 run: "the shadows and mood should probably be
