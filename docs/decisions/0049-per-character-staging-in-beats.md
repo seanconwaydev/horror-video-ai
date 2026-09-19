@@ -7,6 +7,13 @@ Date: 2026-09-16
 Accepted. Supersedes the `character_ids` field introduced by
 [0041](0041-beats-name-every-character-present.md).
 
+Two of the three fields this ADR gave `Staging` have since been split
+further, on the same one-fact-per-field evidence: `occlusion` moved out of
+`frame_position` in [0054](./0054-one-fact-per-field.md), and
+`frame_position` itself became `blocking` + `size_in_frame` in
+[0059](./0059-blocking-and-size-replace-frame-position.md). The rest of
+this decision stands.
+
 ## Context
 
 A four-beat horror run (`--references none`, four candidates per beat)

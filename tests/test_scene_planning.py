@@ -61,7 +61,7 @@ def _valid_payload(**overrides) -> dict:
                     {
                         "character_id": "influencer",
                         "action": "thumbs the screen awake and angles it away from the sun",
-                        "frame_position": "right third, filling half the frame height",
+                        "blocking": "right third, filling half the frame height",
                     }
                 ],
                 "camera": "medium shot",
@@ -75,8 +75,8 @@ def _valid_payload(**overrides) -> dict:
     return payload
 
 
-def _staging(cid, action="reaches for the door handle", frame_position="left third"):
-    return Staging(character_id=cid, action=action, frame_position=frame_position)
+def _staging(cid, action="reaches for the door handle", blocking="left third"):
+    return Staging(character_id=cid, action=action, blocking=blocking)
 
 
 def _beat(**overrides) -> Beat:
@@ -761,7 +761,7 @@ def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, t
     assert "a subject well off-centre" in prompt
     # docs/decisions/0054: the rule used to ask for this as prose in
     # `camera`, contradicting 0044's "three terms and nothing else" and
-    # duplicating frame_position. Each part now names its own field.
+    # duplicating blocking. Each part now names its own field.
     assert "never as extra prose in `camera`" in prompt
 
 
@@ -769,7 +769,7 @@ def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, t
 # rule elsewhere. Two rules still ended with an "unless X is the point"
 # hatch -- the stillness one licensed exactly the T-posing 0049 exists to
 # stop (docs/playbook/repo-audit-brief.md, finding 1).
-# docs/decisions/0054: occlusion moved out of frame_position's prose into
+# docs/decisions/0054: occlusion moved out of blocking's prose into
 # its own field. These assert the move actually happened rather than being
 # described -- a second statement of the same rule is the failure mode
 # this ADR exists to stop.
@@ -781,7 +781,7 @@ def test_staging_parses_occlusion_and_defaults_it_for_older_plans():
         {
             "character_id": payload["characters"][0]["id"],
             "action": "presses a palm flat to the wall",
-            "frame_position": "right third, a quarter of the frame",
+            "blocking": "right third, a quarter of the frame",
             "occlusion": "the pillar covers all but one shoulder",
         }
     ]
@@ -792,6 +792,52 @@ def test_staging_parses_occlusion_and_defaults_it_for_older_plans():
     # `staging` itself carries (docs/decisions/0049).
     del payload["beats"][0]["staging"][0]["occlusion"]
     assert load_scene_plan(payload).beats[0].staging[0].occlusion == ""
+
+
+# docs/decisions/0059: `frame_position` became `blocking` + `size_in_frame`.
+# Archived runs are replayed by --fixture and --video-gen-from, so a plan
+# saved before the split has to keep loading rather than becoming
+# unreadable.
+def test_staging_reads_a_pre_0059_frame_position_into_blocking():
+    from historical_video_ai.stages.scene_planning import load_scene_plan
+
+    payload = _valid_payload()
+    payload["beats"][0]["staging"] = [
+        {
+            "character_id": payload["characters"][0]["id"],
+            "action": "presses a palm flat to the wall",
+            "frame_position": "right third, a quarter of the frame",
+            "occlusion": "the pillar covers all but one shoulder",
+        }
+    ]
+
+    staged = load_scene_plan(payload).beats[0].staging[0]
+
+    assert staged.blocking == "right third, a quarter of the frame"
+    # The old field carried both facts in one string, and nothing can
+    # separate them after the fact -- so size is empty rather than guessed.
+    assert staged.size_in_frame == ""
+    assert staged.occlusion == "the pillar covers all but one shoulder"
+
+
+def test_staging_parses_size_in_frame_and_defaults_it_for_older_plans():
+    from historical_video_ai.stages.scene_planning import load_scene_plan
+
+    payload = _valid_payload()
+    payload["beats"][0]["staging"] = [
+        {
+            "character_id": payload["characters"][0]["id"],
+            "action": "presses a palm flat to the wall",
+            "blocking": "directly between her and the camera, near enough to touch her",
+            "size_in_frame": "roughly a third of the image",
+        }
+    ]
+
+    staged = load_scene_plan(payload).beats[0].staging[0]
+    assert staged.size_in_frame == "roughly a third of the image"
+
+    del payload["beats"][0]["staging"][0]["size_in_frame"]
+    assert load_scene_plan(payload).beats[0].staging[0].size_in_frame == ""
 
 
 def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
@@ -815,12 +861,14 @@ def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
     prompt = captured["messages"][0]["content"]
     # occlusion is asked for as its own field, in the schema and the rules
     assert '"occlusion"' in prompt
-    assert "`frame_position` is WHERE, `occlusion` is WHAT" in prompt
+    assert "`blocking` is WHERE THEY" in prompt
+    assert "`size_in_frame` is HOW BIG THEY READ" in prompt
+    assert "`occlusion` is WHAT HIDES" in prompt
     # the frozen-instant rule, which process verbs kept defeating
     assert "the frozen instant, not the movement through it" in prompt
     # and the old instruction is gone rather than duplicated: nothing may
-    # still tell the planner to put occlusion inside frame_position
-    assert "In `frame_position` state concretely" not in prompt
+    # still tell the planner to put occlusion inside blocking
+    assert "In `blocking` state concretely" not in prompt
 
 
 def test_planning_rules_carry_no_unless_its_the_point_escape_hatches():
@@ -1053,9 +1101,9 @@ def test_each_characters_action_sits_in_that_characters_own_prompt_block():
     beat = _beat(
         subject="w1",
         staging=[
-            _staging("w1", action="jams the key at the lock", frame_position="right of frame"),
+            _staging("w1", action="jams the key at the lock", blocking="right of frame"),
             _staging("fig1", action="reaches over the car roof toward her",
-                     frame_position="far left edge, a quarter of the frame"),
+                     blocking="far left edge, a quarter of the frame"),
         ],
     )
 
@@ -1114,7 +1162,7 @@ def test_a_staging_entry_missing_its_action_is_rejected():
         "BECAUSE OF another character",
         "must show in the BODY",
         "Never encode",
-        "rendered dead centre",
+        "the field that makes depth render",
     ],
 )
 def test_planning_prompt_carries_the_staging_rules(phrase):

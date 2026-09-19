@@ -56,8 +56,10 @@ def beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     for staged in beat.staging:
         name = by_id[staged.character_id].id if staged.character_id in by_id else staged.character_id
         lines.append(f"  {name} doing: {staged.action}")
-        if staged.frame_position:
-            lines.append(f"  {name} in frame: {staged.frame_position}")
+        if staged.blocking:
+            lines.append(f"  {name} stands: {staged.blocking}")
+        if staged.size_in_frame:
+            lines.append(f"  {name} size in frame: {staged.size_in_frame}")
         if staged.occlusion:
             lines.append(f"  {name} hidden by: {staged.occlusion}")
     return "\n".join(lines)

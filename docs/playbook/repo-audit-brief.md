@@ -163,9 +163,14 @@ how prominent it is.
 
 **Does previz honour a composed `camera` field?** ADR 0052 assumes the
 planner writing composition into `camera` reaches the image. If previz
-treats `camera` less faithfully than a character's `frame_position`, 0052
-bought nothing and the fix belongs downstream. Unverified — it needs a
-real run, and it is the fastest way to find out whether 0052 worked.
+treats `camera` less faithfully than a character's placement fields, 0052
+bought nothing and the fix belongs downstream. Still unverified for
+`camera` specifically — but the placement side is now measured:
+`evals/blocking_space.py` found that a character's stated *apparent size*
+is obeyed reliably while world-space distance is not obeyed at all
+([ADR 0059](../decisions/0059-blocking-and-size-replace-frame-position.md)),
+so "does the model act on this field" clearly varies field by field rather
+than holding uniformly.
 
 **Every doc claim against its code.** `docs/pipeline.md` still describes
 the 12-stage vision, including a previz review whose job is stated as

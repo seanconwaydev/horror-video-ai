@@ -104,8 +104,8 @@ def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
         camera="medium", lighting="one hard strip light", audio="hum",
         duration_seconds="4",
         staging=[
-            Staging(character_id="w1", action="stands", frame_position="centre"),
-            Staging(character_id="fig1", action="stands", frame_position="left"),
+            Staging(character_id="w1", action="stands", blocking="centre"),
+            Staging(character_id="fig1", action="stands", blocking="left"),
         ],
     )
     prompts = []
@@ -119,10 +119,10 @@ def test_editing_a_beat_walks_into_each_staging_entry(monkeypatch):
     edited = edit_item_fields(beat, fields=("staging",))
 
     assert any("w1 action" in p for p in prompts)
-    assert any("fig1 in frame" in p for p in prompts)
+    assert any("fig1 stands" in p for p in prompts)
     assert edited.staging[0].action == "stands"
     assert edited.staging[1].action == "leans around the pillar toward her"
-    assert edited.staging[1].frame_position == "left"
+    assert edited.staging[1].blocking == "left"
 
 
 def test_confirm_reprompts_until_the_answer_is_recognisable(monkeypatch, capsys):
@@ -156,7 +156,7 @@ def test_printing_a_beat_spells_out_its_staging(capsys):
             Staging(
                 character_id="influencer",
                 action="checks her phone",
-                frame_position="left third, mid-ground",
+                blocking="left third, mid-ground",
                 occlusion="a market stall",
             ),
         ),
@@ -166,7 +166,7 @@ def test_printing_a_beat_spells_out_its_staging(capsys):
 
     out = capsys.readouterr().out
     assert "- influencer: checks her phone" in out
-    assert "in frame: left third, mid-ground" in out
+    assert "stands: left third, mid-ground" in out
     assert "hidden by: a market stall" in out
 
 
@@ -177,7 +177,7 @@ def test_printing_a_beat_omits_the_occlusion_line_when_there_is_none(capsys):
             Staging(
                 character_id="influencer",
                 action="checks her phone",
-                frame_position="left third, mid-ground",
+                blocking="left third, mid-ground",
                 occlusion="",
             ),
         ),

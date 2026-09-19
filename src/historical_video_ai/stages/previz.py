@@ -426,8 +426,14 @@ def _build_beat_prompt(
         if staged is not None:
             anyone_is_doing_something = True
             block += f"\nDOING: {staged.action}"
-            if staged.frame_position:
-                block += f"\nPOSITION IN FRAME: {staged.frame_position}"
+            # STANDS before SIZE IN FRAME, and both before HIDDEN BY: this
+            # is the wording the blind eval measured, where world placement
+            # plus a size beat a frame coordinate plus the same size 6/6
+            # against 3/6 on depth ordering (docs/decisions/0059).
+            if staged.blocking:
+                block += f"\nSTANDS: {staged.blocking}"
+            if staged.size_in_frame:
+                block += f"\nSIZE IN FRAME: {staged.size_in_frame}"
             if staged.occlusion:
                 block += f"\nHIDDEN BY: {staged.occlusion}"
         parts.append(block)

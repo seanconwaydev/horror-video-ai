@@ -388,3 +388,18 @@ Note what this does *not* say. It is not "frame coordinates win" -- `world_size`
 
 **The POV-duplication artifact recurred, and both occurrences are in the same arm.** `distant_figure__a2_6`: "the camera is a second woman's eyes looking at woman #1, with the POV woman holding a fob". The same artifact appeared in run two, also in a `world_size` `distant_figure` cell -- 2 occurrences in 12 `world_size` images of that scenario against 0 in the 10 non-`world_size` ones. Weak, but the mechanism is plausible: that arm states an apparent size for a character who is simultaneously described as "seen from behind", and a size instruction may push the model toward rendering the body it is measuring. Worth watching rather than acting on.
 
+**2026-09-19** · Blind eval, head-to-head against the incumbent (`results/blocking-20260919-001304`) · *category: world placement plus apparent size beats `frame_position` outright* · genre: horror, embodied threat — **decided; the ADR follows**
+
+Twelve images, six candidates per cell, `frame` (what the pipeline emits today) against `world_size`. `world_size` swept every question with no failures; `frame` did not.
+
+| confrontation | close enough to touch, reacting | he is between camera and her |
+|---|---|---|
+| `frame` -- the incumbent | 4/6 | 3/6 |
+| `world_size` | **6/6** | **6/6** |
+
+Depth ordering pooled across all four runs: `world` 0/10, `frame` 5/10, `world_size` **14/14**. `world_size` has not failed that question once, in any run, at any candidate count.
+
+The composite `frame_position` field is therefore worse than splitting it. It already carries two facts by its own docstring -- "where in frame, and roughly how much of it they occupy" -- and the run shows the two halves are not equally effective: apparent size is doing the work, and pairing it with a *world* statement of where the character stands beats pairing it with a frame coordinate. Same shape as [ADR 0054](../decisions/0054-one-fact-per-field.md), which split occlusion out of this very field for the same reason and on the same kind of evidence.
+
+Both arms scored 6/6 on gaze, which supports the earlier finding that correct depth ordering delivers it: the owner, on every image, "his eyes are black so we can't know for sure where he's looking, but it works fine because of his body, especially when he's turned away."
+

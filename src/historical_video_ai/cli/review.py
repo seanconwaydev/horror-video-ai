@@ -83,7 +83,9 @@ def print_item_fields(item: ItemT) -> None:
             print("  staging:")
             for s in value:
                 print(f"    - {s.character_id}: {s.action}")
-                print(f"      in frame: {s.frame_position}")
+                print(f"      stands: {s.blocking}")
+                if s.size_in_frame:
+                    print(f"      size in frame: {s.size_in_frame}")
                 if s.occlusion:
                     print(f"      hidden by: {s.occlusion}")
             continue
@@ -124,8 +126,12 @@ def edit_item_fields(item: ItemT, *, fields: tuple[str, ...] | None = None) -> I
                         k: v
                         for k, v in (
                             ("action", input(f"  {s.character_id} action [{s.action}]: ").strip()),
-                            ("frame_position",
-                             input(f"  {s.character_id} in frame [{s.frame_position}]: ").strip()),
+                            ("blocking",
+                             input(f"  {s.character_id} stands [{s.blocking}]: ").strip()),
+                            ("size_in_frame",
+                             input(
+                                 f"  {s.character_id} size in frame [{s.size_in_frame}]: "
+                             ).strip()),
                             ("occlusion",
                              input(f"  {s.character_id} hidden by [{s.occlusion}]: ").strip()),
                         )

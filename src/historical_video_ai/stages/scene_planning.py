@@ -57,7 +57,8 @@ class Location:
 
 @dataclass(frozen=True)
 class Staging:
-    """What ONE character is doing in one beat, and where they sit in frame.
+    """What ONE character does in one beat, where they stand, how big they
+    read, and what hides them -- one fact per field (docs/decisions/0054).
 
     Beats used to carry a single `action` string plus a flat list of
     character ids (docs/decisions/0041). That gave the focal character a
@@ -74,12 +75,23 @@ class Staging:
     #: What this character physically does, acting on someone or something.
     #: A state ("stands", "is present") is what this field exists to prevent.
     action: str
-    #: Where in the frame they sit and roughly how much of it they occupy.
-    #: Every character gets one, so nobody defaults to dead centre.
-    #: Position ONLY -- what hides them belongs in `occlusion`.
-    frame_position: str
+    #: Where this character stands -- in the space, relative to the camera,
+    #: and relative to the other characters ("directly between her and the
+    #: camera, near enough to touch her"). NOT a frame coordinate: the
+    #: eval that split this field found world placement paired with
+    #: `size_in_frame` beat a frame coordinate paired with the same size,
+    #: 6/6 against 3/6 on whether the depth ordering rendered correctly.
+    #: See docs/decisions/0059.
+    blocking: str
+    #: How much of the image this character occupies ("roughly a third of
+    #: the image"). This is the field that carries depth: across four
+    #: blind runs, world placement WITHOUT it never once rendered the
+    #: right depth ordering (0/10) and world placement WITH it never
+    #: failed (14/14). Empty for a plan captured before this field.
+    size_in_frame: str = ""
     #: What stands between the camera and this character, and roughly how
-    #: much of them survives it. Split out of `frame_position` after a run
+    #: much of them survives it. Split out of the old `frame_position`
+    #: after a run
     #: where the two halves of that one field scored completely
     #: differently: position was right in 3 of 4 beats while the occlusion
     #: clause in the same sentence was wrong in 4 of 4 ("position is good,
@@ -198,9 +210,10 @@ _BASE_COMPOSITION_RULE = """\
 - Every beat must make one deliberate compositional choice instead of \
 accepting the default, and each part of that choice goes in the field \
 that controls it -- never as extra prose in `camera`. Shot size, camera \
-height and subject orientation go in `camera`; where each character sits \
-goes in their `frame_position`; what stands between the camera and them \
-goes in their `occlusion`. Pick at least one and make it concrete: a \
+height and subject orientation go in `camera`; where each character \
+stands goes in their `blocking`; how big they read goes in their \
+`size_in_frame`; what stands between the camera and them goes in their \
+`occlusion`. Pick at least one and make it concrete: a \
 subject well off-centre with the opposite side of the frame left empty; a \
 subject small and low with the space around them dominating; or a solid \
 near-foreground object the shot looks past. "Medium shot, eye level, \
@@ -292,12 +305,12 @@ visible, however little. Describing it only in a beat's prose is not \
 enough: a real run defined a stalking figure, generated its reference \
 image, mentioned it once in a lighting field, and produced four beats with \
 no antagonist in any of them. Its prominence is controlled by its \
-`frame_position` and `occlusion`, never by a vague adjective like \
+`size_in_frame` and `occlusion`, never by a vague adjective like \
 "barely visible" or "half-hidden" -- an image model renders those as a \
-bold, centered silhouette. In `frame_position` state roughly what \
-fraction of the frame it occupies and where (a background corner, a frame \
-edge, never centered); in `occlusion` name the specific object doing the \
-hiding. Its `action` is a separate question and must still give it \
+bold, centered silhouette. In `size_in_frame` state roughly what \
+fraction of the image it occupies; in `blocking` say where it stands \
+relative to the camera and the other characters; in `occlusion` name the \
+specific object doing the hiding. Its `action` is a separate question and must still give it \
 something to DO.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
@@ -552,21 +565,35 @@ what a real run produced in all four of its beats.
 - If a character gets closer, more threatening, or more exposed as the \
 scene progresses, that change must show in the BODY -- a stoop, a reach, \
 weight shifted onto the front foot, a hand leaving a pocket. Never encode \
-an escalation only as a larger `frame_position`: a real run escalated a \
+an escalation only as a larger `size_in_frame`: a real run escalated a \
 stalker purely from "finger-height in frame" to "a quarter of the frame" \
 and got one motionless man rendered at four zoom levels.
-- Give EVERY character a `frame_position` AND an `occlusion`, including \
-the focal one. A character with no stated position is rendered dead \
-centre, which is the dullest possible framing; say which side of the \
-frame they sit in, and let the subject sit off-centre. `occlusion` names \
-what physically stands between the camera and them and roughly how much \
-of them survives it -- "the pillar's near face covers everything but his \
-left shoulder and half his head", "nothing, she is fully in the open". \
-Keep the two separate: `frame_position` is WHERE, `occlusion` is WHAT \
-HIDES THEM. Hiding written into `frame_position` is ignored -- across a \
-four-beat run the position half of that field was right in three beats \
-while the hiding half was wrong in all four, because position had its own \
-field and hiding was prose inside it.
+- Give EVERY character a `blocking`, a `size_in_frame` AND an \
+`occlusion`, including the focal one.
+- `blocking` says where they STAND -- in the space, relative to the \
+camera, and relative to the other characters. Write it as a position in \
+the room, not as a position in the picture: "on the same floor directly \
+between her and the camera, near enough to touch her", "far down the \
+aisle behind the fourth pillar on the left, looking back toward her". Do \
+NOT write "left third of frame" or "upper-left" here -- a frame \
+coordinate is a projection of where someone stands through a particular \
+camera, and asking for it produced a beat that placed a standing man at \
+ceiling height.
+- `size_in_frame` says how much of the image they occupy -- "roughly a \
+third of the image", "about a quarter of the image height", "a tenth of \
+the image width". This is the field that makes depth render: across four \
+blind runs, blocking WITHOUT a size never once produced the right depth \
+ordering (0 of 10 images) and blocking WITH one never failed (14 of 14). \
+Give every character one, always.
+- `occlusion` names what physically stands between the camera and them \
+and roughly how much of them survives it -- "the pillar's near face \
+covers everything but his left shoulder and half his head", "nothing, she \
+is fully in the open". Keep all three separate: `blocking` is WHERE THEY \
+STAND, `size_in_frame` is HOW BIG THEY READ, `occlusion` is WHAT HIDES \
+THEM. Hiding written into either of the other two is ignored -- across a \
+four-beat run the position half of a combined field was right in three \
+beats while the hiding half was wrong in all four, because position had \
+its own field and hiding was prose inside it.
 - If a Genre and/or Tone are given above, let them actually shape staging, \
 expression, and wardrobe choices -- a comedic/ironic tone reads through \
 confident, knowing expressions and poses (not just a funny premise \
@@ -593,7 +620,9 @@ this exact shape:
       "staging": [
         {{"character_id": "<a character id above>",
           "action": "<what THIS character physically does, acting on someone or something>",
-          "frame_position": "<where in frame, and roughly how much of it they occupy>",
+          "blocking": "<where they STAND -- in the space, relative to the camera and
+            to the other characters. Not a frame coordinate>",
+          "size_in_frame": "<how much of the image they occupy>",
           "occlusion": "<what physically hides them and how much survives, or 'nothing'>"}}
       ],
       "camera": "...", "lighting": "...",
@@ -781,7 +810,7 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
         if not characters:
             return []
         return [Staging(character_id=characters[0].id, action=item.get("action", ""),
-                        frame_position="", occlusion="")]
+                        blocking="", size_in_frame="", occlusion="")]
     if not isinstance(raw, list):
         raise ScenePlanningError(f"A beat's 'staging' must be a list, got {raw!r}")
     staging = []
@@ -789,14 +818,23 @@ def _parse_staging(item: dict, characters: list) -> list[Staging]:
         if not isinstance(entry, dict):
             raise ScenePlanningError(
                 f"Each 'staging' entry must be an object with 'character_id', 'action' and "
-                f"'frame_position', got {entry!r}"
+                f"'blocking', got {entry!r}"
             )
+        # A plan saved before docs/decisions/0059 has `frame_position`
+        # instead, carrying both facts in one string. Read it into
+        # `blocking` rather than dropping it: --fixture and
+        # --video-gen-from both replay archived runs, and the alternative
+        # is a stored plan that no longer loads.
+        if "blocking" not in entry:
+            entry = {**entry, "blocking": entry.get("frame_position", "")}
         _require_str_fields(
-            entry, ["character_id", "action", "frame_position"], item_desc="A staging entry"
+            entry, ["character_id", "action", "blocking"], item_desc="A staging entry"
         )
+        optional = {"occlusion", "size_in_frame"}
         staging.append(
             Staging(
-                **{f: entry[f] for f in Staging.__dataclass_fields__ if f != "occlusion"},
+                **{f: entry[f] for f in Staging.__dataclass_fields__ if f not in optional},
+                size_in_frame=entry.get("size_in_frame", ""),
                 occlusion=entry.get("occlusion", ""),
             )
         )

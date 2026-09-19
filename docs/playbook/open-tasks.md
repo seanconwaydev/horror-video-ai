@@ -32,44 +32,24 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. One head-to-head, then write the apparent-size ADR
+## 1. Rewrite beats that depend on distance
 
-Three blind runs are done, 54 images, written up in
-[failure-taxonomy.md](./failure-taxonomy.md). The answer is not the one
-this project argued for: the axis is not frame-space versus world-space,
-it is whether **apparent size** is stated at all. On "is he between the
-camera and her", pooled:
+Not a code task. Four blind runs established that **distance is not
+promptable** -- "does the far figure read as far away" succeeded in 1 image
+out of 22, across every authoring style tried, including an explicit
+"roughly a twentieth of the image". The owner: "he's never more than ~10
+feet in front of her... a parking garage could have him 50-100+ feet away
+easily."
 
-| arm | score |
-|---|---|
-| `world` -- placement, no size | **0/10** |
-| `world_size` -- same placement plus "roughly a third of the image" | **8/8** |
-| `frame` -- the incumbent: coordinates plus size | 2/4 |
-
-The focused run alone was 0/6 against 6/6 with no partials. What has not
-been run is `world_size` against the **incumbent** at six candidates,
-which is the comparison that justifies changing the schema:
-
-```
-uv run python evals/blocking_space.py \
-  --scenarios confrontation --arms frame,world_size --candidates 6
-```
-
-12 images, about $0.47. If `world_size` holds against `frame`, the ADR
-splits today's composite `frame_position` into two fields -- where the
-character stands relative to the space, the camera and each other, and how
-much of the frame they occupy -- which is [0054](../decisions/0054-one-fact-per-field.md)'s
-rule applied once more. No floor plan for `Location` is needed.
-
-Settled; do not re-test:
-
-- **Distance is not promptable.** 1 success in 22 images. "He's never more
-  than ~10 feet in front of her... a parking garage could have him 50-100+
-  feet away easily." Rewrite beats that depend on it.
-- **Depth ordering delivers gaze for free.** 12/12 in the focused run,
-  because placing him nearer the camera than her forces the turn and the
-  turn is what reads as gaze. This may remove the need for a gaze field
-  entirely -- decide that inside the ADR above rather than separately.
+[0059](../decisions/0059-blocking-and-size-replace-frame-position.md) fixed
+the near field -- whether two characters read as occupying one space in a
+believable order -- and explicitly did not fix this. The open question is
+what the planner should do instead when a scene wants a figure noticed at
+a distance: a different shot (something in the foreground the figure is
+small against), a different beat (cut to him rather than seeing him far
+off), or simply not writing the beat. Worth deciding before the next horror
+run, because the planning rules currently encourage exactly the shot that
+cannot be delivered.
 
 ## 2. Why is the mood under-delivered when the prompt asks for it twice?
 

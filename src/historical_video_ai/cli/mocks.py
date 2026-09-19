@@ -94,7 +94,8 @@ def mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
                         {
                             "character_id": "mock-character",
                             "action": "[MOCK]",
-                            "frame_position": "[MOCK]",
+                            "blocking": "[MOCK]",
+                            "size_in_frame": "[MOCK]",
                             "occlusion": "[MOCK]",
                         }
                     ],

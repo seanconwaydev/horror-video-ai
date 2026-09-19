@@ -325,7 +325,7 @@ def _beat(**overrides) -> Beat:
 
 # docs/decisions/0054: occlusion gets its own labelled line, which is the
 # entire mechanism -- position got one in 0049 and is respected, while
-# hiding written as prose inside frame_position lost in 4 of 4 beats.
+# hiding written as prose inside blocking lost in 4 of 4 beats.
 def test_beat_prompt_gives_occlusion_its_own_labelled_line():
     from historical_video_ai.stages.previz import _build_beat_prompt
     from historical_video_ai.stages.scene_planning import Staging
@@ -336,7 +336,7 @@ def test_beat_prompt_gives_occlusion_its_own_labelled_line():
             Staging(
                 character_id="influencer",
                 action="drags a crooked finger down the concrete",
-                frame_position="right edge, a fifth of the frame",
+                blocking="right edge, a fifth of the frame",
                 occlusion="the pillar's near face covers all but one shoulder and half its head",
             )
         ]
@@ -346,7 +346,7 @@ def test_beat_prompt_gives_occlusion_its_own_labelled_line():
 
     assert "HIDDEN BY: the pillar's near face covers all but one shoulder" in prompt
     # separate lines, not one merged sentence -- the split is the point
-    assert "POSITION IN FRAME: right edge, a fifth of the frame" in prompt
+    assert "STANDS: right edge, a fifth of the frame" in prompt
 
 
 def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
@@ -355,7 +355,7 @@ def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
 
     character = _character()
     beat = _beat(
-        staging=[Staging(character_id="influencer", action="reaches", frame_position="left third")]
+        staging=[Staging(character_id="influencer", action="reaches", blocking="left third")]
     )
 
     prompt = _build_beat_prompt(beat, characters=[character], location=None, style="horror-comic")
@@ -377,7 +377,7 @@ def test_beat_prompt_does_not_restate_the_focal_character_action():
             Staging(
                 character_id="influencer",
                 action="checks her phone",
-                frame_position="left third",
+                blocking="left third",
             )
         ],
     )
@@ -404,7 +404,7 @@ def test_beat_prompt_carries_human_corrections_last():
     from historical_video_ai.stages.previz import _build_beat_prompt
     from historical_video_ai.stages.scene_planning import Staging
 
-    beat = _beat(staging=[Staging(character_id="influencer", action="reaches", frame_position="l")])
+    beat = _beat(staging=[Staging(character_id="influencer", action="reaches", blocking="l")])
 
     prompt = _build_beat_prompt(
         beat,
@@ -417,6 +417,45 @@ def test_beat_prompt_carries_human_corrections_last():
     # After STYLE, because a correction modifies everything stated above it.
     assert prompt.index("STYLE:") < prompt.index("CORRECTION")
     assert prompt.index("make her noticeably smaller") < prompt.index("lose the second light")
+
+
+# docs/decisions/0059: size is the field that makes depth render -- across
+# four blind runs, blocking without one never produced the right depth
+# ordering (0/10) and blocking with one never failed (14/14).
+def test_beat_prompt_gives_size_in_frame_its_own_labelled_line():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="reaches for her",
+                blocking="directly between her and the camera, near enough to touch her",
+                size_in_frame="roughly a third of the image",
+            )
+        ]
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "STANDS: directly between her and the camera" in prompt
+    assert "SIZE IN FRAME: roughly a third of the image" in prompt
+    # Separate lines, not one merged sentence -- the split is the point.
+    assert prompt.index("STANDS:") < prompt.index("SIZE IN FRAME:")
+
+
+def test_beat_prompt_omits_the_size_line_when_a_plan_predates_the_field():
+    from historical_video_ai.stages.previz import _build_beat_prompt
+    from historical_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        staging=[Staging(character_id="influencer", action="reaches", blocking="left third")]
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "SIZE IN FRAME:" not in prompt
 
 
 def test_build_character_sheet_prompt_includes_all_character_fields():

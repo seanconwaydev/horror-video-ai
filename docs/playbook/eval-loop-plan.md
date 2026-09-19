@@ -185,6 +185,11 @@ for three structural reasons:
 3. No relational geometry exists anywhere. Both `frame_position` values are
    absolute; nothing states who is behind whom, how far apart, or where
    each is looking.
+   *(Points 1 and 3 are resolved: [ADR 0057](../decisions/0057-drop-the-duplicate-action-line.md)
+   removed the duplicate ACTION line, and [ADR 0059](../decisions/0059-blocking-and-size-replace-frame-position.md)
+   replaced `frame_position` with `blocking` -- which is relative to the
+   camera and the other characters -- plus `size_in_frame`. Gaze was
+   deliberately left without a field; see 0059 for why.)*
 
 The owner was asked whether to fix this by prompt restructure alone or by
 adding relational data to the schema, and the question was overtaken by the
