@@ -168,13 +168,18 @@ def _generate_image_response(
     """Shared branch between plain text-to-image and image-conditioned
     edit, used by every stage here that can take a reference image.
 
-    Reference images are read as raw bytes, not passed as `Path` objects:
-    litellm's Gemini `image_edit` provider advertises `os.PathLike` as an
-    accepted `image` type, but its `_read_all_bytes` only actually handles
+    WORKAROUND(unfiled -- litellm Gemini image_edit rejects os.PathLike):
+    reference images are read as raw bytes, not passed as `Path` objects.
+    litellm's Gemini `image_edit` advertises `os.PathLike` in its `image`
+    type hint, but `GeminiImageEditConfig._read_all_bytes` handles only
     `bytes`/`BytesIO`/`BufferedReader` and raises `ValueError` on a bare
-    `Path` -- confirmed directly against litellm 1.98.0's source.
-    TODO(WORKAROUND): file a litellm issue for this and link it here; none
-    of the existing open issues checked matched this exactly."""
+    `Path`. Re-confirmed by calling it against the installed litellm
+    1.101.0, so the upgrade from 1.98.0 did not fix it. Its Vertex sibling
+    has the identical gap while `vertex_imagen_transformation` does resolve
+    paths, so this is an inconsistency upstream rather than a deliberate
+    contract. No upstream issue tracks it and none will be filed, so
+    re-check by running the `_read_all_bytes` call above after an
+    upgrade rather than by watching a URL."""
     if reference_paths:
         image_bytes = [p.read_bytes() for p in reference_paths]
         return _call_with_transient_retry(

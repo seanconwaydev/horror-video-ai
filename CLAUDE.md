@@ -24,7 +24,7 @@ uv run pytest                          # run the test suite
 uv run pytest tests/test_config.py::test_get_stage_model_returns_pinned_model_string  # single test
 uv run ruff check .                    # lint
 uv run mypy                            # type check src/, evals/, tests/ -- must be clean
-uv run pytest --cov                    # tests + coverage floor (84%)
+uv run pytest --cov                    # tests + coverage floor (86%)
 uv run historical-video-ai --mock      # run the pipeline with no API keys / no network calls
 uv run historical-video-ai --time "July 1969" --place "Cape Canaveral, Florida" \
     --description "watches a rocket launch from the crowd."
@@ -79,6 +79,15 @@ If the real tool genuinely can't be run in the current environment, say so plain
 
 **Stage code**: one module per pipeline stage under `src/historical_video_ai/stages/`, added incrementally as each stage in `docs/pipeline.md` gets implemented (currently: `research.py`, `fact_check.py`, `scene_planning.py`, `previz.py`, `moderation.py`, `video_generation.py`). Established pattern: a frozen-dataclass artifact type for the stage's reviewable output, a stage-specific `<Stage>Error` exception that fails loud on malformed model output (matching `ConfigError`'s convention in `config.py`), and a `run_<stage>_stage(...)` function taking an injectable `completion_fn`/`image_fn`/`video_fn` (default `litellm.completion`/`litellm.image_generation`/`litellm.video_generation`) so tests never need a live API call.
 
+**CLI code** (`src/historical_video_ai/cli/`): seven modules, not one file — a 2,491-line `cli.py` is what this replaced. Which module a new CLI feature belongs in follows from a deliberate one-way import direction, and adding an import that points back up it is how the single file grows again:
+
+- `app.py` — argument parser and `main()`; the only module that knows the whole run's shape. Imports every other module.
+- `beats.py` / `research_flow.py` / `video_gen.py` — one per stage-facing flow: beat images + their review loop, research→fact-check, and the standalone `--video-gen-from` path.
+- `review.py` / `runlog.py` — shared primitives the flows sit on: interactive confirm/edit prompts, and reading/writing a run's `run_log.json`.
+- `mocks.py` — the `--mock` fixtures, imported by `app.py` and `video_gen.py` only.
+
+Helpers stay `_`-prefixed unless another module actually calls them; a name without the underscore is a claim that it crosses a module boundary.
+
 **AWS**: adopted incrementally and only for genuine fit, not proactively (`docs/decisions/0004-aws-incremental-adoption.md`) — SQS is committed for stage 9 (video generation) specifically, as a fan-out-with-retry queue over independent per-scene generation calls; Step Functions is committed for overall pipeline orchestration (matches the sequential-stages-with-human-approval-wait-states shape already). Nothing here is implemented yet, and it isn't needed for the current v1 scope (`docs/decisions/0006`), which uses a plain CLI confirm-loop instead.
 
 **Format**: Shorts-only for now (`docs/decisions/0002-shorts-first-format.md`) — roughly 30–60 seconds, vertical 9:16. Genre is horror in a motion-comic style (`docs/decisions/0037`); video generation runs on Wan via Replicate.
@@ -87,9 +96,13 @@ If the real tool genuinely can't be run in the current environment, say so plain
 
 Sometimes a third-party dependency has a real bug with no released fix, and the only way forward is a workaround in this project's own code rather than waiting indefinitely. When that happens: check whether a newer **released** version (stable or an official pre-release build actually published to the package index) fixes it first — never install from an unmerged PR or issue-thread patch as a substitute for a real release, even if it looks relevant, since those can be incomplete or simply wrong (see the litellm example below, where two open PRs claiming to fix the exact error don't actually fix it). Only once a released fix genuinely doesn't exist does a workaround belong in the codebase.
 
-Every such workaround must be tagged with a greppable `WORKAROUND(<issue-or-PR-URL>):` marker at the patch site, so a later session can find every currently-applied one (`grep -rn "WORKAROUND(" src/`) and check whether it's now safe to delete because upstream shipped a real fix.
+Every such workaround must be tagged with a greppable `WORKAROUND(...):` marker at the patch site, so a later session can find every currently-applied one (`grep -rn "WORKAROUND(" src/`) and check whether it's now safe to delete because upstream shipped a real fix. Put the issue or PR URL in the parens when one exists. When no upstream issue tracks the bug, write `WORKAROUND(unfiled -- <one-line description>):` — this project does not file bug reports upstream, so an unfiled workaround is a normal steady state, not a TODO. It still has to be re-checkable: an unfiled marker must say how to re-test the bug directly against the installed version, since there is no URL to watch. Do not invent a variant spelling — `TODO(WORKAROUND):` was used once and the documented grep could not find it.
 
-One currently active: `stages/moderation.py`'s `run_moderation_policy_check` strips a leading `"openai/"` from the model string before calling litellm's synchronous `moderation()`, which passes `model` straight through to `openai_client.moderations.create()` with no provider-prefix stripping at all (unlike `completion()`/`image_generation()`) — confirmed still present in litellm 1.100.1 (latest released as of 2026-09-14) by inspecting that version's source directly; [litellm#6020](https://github.com/BerriAI/litellm/issues/6020) documents the same bug and is closed "not planned," so no upstream fix is coming.
+One currently active: `stages/moderation.py`'s `run_moderation_policy_check` strips a leading `"openai/"` from the model string before calling litellm's synchronous `moderation()`, which passes `model` straight through to `openai_client.moderations.create()` with no provider-prefix stripping at all (unlike `completion()`/`image_generation()`) — confirmed still present in litellm 1.101.0 — the version this project runs and the latest released as of 2026-09-18 — by calling `litellm.moderation` against the installed package, not just reading its source; [litellm#6020](https://github.com/BerriAI/litellm/issues/6020) documents the same bug and is closed "not planned," so no upstream fix is coming.
+
+A second one lives in `stages/previz.py`: reference images are passed to litellm's Gemini `image_edit` as raw `bytes`, because its `_read_all_bytes` accepts only `bytes`/`BytesIO`/`BufferedReader` and raises `ValueError` on the `os.PathLike` its own type hint advertises — also re-confirmed against the installed 1.101.0.
+
+**Keep the pinned version and the verified version the same.** These two were verified against 1.100.1 while `uv.lock` pinned 1.98.0, so the project had checked a version it did not run. When you re-check a workaround, upgrade the lock to the version you checked.
 
 The previous two (`src/historical_video_ai/_litellm_workarounds.py`, covering litellm's `Message`/`ModelResponse` construction failing on Python 3.10/3.11 per [litellm#36384](https://github.com/BerriAI/litellm/issues/36384), and a separate undocumented leak of litellm's own internal params into the `video_generation()` request body) were both deleted once the project moved to Python 3.11 + litellm 1.98.0 confirmed both fixed for real — see [docs/decisions/0013](./docs/decisions/0013-python-3.11-upgrade.md).
 

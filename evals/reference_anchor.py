@@ -31,6 +31,13 @@ judge it, so each arm's beats are written side by side for that.
 Measuring only adherence would produce a misleading "delete the reference"
 answer.
 
+HISTORICAL. The question this answers -- is the character reference
+flattening every beat? -- was closed by docs/decisions/0050: references are off by
+default now, behind `--references`. It reads `anchor_scene.json`, a
+deliberately frozen pre-0049 fixture with no `staging` (ADR 0064), so the
+prompts it builds are not the shape the pipeline produces today. Re-run it
+for the record it already holds, not as a measurement of current output.
+
 Usage:
     uv run python evals/reference_anchor.py --dry-run
     uv run python evals/reference_anchor.py

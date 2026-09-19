@@ -180,7 +180,7 @@ def review_item(item: ItemT, *, item_desc: str, auto_yes: bool = False) -> ItemT
     return edit_item_fields(item)
 
 
-def review_list_with_unique_ids(items: list, *, item_label: str, auto_yes: bool) -> list:
+def _review_list_with_unique_ids(items: list, *, item_label: str, auto_yes: bool) -> list:
     """Review each item (Character or Location) via review_item, then
     re-check the whole reviewed list for a duplicate id -- an edit can
     introduce a collision the LLM's original output didn't have just as
@@ -226,13 +226,13 @@ def review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
     print("\n--- scene plan review (docs/decisions/0023) ---")
     for warning in identity_field_pose_warnings(plan.characters):
         print(f"\nheads up: {warning}")
-    reviewed_characters = review_list_with_unique_ids(
+    reviewed_characters = _review_list_with_unique_ids(
         plan.characters, item_label="Character", auto_yes=auto_yes
     )
     still_posed = identity_field_pose_warnings(reviewed_characters)
     if still_posed and not auto_yes:
         print(f"\n{len(still_posed)} identity field(s) still look like a pose; continuing anyway.")
-    reviewed_locations = review_list_with_unique_ids(
+    reviewed_locations = _review_list_with_unique_ids(
         plan.locations, item_label="Location", auto_yes=auto_yes
     )
 

@@ -6,6 +6,11 @@
 # Per docs/decisions/0003-model-configuration-via-litellm.md: these are
 # pinned on purpose. Change a model only by editing this file by hand --
 # never automatically, never via a fallback/router.
+#
+# Only stages that have code get a pin (docs/decisions/0063). A stage
+# nobody has written yet gets its pin when its module is written, not
+# before -- an unvalidatable pin goes stale silently, and this project has
+# already had a pinned model retired underneath it (docs/decisions/0018).
 
 # v1 stages (see docs/decisions/0006 and 0007) -- real decisions, not placeholders.
 # previz is the exception -- see docs/decisions/0011-previz-image-model-for-
@@ -73,20 +78,3 @@ video_generation:
 
 moderation_check:
   model: "openai/omni-moderation-latest"
-
-# Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
-# stay as placeholders so the full pipeline vision in docs/pipeline.md still
-# has a config slot waiting for it. Untouched, still "anthropic/claude-sonnet-5"
-# from initial scaffolding -- revisit when these stages are actually built.
-
-narrative:
-  model: "anthropic/claude-sonnet-5"
-
-narrative_review:
-  model: "anthropic/claude-sonnet-5"
-
-shot_list:
-  model: "anthropic/claude-sonnet-5"
-
-video_prompts:
-  model: "anthropic/claude-sonnet-5"

@@ -42,7 +42,7 @@ from historical_video_ai.stages.scene_planning import Beat, Character, Location,
 # tunable via a flag, to keep behavior predictable rather than open-ended.
 MAX_PREVIZ_ATTEMPTS = 3
 
-def beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
+def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     """The plan text a candidate image is being judged against.
 
     Shown at the candidate prompt rather than only at scene-plan review,
@@ -65,7 +65,7 @@ def beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     return "\n".join(lines)
 
 
-def choose_candidate(
+def _choose_candidate(
     candidates: list[PrevizResult], *, auto_yes: bool, context: str | None = None
 ) -> PrevizResult | None:
     """Ask which of several candidate images to keep, or None to reject all.
@@ -216,7 +216,7 @@ def generate_image_with_retries(
             )
 
         if len(candidates) > 1:
-            chosen = choose_candidate(
+            chosen = _choose_candidate(
                 candidates, auto_yes=choose_auto, context=context
             )
             if chosen is None:
@@ -672,7 +672,7 @@ def generate_beats_with_choices(
                     all_attempts.append(entry)
                 _persist_in_progress(i, beat, all_attempts)
 
-            beat_context = beat_review_context(beat, beat_characters)
+            beat_context = _beat_review_context(beat, beat_characters)
             previz_result, _ = generate_image_with_retries(
                 _generate,
                 out_dir=beat_out_dir,

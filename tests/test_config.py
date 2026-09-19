@@ -69,7 +69,11 @@ def test_load_stage_configs_raises_when_stage_missing_model(tmp_path):
 
 def test_real_project_config_is_valid():
     """The actual committed config/models.yaml should always load cleanly
-    and define every stage that has code depending on it so far."""
+    and define exactly the stages that have code depending on it.
+
+    Exactly, not a superset: per ADR 0063 a stage with no module gets no
+    pin, because nothing can validate it and a stale pin can name a model
+    the provider has since retired (ADR 0018)."""
     configs = load_stage_configs(REPO_ROOT / "config" / "models.yaml")
 
     expected_stages = {
@@ -80,12 +84,8 @@ def test_real_project_config_is_valid():
         "previz_review",
         "video_generation",
         "moderation_check",
-        "narrative",
-        "narrative_review",
-        "shot_list",
-        "video_prompts",
     }
-    assert expected_stages.issubset(configs.keys())
+    assert set(configs.keys()) == expected_stages
     for stage_name, config in configs.items():
         assert "/" in config.model, (
             f"Stage '{stage_name}' model '{config.model}' should be in "

@@ -42,7 +42,7 @@ class VideoGenTarget:
 
     `beat_index` is None for the old-style case; for a beat, it locates
     where to record a video/moderation-flag result back in the parent
-    run's run_log.json (see record_video_gen_result) -- nested under
+    run's run_log.json (see _record_video_gen_result) -- nested under
     that beat's own entry, not mixed into one flat list across every beat.
     """
 
@@ -54,7 +54,7 @@ class VideoGenTarget:
     beat_index: int | None
 
 
-def resolve_recorded_path(recorded: str, run_dir: Path) -> Path:
+def _resolve_recorded_path(recorded: str, run_dir: Path) -> Path:
     """Resolve a path recorded in a run log, tolerating a moved outputs/.
 
     Run logs store absolute paths, so they embed wherever the project
@@ -128,7 +128,7 @@ def load_video_gen_targets(
                 "'prompt_used' -- pass --video-prompt, or point --video-gen-from at a run "
                 "generated after docs/decisions/0024 started recording it."
             )
-        image_path = resolve_recorded_path(beat_result["image_path"], run_dir)
+        image_path = _resolve_recorded_path(beat_result["image_path"], run_dir)
         if not image_path.exists():
             raise FileNotFoundError(
                 f"Beat {index}'s image referenced by {log_path} no longer exists: {image_path}"
@@ -151,7 +151,7 @@ def load_video_gen_targets(
     return targets
 
 
-def record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> None:
+def _record_video_gen_result(target: VideoGenTarget, key: str, entry: dict) -> None:
     """Append `entry` to list `key` in this target's run_log.json -- at
     the top level for an old-style single-image run, or nested under the
     matching beat's own entry in "previz_beats" for a new-style
@@ -199,7 +199,7 @@ def load_previz_output(run_dir: Path, *, prompt_override: str | None = None) -> 
             "--video-gen-from at a run that finished previz successfully."
         )
 
-    image_path = resolve_recorded_path(image_path_str, run_dir)
+    image_path = _resolve_recorded_path(image_path_str, run_dir)
     if not image_path.exists():
         raise FileNotFoundError(
             f"Previz image referenced by {log_path} no longer exists: {image_path}"
@@ -338,7 +338,7 @@ def run_video_generation_only(
                 f"Note: omni-moderation-latest flagged [{categories}]. Recorded for "
                 "YouTube-policy review; not blocking generation."
             )
-            record_video_gen_result(
+            _record_video_gen_result(
                 target,
                 "moderation_flags",
                 {
@@ -372,7 +372,7 @@ def run_video_generation_only(
             f"(requested {result.seconds_requested:.2f}s, actual {result.seconds_actual:.2f}s)"
         )
 
-        record_video_gen_result(
+        _record_video_gen_result(
             target,
             "videos",
             {
