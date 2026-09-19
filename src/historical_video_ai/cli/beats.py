@@ -119,54 +119,41 @@ def generate_image_with_retries(
     max_attempts: int | None = MAX_PREVIZ_ATTEMPTS,
     context: str | None = None,
 ) -> tuple[PrevizResult | None, list[dict]]:
-    """Generate an image via `generate_fn` (a callable producing one
-    PrevizResult from the concerns accumulated so far -- a closure over
-    run_beat_image_stage for a scene-plan beat, docs/decisions/0023/0024),
-    then have an independent pass review the actual image against the
-    scene (docs/decisions/0009). On rejection, regenerates -- now with
-    every prior rejection reason handed to `generate_fn` too (see below),
-    not a truly blind identical retry -- unless `on_reviewed` says to
-    stop, capped at MAX_PREVIZ_ATTEMPTS regardless. Shared by both
-    generation paths -- only how the image itself gets made differs
-    between them.
+    """Generate one attempt's candidate images via `generate_fn`, ask the
+    human what to do, and regenerate until something is kept or the human
+    stops -- capped at `max_attempts`. Shared by both generation paths;
+    only how the image itself gets made differs between them.
 
-    `generate_fn` receives the list of rejection reasons accumulated on
-    this beat so far (empty on the first attempt). Real usage (2026-09-15)
-    found previz_review's own rejection text -- e.g. "the image shows
-    anger, not the fear/terror the beat calls for" -- is itself a
-    near-ready corrective instruction, confirmed by a human manually
-    typing almost the same correction via the (f)eedback option and
-    getting a fixed result. Previously a blind retry reused the exact
-    same prompt with zero new information on every attempt; feeding the
-    reviewer's own concerns back into generation is strictly more
-    information than that, at no extra cost (no added model call -- the
-    concern text already exists from the review that just ran).
+    `generate_fn` takes no arguments. Anything an attempt needs to carry
+    forward -- human (f)eedback from an earlier cycle, an edited beat --
+    is closed over by the caller when it builds the closure, because that
+    state outlives a single call to this function (see
+    `generate_beats_with_choices`).
+
+    There is no automated review step. docs/decisions/0055 deleted
+    `previz_review` from the pipeline after measuring 56% agreement with
+    the owner's own accept/reject calls, against 79% for accepting
+    everything. Asking the human after every attempt rather than only
+    after a rejection is docs/decisions/0043, and it is what was doing the
+    work even while the reviewer was still running.
 
     Returns (accepted PrevizResult, attempt log), or (None, attempt log)
-    if the human kept nothing, or `on_reviewed` stopped early. A
-    rejected attempt's image is archived as `<archive_prefix>_<n>_rejected.png`
-    rather than overwritten.
+    if the human kept nothing or stopped early. A rejected attempt's image
+    is archived as `<archive_prefix>_<n>_rejected.png` rather than
+    overwritten.
 
     `on_image_generated`, if given, is called with each attempt's
-    PrevizResult right after the image is written -- *before* review runs,
-    which can itself fail. Without this, a review-stage crash left a real,
-    already-paid-for image on disk with no record of it in the log.
+    PrevizResult right after the image is written and before anything can
+    fail or block on input -- without it, an interrupted run left a real,
+    already-paid-for image on disk with no record of it
+    (docs/decisions/0056).
 
-    `on_reviewed`, if given, is called after EVERY review -- not only
-    after a rejection -- with (concern or None, attempt), and its return
-    value picks one of three outcomes: "accept" keeps this attempt's
-    image, "stop" ends the loop with nothing kept, anything else
-    regenerates with the accumulated concerns folded in.
-
-    Asking on every review, rather than letting the reviewer's verdict
-    decide whether to ask at all, is docs/decisions/0043. previz_review
-    was measured ranking four arms in exact reverse of blind human
-    judgement, and rejecting 88% of images; letting it choose the default
-    action spent money retrying images a human would have kept, and never
-    offered the choice on images a human would have rerolled.
-
-    With no callback the reviewer's verdict is followed, which is what
-    --yes does.
+    `on_reviewed`, if given, is called once per attempt as
+    `(None, attempt)` -- the first argument is a vestige of the deleted
+    reviewer's concern text and is always None. Its return value picks one
+    of three outcomes: "accept" keeps this attempt's image, "stop" ends the
+    loop with nothing kept, anything else regenerates. With no callback
+    every attempt is accepted, which is what --yes does.
     """
     attempts: list[dict] = []
     # `max_attempts=None` means no ceiling. The cap exists to stop an
@@ -498,13 +485,10 @@ def generate_beats_with_choices(
         beat_out_dir = out_dir / f"beat_{i}"
 
         # Spans attempt cycles, unlike the list inside
-        # generate_image_with_retries, which is per call. An (e)dit or
-        # (f)eedback starts a new call, and the reviewer's concerns must
-        # survive that (docs/decisions/0043).
-        # Spans cycles because each
-        # generate_image_with_retries call returns only its own attempts,
-        # and the previous binding used to be thrown away at an (e)dit or
-        # (f)eedback boundary (docs/decisions/0053).
+        # generate_image_with_retries, which is per call: an (e)dit or
+        # (f)eedback starts a fresh call that returns only its own
+        # attempts, and the previous binding used to be thrown away at
+        # that boundary (docs/decisions/0053).
         all_attempts: list[dict] = []
         # What the human did at each attempt's prompt, keyed by cycle and
         # attempt number -- the judgement itself, as opposed to what was

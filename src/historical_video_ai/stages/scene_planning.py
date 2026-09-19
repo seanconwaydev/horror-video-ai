@@ -126,7 +126,7 @@ class Beat:
 
 @dataclass(frozen=True)
 class ScenePlan:
-    """The reviewable artifact this stage produces -- see cli.py's
+    """The reviewable artifact this stage produces -- see cli/review.py's
     per-item review loop (characters, then locations, then beats, in that
     order, docs/decisions/0023)."""
 
@@ -678,8 +678,8 @@ def _require_str_fields(item: dict, fields_: list[str], *, item_desc: str) -> No
 def check_unique_ids(items: list, *, label: str) -> None:
     """Raise ScenePlanningError if any two `items` (Character or Location
     objects, or anything with an `.id`) share an id -- reused by
-    `_parse_scene_plan` (the LLM's raw output) and by cli.py's
-    `_review_scene_plan` (after a human edit could just as easily
+    `_parse_scene_plan` (the LLM's raw output) and by cli/review.py's
+    `review_scene_plan` (after a human edit could just as easily
     introduce a collision the LLM didn't). A silent collision would make
     `character_refs`/`location_refs` -- plain dicts keyed by id -- drop
     one item's reference image in favor of another's without any warning.
@@ -788,7 +788,7 @@ def check_beat_character_references(beats: list, characters: list) -> None:
 def check_beat_location_references(beats: list, locations: list) -> None:
     """Raise ScenePlanningError if any beat's location_id doesn't match a
     defined location -- reused by `_parse_scene_plan` (the LLM's raw
-    output) and by cli.py's `_review_scene_plan` (after a human edit to
+    output) and by cli/review.py's `review_scene_plan` (after a human edit to
     either a beat's location_id or a location's id could just as easily
     break the reference the LLM originally got right)."""
     location_ids = {loc.id for loc in locations}
@@ -808,17 +808,29 @@ def _truncate_references_safely(plan: ScenePlan, max_references: int) -> ScenePl
     than silently breaking a beat's location_id (the same class of bug
     docs/decisions/0027/0028 fixed elsewhere).
 
-    Safe to drop, in order: every character past the first (cli.py's
-    `_generate_beats_with_choices` only ever conditions on
-    `characters[0]` -- a documented v1 simplification, Beat has no
-    character_id -- so the rest are already unused by construction), then
-    any location no beat's `location_id` actually references.
+    Safe to drop, in order: any character no beat's `staging` names, then
+    any location no beat's `location_id` references.
+
+    The character half used to drop everything past `characters[0]`
+    unconditionally, on the premise that beats could only ever condition
+    on the first character. docs/decisions/0049 ended that -- `staging`
+    names characters by id -- so the unconditional version deleted staged
+    characters, and popping from the end takes the antagonist first. The
+    result failed this module's own `check_beat_character_references`,
+    which runs at parse time and not again after truncation, and previz
+    builds its prompt by iterating `characters`, so the dropped character
+    simply vanished from it while `len(beat.staging) > 1` still told the
+    model two people had to react to each other.
     """
     characters = list(plan.characters)
     locations = list(plan.locations)
 
-    while len(characters) + len(locations) > max_references and len(characters) > 1:
-        characters.pop()
+    used_character_ids = {s.character_id for b in plan.beats for s in b.staging}
+    i = len(characters) - 1
+    while len(characters) + len(locations) > max_references and i >= 0:
+        if characters[i].id not in used_character_ids and len(characters) > 1:
+            characters.pop(i)
+        i -= 1
 
     used_location_ids = {b.location_id for b in plan.beats}
     i = len(locations) - 1

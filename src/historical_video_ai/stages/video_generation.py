@@ -2,7 +2,7 @@
 approved previz image and the prompt that produced it. See
 docs/pipeline.md ("9. Video generation") and docs/decisions/0010 for why
 this is scoped to one image + one prompt per call (the caller loops for
-multiple scenes -- cli.py's `_run_video_generation_only`).
+multiple scenes -- cli/video_gen.py's `run_video_generation_only`).
 
 Model: Wan 2.2 image-to-video, hosted on Replicate and called directly
 rather than through litellm -- docs/decisions/0037 (the decision) and

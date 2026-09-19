@@ -70,7 +70,7 @@ class FactCheckResult:
     proceed past an unresolved premise conflict -- per docs/pipeline.md's
     review gate for this stage, a human "resolves" flags (accept the claim,
     cut it, or soften the language) and decides how to handle a premise
-    conflict (see cli.py's _resolve_premise_conflict and
+    conflict (see cli/research_flow.py's `resolve_premise_conflict` and
     docs/decisions/0008-refuse-impossible-premises.md), not the model.
 
     `acknowledged_fiction`, if set, is the explanation of a premise
@@ -155,7 +155,7 @@ def _parse_flags(raw_flags: list, claims: list[Claim]) -> list[ClaimFlag]:
     claims-by-number.md for why this replaced asking the model to copy
     claim_text back verbatim. `ClaimFlag.claim_text` is populated from our
     own claims list, not the model's response, so it's always exactly
-    right by construction; nothing downstream (cli.py's _resolve_flags,
+    right by construction; nothing downstream (cli/research_flow.py's `resolve_flags`,
     previz, --fixture loading) needed to change."""
     flags: list[ClaimFlag] = []
     for i, raw_flag in enumerate(raw_flags):

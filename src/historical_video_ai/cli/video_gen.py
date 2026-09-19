@@ -62,7 +62,7 @@ def _resolve_recorded_path(recorded: str, run_dir: Path) -> Path:
     -- or handing one to someone else -- breaks every reference in it, even
     though the files are sitting right beside the log. The gallery
     symlinks were deliberately made relative for exactly this reason
-    (`_link_beat_into_gallery`); the log was not.
+    (cli/beats.py's `link_beat_into_gallery`); the log was not.
 
     The portion of a recorded path after the run directory's own name is
     still correct relative to wherever that directory is now, so fall back

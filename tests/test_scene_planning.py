@@ -260,8 +260,8 @@ def test_run_scene_planning_stage_leaves_beats_alone_when_under_max_beats():
 
 
 def test_run_scene_planning_stage_drops_unused_character_beyond_first_for_max_references():
-    # cli.py only ever conditions generation on characters[0] (Beat has no
-    # character_id) -- always safe to drop the rest.
+    # A character no beat's staging names is genuinely unused, so dropping
+    # it cannot orphan anything.
     payload = _valid_payload()
     second_character = dict(payload["characters"][0])
     second_character["id"] = "second"
@@ -277,6 +277,39 @@ def test_run_scene_planning_stage_drops_unused_character_beyond_first_for_max_re
     assert len(plan.characters) == 1
     assert plan.characters[0].id == "influencer"
     assert len(plan.locations) == 1
+
+
+def test_max_references_never_drops_a_character_a_beat_stages():
+    """Truncation used to pop every character past the first, on the
+    pre-ADR-0049 premise that only characters[0] could be conditioned on.
+    `staging` names characters by id, and popping from the end takes the
+    antagonist first -- so a horror run's threat was deleted from the
+    plan while its beats still staged it. The returned plan failed this
+    module's own validator, which runs at parse time and not again after
+    truncation."""
+    payload = _valid_payload()
+    threat = dict(payload["characters"][0])
+    threat["id"] = "the-man"
+    payload["characters"].append(threat)
+    payload["beats"][0]["staging"].append(
+        {
+            "character_id": "the-man",
+            "action": "steps in behind her",
+            "blocking": "directly behind her, near enough to touch",
+            "size_in_frame": "roughly a sixth of the image",
+        }
+    )
+
+    plan = run_scene_planning_stage(
+        _fact_check_result(),
+        max_references=2,
+        completion_fn=_fake_completion(json.dumps(payload)),
+    )
+
+    assert [c.id for c in plan.characters] == ["influencer", "the-man"]
+    # The plan a caller gets back must satisfy the validator that ran
+    # before truncation, not just the one that ran at parse time.
+    check_beat_character_references(plan.beats, plan.characters)
 
 
 def test_run_scene_planning_stage_drops_unused_location_for_max_references():
