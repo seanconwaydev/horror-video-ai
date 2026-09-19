@@ -17,14 +17,20 @@ broadening the CI trigger to every branch
 (which is why five commits had shipped with no CI at all), and splitting
 the 2,491-line `cli.py` into `cli/` -- six modules, one seam per commit,
 with `app.py` left holding the argument parser and `main()` at 631 lines.
-The coverage floor rose from 84 to 86 along the way.
+The coverage floor rose from 84 to 86 along the way, and to 94 since.
 
-One thing that split surfaced and did not fix: **142 of the repo's 198
-uncovered statements are now `main()`**, and `main()` is not untested --
-CI's smoke job runs it end to end offline every push. It is just not
-*measured*, because coverage only runs under pytest. Running the smoke
-job under `coverage run` and combining the two reports would make the
-real number visible; nobody has decided whether that is worth doing.
+**Done 2026-09-19.** That split had left 142 of the repo's 198 uncovered
+statements in `main()`, measured at 22% while every other module was
+above 94%. Rather than combine coverage reports from the smoke job,
+`tests/test_cli_app_main.py` now calls `main()` under `--mock` once per
+entry shape -- grounded historical, ungrounded genre, fixture replay --
+and asserts what each records. app.py is at 81%, the project at 95%, and
+the floor moved 86 -> 94.
+
+That was not just a number: the single smoke invocation took one path
+through a function that branches three ways before scene planning, which
+is how a `--fixture` run came to record `genre: "historical"` no matter
+what `--genre` said, mislabelling every judgement row exported from it.
 
 Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 [eval-loop-plan.md](./eval-loop-plan.md) and
@@ -81,7 +87,7 @@ Worth deciding at the same time whether the planning rule should say it
 too, or whether the warning alone is enough -- ADR 0058's lesson is that a
 32nd bullet is not free.
 
-## 2. Why is the mood under-delivered when the prompt asks for it twice?
+## 3. Why is the mood under-delivered when the prompt asks for it twice?
 
 The owner on the 2026-09-18 run: "the shadows and mood should probably be
 better for horror, though i didn't check how much of the prompt specified
@@ -93,8 +99,14 @@ unlit black").
 
 So this is not a missing instruction, and writing a 32nd rule would be
 the exact move ADR 0058 just argued against. Things worth checking before
-anything else: whether the character reference sheet every beat is *edited
-from* is washing out the contrast it inherits, whether `LIGHTING` late in
-the prompt loses to `STYLE` right after it, and whether the model simply
-does not do heavy blacks at this level. The first two are testable with
-the eval harness; the third is not fixable here.
+anything else: whether `LIGHTING` late in the prompt loses to `STYLE`
+right after it, and whether the model simply does not do heavy blacks at
+this level. The first is testable with the eval harness; the second is
+not fixable here.
+
+A third hypothesis was listed here and is already ruled out: "the
+character reference sheet every beat is *edited from* is washing out the
+contrast." References have been off by default since
+[0050](../decisions/0050-no-reference-images-by-default.md) -- a default
+run is plain text-to-image and is edited from nothing, so unless the run
+passed `--references` there is no sheet to inherit from.

@@ -31,13 +31,20 @@ Every stage produces a reviewable artifact — a prompt, a document, an image �
 
 Most stages get two passes: a generation pass (one model produces the artifact) and a review pass (a second model critiques it against explicit criteria) before it reaches you. The second model isn't rubber-stamping the first — it should be prompted adversarially, i.e. "find what's wrong with this," not "confirm this is fine."
 
+**This principle held for text and failed for images, and the difference is measured, not assumed.** Fact-check reviewing research is a second model catching real errors and it stays. The equivalent pass over a generated *image* was measured against 78 images the owner had already ruled on: 56% agreement, against 79% for a reviewer that accepts everything, and it rejected 31 of the 62 images that were kept. It was deleted ([decisions/0055](./decisions/0055-delete-the-automated-previz-reviewer.md)). So before adding an adversarial pass to a new stage, ask which of those two it resembles — the failure mode was that a plan-fidelity question answered as a binary has no notion of severity, so a missing tote bag and an absent antagonist score the same.
+
 The system should get better with use. Findings from your own review notes and, later, from actual YouTube performance data should feed back into the prompts and rubrics used at each gate, not just live in your head.
 
 Format, audio style, and point of view are all decided per video at the narrative stage, not hardcoded as pipeline defaults — forcing every video into the same shape would itself be the "templated" pattern the monetization policy penalizes.
 
 ## Current v1 scope
 
-The full pipeline below is the vision, and it hasn't changed. What's actually being built right now is deliberately narrower: stages 1–3 (input, research, fact-check) feeding a scoped-down Previz that produces a single image from a single described scene — no multi-scene script, no video yet. See [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md) for why, and exactly what's deferred vs. skipped for good.
+The full pipeline below is the vision, and it hasn't changed. What's actually built is narrower, and has moved twice since [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md) first scoped it — read 0006 for what is deferred vs. skipped for good, but not for the current state:
+
+- Stages 2–3 (research, fact-check), then **scene planning** ([decisions/0023](./decisions/0023-scene-planning-stage.md)), which breaks a scene into beats with characters and locations. Scene planning is not in the diagram below, which predates it.
+- Previz (stage 8) renders **one image per beat**. The single-image-from-a-single-scene flow 0006 originally scoped was deleted once scene planning made it unreachable ([decisions/0051](./decisions/0051-remove-the-single-image-previz-flow.md)).
+- Video generation (stage 9) **is built** ([decisions/0037](./decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md), [0038](./decisions/0038-video-generation-on-replicate-and-moderation-rescope.md)), as a deliberately separate invocation (`--video-gen-from`) rather than part of the same run — previz is the spend gate, so crossing it should be a distinct, deliberate act ([decisions/0010](./decisions/0010-video-generation-model-and-standalone-stage.md)).
+- Stages 5–7 and 10–12 are not built.
 
 ## Structure
 
@@ -46,7 +53,8 @@ flowchart TD
     A[Topic] --> B[Research + fact-check]
     B --> C[Script + review]
     C --> D[Shot list + prompts]
-    D --> E[Previz]
+    D --> SP[Scene planning]
+    SP --> E[Previz]
     E --> F[Video generation]
     F --> G[Audio]
     G --> H[Assembly]
@@ -56,7 +64,7 @@ flowchart TD
     class E gate;
 ```
 
-The highlighted box (Previz) is the spend gate: everything before it is text or a still image and cheap to redo; everything from Video generation onward costs real money, so nothing crosses that line without explicit approval. Full behavior of each box is in [pipeline.md](./pipeline.md).
+Scene planning ([decisions/0023](./decisions/0023-scene-planning-stage.md)) sits where stages 5-7 will: it is what actually feeds Previz today, since those stages are not built. The highlighted box (Previz) is the spend gate: everything before it is text or a still image and cheap to redo; everything from Video generation onward costs real money, so nothing crosses that line without explicit approval. Full behavior of each box is in [pipeline.md](./pipeline.md).
 
 ## Open questions (not yet decided)
 
@@ -110,7 +118,7 @@ of the frame ([0049](./decisions/0049-per-character-staging-in-beats.md)).
 
 **Whether previz's "main character" stays generic or becomes fixed (a recurring "brand" character) or input-determined.** Raised in [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md); not resolved there.
 
-**How a non-interactive caller should resolve a premise conflict.** [decisions/0008](./decisions/0008-refuse-impossible-premises.md) builds an interactive human review flow for when fact-check finds the requested scene historically impossible (offer a close alternative, let the human correct it, or stop) — but this pipeline may eventually be driven by something other than a human at a terminal, per the "Control flow" question above. There's no answer yet for how such a caller would resolve a conflict without a human to ask; `run_previz_stage`'s hard refusal is the safety net in the meantime, not a resolution mechanism.
+**How a non-interactive caller should resolve a premise conflict.** [decisions/0008](./decisions/0008-refuse-impossible-premises.md) builds an interactive human review flow for when fact-check finds the requested scene historically impossible (offer a close alternative, let the human correct it, or stop) — but this pipeline may eventually be driven by something other than a human at a terminal, per the "Control flow" question above. There's no answer yet for how such a caller would resolve a conflict without a human to ask. The safety net named here used to be `run_previz_stage`'s hard refusal, which went with that function in [decisions/0051](./decisions/0051-remove-the-single-image-previz-flow.md). What remains is in the CLI: `--yes` stops the run on an unresolved premise conflict ([decisions/0019](./decisions/0019-yes-flag-refuses-contradicted-flags.md)) rather than proceeding. That is still a refusal, not a resolution mechanism.
 
 **Whether an overall video "style/genre" preset is worth adding — the rule-application half is now answered.** Raised while researching camera/composition conventions for previz: classical continuity editing (the 180-degree rule, consistent screen direction, eyeline matches) is the right convention for a cinematic/film-like video, but genuinely wrong for other genres this project might want to produce — an influencer/vlog-style video routinely breaks those rules on purpose (jump cuts, direct-to-camera address) while relying on its own strong, well-established convention instead. Kids' content, "cute"/wholesome content, and other genres likely each have their own established trope set the same way. [decisions/0034](./decisions/0034-creative-flag-skips-historical-grounding.md) took the first step (a binary `--creative` flag), superseded by [decisions/0035](./decisions/0035-genre-and-tone-replace-binary-creative-flag.md) (`--genre`/`--tone` free text feeding scene-planning directly). [decisions/0036](./decisions/0036-genre-resolves-to-early-routing-signals.md) now answers the *mechanism* for exactly this 180-degree-rule-vs-jump-cuts-vs-other-trope-sets idea: genre-conditional rules are built reactively as named, selected rule groups keyed by a small early-resolved signal (generalizing the `requires_grounding` pattern), not inline prose exceptions, and not a full pipeline split per genre. Still genuinely open: the fuller structured-brief fields (audience, constraints-as-one-concept, deliverables) and whether per-stage *model* selection should also route on grounding/genre — both tracked as their own items, not resolved by 0036.
 

@@ -216,14 +216,20 @@ def resolve_premise_conflict(
 ) -> tuple[FactSheet, FactCheckResult, str | None] | None:
     """If fact-check flagged the scene's own premise as historically
     impossible (docs/decisions/0008), push back instead of silently
-    proceeding -- previz would refuse anyway, but that's a last-resort
-    safety net, not a substitute for asking. Offers three resolutions:
-    use the suggested alternative, supply a corrected description
-    (re-verified with one fresh research + fact-check pass), or keep the
-    premise as intentional fiction (docs/decisions/0025) -- acknowledges
-    the conflict without altering the description, clearing
-    `premise_conflict` since previz's own check exists to require
-    knowing acknowledgment, not to forbid fiction outright.
+    proceeding. Offers three resolutions: use the suggested alternative,
+    supply a corrected description (re-verified with one fresh research +
+    fact-check pass), or keep the premise as intentional fiction
+    (docs/decisions/0025) -- acknowledging the conflict without altering
+    the description, and clearing `premise_conflict`.
+
+    This prompt is now the *only* thing standing between an impossible
+    premise and the run. Two backstops it used to describe are gone:
+    `run_previz_stage`'s hard refusal went with the single-image flow
+    (docs/decisions/0051), and the `acknowledged_fiction` string this
+    produces is read only by `run_previz_review_stage`, which
+    docs/decisions/0055 removed from the pipeline -- so it is recorded in
+    the run log and reaches nothing that runs. Under `--yes` an
+    unresolved conflict stops the run (docs/decisions/0019).
 
     Returns (fact_sheet, fact_check_result, resolution_type), or None if
     the human stopped. `resolution_type` is None when there was no
