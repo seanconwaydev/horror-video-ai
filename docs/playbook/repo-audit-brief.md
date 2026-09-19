@@ -296,6 +296,74 @@ something that builds a prompt from each fixture in CI and diffs its
 section headers against the live builder's, which is a real piece of work
 rather than an assertion.
 
+## Third pass, 2026-09-19 -- reading the code, not the claims
+
+The first two passes read documentation against code. This one read the
+code itself, module by module, starting with what no pass had opened:
+`cli/app.py`'s `main()`, the beat loop, `research_flow.py`, the
+research-side stages, and every eval script. Nine findings, all fixed.
+
+**Four were real defects, not rot.**
+
+1. `write_log` truncated `run_log.json` in place. An interrupt mid-write
+   left invalid JSON and lost the whole run, and [0056](../decisions/0056-persist-work-in-flight.md)
+   had *widened* that window by writing three times per beat attempt to
+   protect against the same class of loss. Now writes a sibling temp file
+   and `os.replace`s it.
+2. `--max-references` deleted characters a beat's `staging` named,
+   antagonist first, returning a plan that failed this repo's own
+   validator. Fixed, then the flag was deleted entirely
+   ([0066](../decisions/0066-delete-max-references.md)) -- its premise
+   died with [0050](../decisions/0050-no-reference-images-by-default.md).
+3. Two fact-check flags on one claim crashed the review with a bare
+   `StopIteration`, mid-session, after the human had answered one prompt.
+   Nothing in the prompt limits a model to one concern per claim.
+   `ClaimFlag` now carries `claim_number` instead of re-deriving it by
+   text.
+4. Stage 9 recorded a clip only after downloading it, and the download
+   had no retry while the polling GET beside it had five. A dropped
+   connection discarded a generated, billed clip leaving nothing that
+   pointed at it ([0068](../decisions/0068-record-the-clip-before-fetching-it.md)).
+   Prediction *creation* was also being retried on ambiguous failures,
+   paying twice ([0067](../decisions/0067-retry-a-post-only-on-a-throttle.md)).
+
+**Three were silent-degradation bugs -- the class this document exists
+for.** The live planner accepted a response with no `staging` by falling
+back to a pre-0049 shim ([0065](../decisions/0065-strict-for-a-model-lenient-for-a-file.md));
+a `--fixture` run recorded `genre: "historical"` regardless of `--genre`,
+mislabelling every judgement row the measurement layer exported from it;
+and a typo in any eval flag either crashed bare or, for `--scenes`,
+silently ran zero scenes while reporting success.
+
+**Two were in the documentation layer the project depends on.**
+`generate_image_with_retries` -- the core generation loop -- had a
+docstring describing an automated reviewer 0055 deleted and claiming
+`generate_fn` receives accumulated rejection reasons, which its own type
+signature (`Callable[[], ...]`) disproves. And three "Addressed" entries
+in `failure-taxonomy.md` were addressed by things since deleted, which
+is worse than an open entry: it tells the next session to look
+elsewhere. Its methodology section proposed building a golden eval set
+scored by `previz_review`, the judge 0055 measured at 56% against 79%
+for accepting everything.
+
+**What made the difference.** `cli/app.py` sat at 22% coverage with
+`main()` never called by the suite, while every other module was above
+94%. Its only automated exercise was the smoke job's single `--mock`
+invocation, through a function that branches three ways before scene
+planning -- which is exactly how the fixture-genre bug survived. Tests
+now run `main()` once per entry shape; app.py is at 81%, the project at
+95%, and the floor moved 86 -> 94.
+
+**The pattern worth carrying forward.** Pass one and two found claims
+that disagreed with code. This pass found code that disagreed with
+itself: a validator that ran and then let the plan change underneath it,
+a retry policy applied uniformly to calls that are not uniformly safe, a
+persistence mechanism that was not atomic, a parser whose lenient branch
+fired where no leniency was wanted. None of these were findable by
+reading documentation, and none were findable by grep. They came from
+reading each function against what its own docstring promised.
+
+
 ## Open — still to do
 
 **Prompt rules, tier and order.** 33 bullet rules now sit in the planning
