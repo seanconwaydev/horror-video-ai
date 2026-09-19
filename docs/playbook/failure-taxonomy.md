@@ -403,3 +403,13 @@ The composite `frame_position` field is therefore worse than splitting it. It al
 
 Both arms scored 6/6 on gaze, which supports the earlier finding that correct depth ordering delivers it: the owner, on every image, "his eyes are black so we can't know for sure where he's looking, but it works fine because of his body, especially when he's turned away."
 
+**2026-09-19** · Real run, plan only (`run_20260919-003600`, stopped at the spend gate) · *category: the planner writes world-space blocking correctly, and writes the one shot that cannot render* · genre: horror, embodied threat — **[ADR 0059](../decisions/0059-blocking-and-size-replace-frame-position.md) validated end to end; a planning-rule problem exposed**
+
+0059 was measured on hand-written prompts, which proved the prompt *format* worked and said nothing about whether a planning model would write that format. This run answers it, for a few cents: research, fact-check and scene planning against `deepseek/deepseek-v4-flash`, declined at the previz gate so nothing was spent on images.
+
+**The rule held in 16 of 16 staging entries.** Not one `blocking` contains a frame coordinate. They are positions in the room -- "between the fourth and fifth pillars on the left-hand row", "three steps down the lower flight from the half-landing", "two bays further down the aisle than her car" -- or relative to the camera -- "directly between the camera and the far pillars", "her back to the camera". `size_in_frame` was filled on every entry with a clean fraction. 0059's stated risk was that frame coordinates would get smuggled into the new field; they did not.
+
+**Gaze arrived as body orientation with no field asking for it**, which is the specific bet 0059 made when it declined to add one: "facing back along the aisle toward her", "her face turned up toward the steps above", "facing her". Six of sixteen entries state orientation inside `blocking`.
+
+**And the planner wrote the shot that cannot be rendered.** Beat 1 places the figure "far down the aisle beyond her" at "roughly a twentieth of the image height" -- a distant background figure, which is 1 success in 22 images across every arm of `evals/blocking_space.py`, including an arm that stated exactly that size. Two planning rules are asking for it directly: `_THREAT_PRESENCE_RULE` offers "a shape at the edge of vision" as a way to keep the threat present, and `_BASE_COMPOSITION_RULE` offers "a subject small and low with the space around them dominating" as a compositional choice. The planner is not misbehaving; it is doing what the prompt asks, and the prompt asks for the one thing the image model reliably fails.
+
