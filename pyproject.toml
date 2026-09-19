@@ -59,7 +59,7 @@ testpaths = ["tests"]
 source = ["src/historical_video_ai"]
 
 [tool.coverage.report]
-fail_under = 86
+fail_under = 94
 show_missing = true
 
 # ruff's ANN rules enforce that annotations *exist*; nothing checked they

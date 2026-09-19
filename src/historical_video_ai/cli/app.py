@@ -343,11 +343,22 @@ def main() -> None:
         log = {"time": time, "place": place, "description": description, "mock": args.mock}
         log["fixture"] = str(args.fixture)
         # A fixture is always a replay of a previously completed *real*
-        # research + fact-check run -- --genre didn't exist when it was
-        # captured, and there's nothing to un-ground.
+        # research + fact-check run, so its fact sheet is already grounded
+        # and --genre cannot un-ground it: requires_grounding stays True
+        # whatever was passed.
+        #
+        # The genre itself is still live, though. It routes composition
+        # mode and threat mode (docs/decisions/0036, 0060) regardless of
+        # grounding, so `--fixture X --genre horror` really does plan a
+        # horror scene -- historical horror being an ordinary thing to
+        # want here. Recording a hardcoded "historical" made the run log
+        # disagree with the run, and evals/export_judgements.py stamps
+        # every judgement row with this field precisely so rows made under
+        # different conditions are not compared.
         requires_grounding = True
-        log["genre"] = "historical"
+        log["genre"] = args.genre
         log["tone"] = args.tone
+        log["requires_grounding"] = requires_grounding
 
         if has_fact_check:
             fact_check_result = load_fixture(args.fixture)

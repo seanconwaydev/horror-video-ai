@@ -24,7 +24,7 @@ uv run pytest                          # run the test suite
 uv run pytest tests/test_config.py::test_get_stage_model_returns_pinned_model_string  # single test
 uv run ruff check .                    # lint
 uv run mypy                            # type check src/, evals/, tests/ -- must be clean
-uv run pytest --cov                    # tests + coverage floor (86%)
+uv run pytest --cov                    # tests + coverage floor (94%)
 uv run historical-video-ai --mock      # run the pipeline with no API keys / no network calls
 uv run historical-video-ai --time "July 1969" --place "Cape Canaveral, Florida" \
     --description "watches a rocket launch from the crowd."
