@@ -429,3 +429,19 @@ It cannot be enforced as a hard check. Whether a camera height is possible in a 
 
 Two smaller things from the same plan, neither acted on. Both characters were given hooded rain shells, so two similar silhouettes share a near-black cabin lit by one amber dome light -- her blonde bob is the only strong separator. And beat 3 has the woman with her back flat against the driver's door panel *and* both palms braced on the door glass "shoving herself away from the figure", which does not describe a direction anyone can be shoved in.
 
+**2026-09-19** · Real run, car-cabin scene, images generated (`--style painterly`) · *category: the threat acts on scenery, and orientation is stated twice* · genre: horror, embodied threat — **[ADR 0061](../decisions/0061-the-threat-must-act-on-the-person.md)**
+
+Unusable images from a plan that read well. The owner: "it mostly reads as the two characters just hanging out in the car together, and there's no escalation... the girl tends to look off into 'somewhere' in the distance while the figure is kinda just posing and chilling."
+
+What did work, and is worth separating out: "the two characters are being rendered in unique ways, their seating positions and arms and legs are all at least possible. the overall vibe is scary, the figure is scary and the girl usually looks believably concerned and/or scared." Character identity, physical plausibility and expression are not the problem. The relationship between the two is.
+
+Both causes are visible in the prompts, not inferred from the images.
+
+**The threat's `action` never took the woman as its object.** All three beats: "braces its shoulders low into the rear bench cushion, one crooked hand flattened on the seat fabric beside its hip"; "both hands planted flat on the seat cushion ahead of its knees"; "both long pale hands closed on the top edge of the seat back". Three actions on upholstery. 0049's interaction rule exists to stop this and had a hole: it required "at least one `staging` entry" to name a because-of-another action, and all three of its worked examples were victim behaviours, so the protagonist's reaction discharged it and the antagonist was left free to pose.
+
+**Orientation was stated in two fields that disagreed.** `DOING: her torso rotated a few inches off the seat back because of the shape behind her` against `STANDS: ... facing the windscreen`. The image obeyed the `blocking`. "Looking off into somewhere in the distance" is the model doing as it was told. Beats 1 and 2 both do this; only beat 3 turns her toward the figure in both fields.
+
+The second is a regression introduced by [0059](../decisions/0059-blocking-and-size-replace-frame-position.md) hours earlier. That ADR let `blocking` carry orientation and used it as the argument against a gaze field, on evidence from prompts written by hand -- where the two fields agreed because one author wrote both. A real planner can contradict itself across them, and a fact stated twice is adjudicated by the model. It is the failure 0057 removed from the beat prompt, reappearing in a field created after it.
+
+**And the stage itself was the wrong choice.** The owner: "there isn't too much to 'do' with such a confined space." A sedan cabin permits posture changes on a bench and little else, so the planned escalation -- lying, then kneeling up, then leaning over the seat back -- had nowhere to go. No rule here fixes that. Scene selection is a lever on image quality in its own right and this project has never treated it as one.
+

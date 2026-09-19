@@ -565,12 +565,21 @@ a process verb renders as the character standing still. Name the \
 configuration a camera would freeze: which foot carries the weight, how \
 far the torso is twisted from the hips, where the hair has already swung \
 to, which hand has already closed on what.
-- In EVERY beat with more than one character, at least one `staging` \
-entry must name what that character does BECAUSE OF another character in \
-the same beat -- a flinch away from them, a step that puts a pillar \
-between them, a hand that stops halfway to a pocket. Without this the two \
-read as independently-posed figures who happen to share a frame, which is \
-what a real run produced in all four of its beats.
+- In EVERY beat with more than one character, the NON-FOCAL character's \
+own `action` must take another character as its OBJECT -- reach for her, \
+close a hand on her arm, put its face at hers, block the door she is \
+moving toward. An action performed on scenery is not enough, however \
+menacing the scenery makes it look: a real run put a stalking figure in a \
+car with its victim and gave it "braces its shoulders into the rear bench \
+cushion", "hands planted flat on the seat cushion", "hands closed on the \
+top edge of the seat back" across all three beats. Every one of those is \
+an action on upholstery, and the images read as two people sitting in a \
+car together.
+- The focal character must also react to them -- a flinch away, a step \
+that puts something between them, a hand that stops halfway to a pocket. \
+But that reaction ALONE does not satisfy the rule above: a victim \
+reacting to a threat that is doing nothing to her is the exact failure \
+this pair of rules exists to prevent.
 - If a character gets closer, more threatening, or more exposed as the \
 scene progresses, that change must show in the BODY -- a stoop, a reach, \
 weight shifted onto the front foot, a hand leaving a pocket. Never encode \
@@ -579,15 +588,20 @@ stalker purely from "finger-height in frame" to "a quarter of the frame" \
 and got one motionless man rendered at four zoom levels.
 - Give EVERY character a `blocking`, a `size_in_frame` AND an \
 `occlusion`, including the focal one.
-- `blocking` says where they STAND -- in the space, relative to the \
-camera, and relative to the other characters. Write it as a position in \
-the room, not as a position in the picture: "on the same floor directly \
-between her and the camera, near enough to touch her", "far down the \
-aisle behind the fourth pillar on the left, looking back toward her". Do \
-NOT write "left third of frame" or "upper-left" here -- a frame \
-coordinate is a projection of where someone stands through a particular \
-camera, and asking for it produced a beat that placed a standing man at \
-ceiling height.
+- `blocking` says where they STAND and nothing else -- their place in \
+the space, relative to the camera and to the other characters. Write it \
+as a position in the room, not as a position in the picture: "on the same \
+floor directly between her and the camera, near enough to touch her", \
+"on the rear bench directly behind the driver's seat". Do NOT write \
+"left third of frame" or "upper-left" here -- a frame coordinate is a \
+projection of where someone stands through a particular camera, and \
+asking for it produced a beat that placed a standing man at ceiling \
+height. Do NOT state which way they FACE here either: that belongs in \
+`action`, with the rest of what the body is doing. A real run wrote \
+`blocking` "facing the windscreen" while the same character's `action` \
+had her turning back over her shoulder at the thing behind her, and the \
+image obeyed the `blocking` -- she stared out of the windscreen at \
+nothing while the threat sat behind her unnoticed.
 - `size_in_frame` says how much of the image they occupy -- "roughly a \
 third of the image", "about a quarter of the image height", "a tenth of \
 the image width". This is the field that makes depth render: across four \

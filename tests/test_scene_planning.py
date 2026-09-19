@@ -869,6 +869,59 @@ def test_threat_rule_asks_for_occlusion_rather_than_distance():
     assert "a shape at the edge of vision" not in prompt
 
 
+# docs/decisions/0061: the interaction rule used to be satisfied by the
+# VICTIM reacting, which left the threat free to act on scenery -- a real
+# run gave it three beats of hands on upholstery and read as two people
+# sitting in a car together.
+def test_interaction_rule_binds_the_non_focal_character_not_just_any_entry():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "NON-FOCAL character's own `action` must take another character as its OBJECT" in prompt
+    assert "An action performed on scenery is not enough" in prompt
+    # the victim's reaction is still required, but explicitly does not
+    # discharge the rule on its own
+    assert "that reaction ALONE does not satisfy the rule above" in prompt
+
+
+def test_blocking_rule_forbids_stating_which_way_a_character_faces():
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _fact_check_result(),
+        model="deepseek/deepseek-v4-flash",
+        requires_grounding=False,
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Do NOT state which way they FACE here" in prompt
+    assert "belongs in `action`" in prompt
+
+
 def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
     captured = {}
 
@@ -1188,7 +1241,7 @@ def test_a_staging_entry_missing_its_action_is_rejected():
         # Each rule the run's failures map onto, asserted so a prompt edit
         # can't quietly drop one (docs/decisions/0049).
         "are states, not actions",
-        "BECAUSE OF another character",
+        "must take another character as its OBJECT",
         "must show in the BODY",
         "Never encode",
         "the field that makes depth render",

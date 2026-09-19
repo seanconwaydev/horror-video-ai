@@ -32,37 +32,24 @@ Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 
 ---
 
-## 1. Run a horror scene end to end under 0059 + 0060
+## 1. Re-run in a scene with room to move
 
-Everything measured so far has been measured in pieces. What has not
-happened is a full interactive run with all of this session's changes
-live: the duplicate `ACTION:` line gone
-([0057](../decisions/0057-drop-the-duplicate-action-line.md)), three
-prompt rules deleted ([0058](../decisions/0058-delete-rules-by-judgement-not-ablation.md)),
-`blocking` + `size_in_frame` ([0059](../decisions/0059-blocking-and-size-replace-frame-position.md)),
-and the threat now written close-and-hidden rather than distant
-([0060](../decisions/0060-threat-is-hidden-not-distant.md)).
+Two rule repairs landed unmeasured in
+[0061](../decisions/0061-the-threat-must-act-on-the-person.md): the
+non-focal character's own action must now take another character as its
+object, and `blocking` states place only, with orientation moved to
+`action`. Neither has been seen in an image.
 
-```
-uv run historical-video-ai --genre horror --tone dread --style horror-comic \
-  --candidates 3 --max-beats 3 --experiment-model deepseek/deepseek-v4-flash \
-  --time "present day" --place "an underground car park at night" \
-  --description "a woman realises someone has been standing between the pillars watching her"
-```
+The car-cabin run also established that **scene selection is a lever this
+project has never used deliberately**. A sedan cabin permits posture
+changes on a bench and nothing else, so a planned escalation had nowhere
+to go. The next scene should have physical affordance -- room to close
+distance, objects to use, somewhere for one character to move that the
+other has to answer.
 
-`--max-beats 3`, because the unconstrained plan came back with 8 and three
-candidates each is ~24 paid images. Run it interactively so it produces
-labels ([0053](../decisions/0053-human-judgements-are-recorded-as-data.md)).
-
-Two specific things to watch, both of which are predictions this session
-made and has not tested:
-
-- **Does the threat now arrive close and occluded?** 0060 rewrote the rule
-  after a plan-only run put it "far down the aisle beyond her". Read the
-  scene plan at the review gate before spending.
-- **Does near-field depth ordering hold with a real planner's text?** It
-  was 14/14 on prose written by hand for the eval. The planner's own
-  `blocking` and `size_in_frame` have never been rendered.
+Run it interactively, `--max-beats 3`, and read the plan at the review
+gate before spending: the specific thing to check is whether the threat's
+own `action` now reaches for the person rather than bracing on furniture.
 
 ## 2. Warn when a beat's camera height cannot exist in its location
 
