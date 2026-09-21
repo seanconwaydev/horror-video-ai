@@ -318,6 +318,10 @@ def _resolve_threat_mode(genre: str | None, tone: str | None) -> str:
     return "none"
 
 
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- write a threat as thirty
+#   metres off and measure how far away it actually renders; it came back
+#   a few feet off in 21 of 22 measured images): a threat is never
+#   distant, only occluded (docs/decisions/0060, 0073).
 _THREAT_PRESENCE_RULE = """\
 - This is a horror/suspense scene: the protagonist's own motivation and \
 emotional register must read as fear/apprehension/dread-driven in every \
@@ -504,6 +508,17 @@ description actually contradicts.
 
 # docs/decisions/0071. Unconditional, like the base composition rule
 # (0052): the ceiling is a property of the image model, not of a genre.
+#
+# Four hard bans, all measured on one image model and all due for
+# re-verification when that pin changes -- docs/decisions/0073.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- ask one beat for a character
+#   reflected in a window and look at the image): no reflected people.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- ask one beat for an interior
+#   and the structure outside its windows): one beat is one space.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- ask for visible breath or
+#   beads of condensation at 9:16 phone resolution): no physical minutiae.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- give one beat two light
+#   sources of similar strength): one dominant light source per beat.
 _COMPLEXITY_BUDGET_RULE = """\
 - Budget each beat's complexity instead of maximising it. An image model \
 has a hard ceiling on how many things it can hold at once, and past it \
@@ -539,6 +554,16 @@ produce a flat, sourceless image with no readable shadow.
 """
 
 
+# Three more hard bans live in the rule text below -- docs/decisions/0073.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- put a camera position in the
+#   location's floor plan, "from a ceiling corner at the west end"): no
+#   camera world-position (docs/decisions/0044).
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- write a staging action as
+#   "turning" or "spinning"): no process verbs, name the frozen instant.
+# MODEL-BAN(gemini/gemini-2.5-flash-image -- escalate a threat across four
+#   beats using only a growing `size_in_frame`; it produced one motionless
+#   man at four zoom levels): escalation must show in the body
+#   (docs/decisions/0049).
 _PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
 {complexity_budget_rule}\

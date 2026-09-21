@@ -27,6 +27,13 @@
 scene_planning:
   model: "deepseek/deepseek-v4-flash"
 
+# Changing this pin to a different model family or major version triggers
+# a re-verification of every hard ban in the scene-planning prompt before
+# the new pin ships -- `grep -rn "MODEL-BAN(" src/` lists them and says
+# how to re-test each. See docs/decisions/0073. A ban forbids something
+# because THIS model rendered it badly; it does not survive the model on
+# its own merits, and it suppresses the only evidence that would retire it.
+
 previz:
   model: "gemini/gemini-2.5-flash-image"
 

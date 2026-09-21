@@ -110,6 +110,23 @@ A second one lives in `stages/previz.py`: reference images are passed to litellm
 
 The previous two (`src/horror_video_ai/_litellm_workarounds.py`, covering litellm's `Message`/`ModelResponse` construction failing on Python 3.10/3.11 per [litellm#36384](https://github.com/BerriAI/litellm/issues/36384), and a separate undocumented leak of litellm's own internal params into the `video_generation()` request body) were both deleted once the project moved to Python 3.11 + litellm 1.98.0 confirmed both fixed for real — see [docs/decisions/0013](./docs/decisions/0013-python-3.11-upgrade.md).
 
+## Hard bans expire with the model
+
+Some prompt rules forbid something because one image model rendered it
+badly -- no character reflections, no distant threat, no process verbs,
+one space per beat. These are different from every other rule here: a rule
+that *asks* for something shows up (or doesn't) in the next batch of
+images, but a ban suppresses the only evidence that would retire it, so it
+can be wrong silently and forever. Each is tagged with a greppable
+`MODEL-BAN(<model it was measured on> -- <how to re-test it>):` comment,
+so `grep -rn "MODEL-BAN(" src/` lists every ban in force. **When
+`config/models.yaml`'s `previz` or `video_generation` pin moves to a
+different model family or major version, re-verify them all before
+shipping the pin** -- by generating the forbidden thing against the new
+model and looking at it, never by reasoning from the model's docs -- and
+update each surviving ban's marker to the model it was just checked on.
+See `docs/decisions/0073`.
+
 ## Project conventions
 
 - **Architecture decisions are recorded as ADRs** in `docs/decisions/`, one file per decision, numbered sequentially, written once and left alone — a changed decision gets a new ADR that supersedes the old one rather than an edit in place (`docs/decisions/0001-record-architecture-decisions.md`). `docs/architecture.md` stays a short current-state overview; undecided items live in its "Open questions" section until they're resolved, at which point they become an ADR. When you make or are asked to help make an actual architectural decision on this project, write the ADR.
