@@ -19,7 +19,9 @@ from horror_video_ai.stages.scene_planning import (
     Beat,
     ScenePlan,
     ScenePlanningError,
+    beat_visibility_warnings,
     check_beat_location_references,
+    check_staging_visibility,
     check_unique_ids,
     identity_field_pose_warnings,
 )
@@ -92,13 +94,15 @@ def print_item_fields(item: ItemT) -> None:
         print(f"  {f.name}: {value}")
 
 
-# A Beat has 8 fields, but a human editing one is almost always reacting
-# to a specific rendered mismatch (the wrong action, the wrong framing, a
-# missing shadow) -- walking through all 8 one by one (including
+# A human editing a beat is almost always reacting to a specific rendered
+# mismatch (the wrong action, the wrong framing, a missing shadow), so
+# this skips the fields that don't drive the picture -- notably
 # location_id, which shouldn't change here without the revalidation
-# decisions/0028 requires for a real structural edit) was real, reported
-# friction. These three are what actually drives what gets rendered.
-BEAT_QUICK_EDIT_FIELDS = ("staging", "action", "camera", "lighting")
+# decisions/0028 requires for a real structural edit. `contact` and
+# `intensity` earn their place because the two failures they exist to fix
+# -- characters not touching, nobody moving -- are exactly what a human
+# rejects an image for (docs/decisions/0071).
+BEAT_QUICK_EDIT_FIELDS = ("staging", "action", "contact", "intensity", "camera", "lighting")
 
 
 def edit_item_fields(item: ItemT, *, fields: tuple[str, ...] | None = None) -> ItemT:
@@ -225,6 +229,8 @@ def review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
     print("\n--- scene plan review (docs/decisions/0023) ---")
     for warning in identity_field_pose_warnings(plan.characters):
         print(f"\nheads up: {warning}")
+    for warning in beat_visibility_warnings(plan.beats):
+        print(f"\nheads up: {warning}")
     reviewed_characters = _review_list_with_unique_ids(
         plan.characters, item_label="Character", auto_yes=auto_yes
     )
@@ -243,6 +249,7 @@ def review_scene_plan(plan: ScenePlan, *, auto_yes: bool = False) -> ScenePlan:
             )
             try:
                 check_beat_location_references([reviewed_beat], reviewed_locations)
+                check_staging_visibility([reviewed_beat])
             except ScenePlanningError as exc:
                 print(f"\n{exc}")
                 if auto_yes:

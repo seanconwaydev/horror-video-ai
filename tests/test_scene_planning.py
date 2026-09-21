@@ -15,8 +15,10 @@ from horror_video_ai.stages.scene_planning import (
     _random_character_trait_hint,
     _resolve_composition_mode,
     _resolve_threat_mode,
+    beat_visibility_warnings,
     check_beat_character_references,
     identity_field_pose_warnings,
+    load_scene_plan,
     run_scene_planning_stage,
 )
 
@@ -62,6 +64,8 @@ def _valid_payload(**overrides) -> dict:
                         "size_in_frame": "roughly a third of the image",
                     }
                 ],
+                "contact": "",
+                "intensity": "still -- nothing moving but her thumb on the screen",
                 "camera": "medium shot",
                 "lighting": "bright midday sun",
                 "audio": "street ambience",
@@ -1184,3 +1188,135 @@ def test_planning_prompt_carries_the_staging_rules(phrase):
 
     run_scene_planning_stage(_scene(), completion_fn=_completion)
     assert phrase in captured["messages"][0]["content"]
+
+
+# --- docs/decisions/0071: contact, visibility, intensity, complexity ---
+
+
+def test_a_live_beat_without_intensity_is_refused():
+    """Strict parsing of a model response, same reasoning as size_in_frame
+    (docs/decisions/0065): a beat with no intensity silently loses its
+    INTENSITY line and the render comes back static, after the human has
+    already paid for it."""
+    payload = _valid_payload()
+    payload["beats"][0].pop("intensity")
+    with pytest.raises(ScenePlanningError, match="no 'intensity'"):
+        _parse_scene_plan(json.dumps(payload))
+
+
+def test_an_archived_plan_without_intensity_still_loads():
+    """--fixture and --video-gen-from replay plans written before the
+    field existed; they must keep loading (docs/decisions/0065)."""
+    payload = _valid_payload()
+    payload["beats"][0].pop("intensity")
+    plan = load_scene_plan(payload)
+    assert plan.beats[0].intensity == ""
+
+
+def test_contact_is_optional_and_round_trips():
+    payload = _valid_payload()
+    payload["beats"][0]["contact"] = "its hand closes round her forearm at frame centre"
+    plan = _parse_scene_plan(json.dumps(payload))
+    assert plan.beats[0].contact == "its hand closes round her forearm at frame centre"
+
+    payload["beats"][0].pop("contact")
+    assert _parse_scene_plan(json.dumps(payload)).beats[0].contact == ""
+
+
+def test_staging_a_character_the_camera_cannot_see_is_refused():
+    """The beat-2 failure in docs/decisions/0071: a threat placed behind a
+    total occluder and still given a share of the frame. The image model
+    settles the contradiction by drawing it somewhere arbitrary, and no
+    human correction can then move it, because the plan never named a
+    place for it."""
+    payload = _valid_payload()
+    payload["beats"][0]["staging"][0]["occlusion"] = (
+        "the catwalk's floor grating covers it completely, not visible from here"
+    )
+    with pytest.raises(ScenePlanningError, match="cannot see"):
+        _parse_scene_plan(json.dumps(payload))
+
+
+def test_partial_occlusion_naming_what_survives_is_still_allowed():
+    """Threat presence in this project runs entirely on partial occlusion,
+    so the check must not catch it."""
+    payload = _valid_payload()
+    payload["beats"][0]["staging"][0]["occlusion"] = (
+        "the pillar's near face covers everything but one shoulder and half her head"
+    )
+    plan = _parse_scene_plan(json.dumps(payload))
+    assert plan.beats[0].staging[0].occlusion.startswith("the pillar")
+
+
+def test_a_reflected_character_is_warned_about():
+    beat = _beat(
+        staging=[_staging("influencer")],
+        lighting="her reflection stares back out of the black glass",
+    )
+    warnings = beat_visibility_warnings([beat])
+    assert any("reflect" in w.lower() for w in warnings)
+    assert any("second copy" in w for w in warnings)
+
+
+def test_a_character_hidden_behind_a_solid_surface_is_warned_about():
+    beat = _beat(
+        staging=[
+            Staging(
+                character_id="bearer",
+                action="lifts the lantern toward her",
+                blocking="a flight below the catwalk",
+                occlusion="the catwalk's floor grating hides all but the lantern",
+            )
+        ]
+    )
+    warnings = beat_visibility_warnings([beat])
+    assert any("different space" in w for w in warnings)
+
+
+def test_a_clean_beat_produces_no_visibility_warnings():
+    assert beat_visibility_warnings([_beat(staging=[_staging("influencer")])]) == []
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        # docs/decisions/0071, one per failure the rules were written for.
+        "that beat's `contact` field",
+        "as ONE shape seen from the camera",
+        "Only stage characters the camera can actually SEE",
+        "Every beat needs an `intensity`",
+        "must CHANGE across the scene",
+        "Budget each beat's complexity",
+        "One beat is ONE SPACE",
+        "Never put a CHARACTER'S REFLECTION",
+        "One dominant light source per beat",
+    ],
+)
+def test_planning_prompt_carries_the_0071_rules(phrase):
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
+    assert phrase in captured["messages"][0]["content"]
+
+
+def test_planning_prompt_asks_for_contact_and_intensity_in_its_json_shape():
+    """A rule the response shape has no slot for is a rule the planner
+    cannot obey."""
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
+    prompt = captured["messages"][0]["content"]
+    assert '"contact":' in prompt
+    assert '"intensity":' in prompt

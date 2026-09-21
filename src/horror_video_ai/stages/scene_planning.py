@@ -134,6 +134,28 @@ class Beat:
     lighting: str
     audio: str
     duration_seconds: str
+    #: The single composed shape two characters make where they physically
+    #: touch, written once from the camera's point of view ("its grey hand
+    #: closes round her right forearm at the centre of the frame, her arm
+    #: pulled straight between them"). Empty when nobody is touching.
+    #:
+    #: `staging` describes each character independently, so a grab had no
+    #: home in the schema: it existed only as two separate sentences in two
+    #: separate entries, and the image model drew two people standing near
+    #: each other. A real run's beat wrote "its bare hand is clamped around
+    #: Rook's right wrist" and "hauls her right arm back" and rendered no
+    #: contact at all. See docs/decisions/0071.
+    contact: str = ""
+    #: How much physical force is in this moment and what a frozen frame
+    #: shows of it -- "still, nothing moving but her eyes" through to
+    #: "violent: the slicker flared out mid-lunge, the lantern swung wide
+    #: on its arc, one boot off the grating".
+    #:
+    #: Every other field is positional (where they stand, how big, what
+    #: hides them), so the planner had no vocabulary for force and wrote
+    #: stillness in every beat. Empty for a plan captured before this
+    #: field. See docs/decisions/0071.
+    intensity: str = ""
     #: One entry per character visible in this beat -- not just the focal
     #: one named in `subject`. Replaces the flat `character_ids` list from
     #: docs/decisions/0041, which could say who was present but not what
@@ -442,8 +464,45 @@ description actually contradicts.
 """
 
 
+# docs/decisions/0071. Unconditional, like the base composition rule
+# (0052): the ceiling is a property of the image model, not of a genre.
+_COMPLEXITY_BUDGET_RULE = """\
+- Budget each beat's complexity instead of maximising it. An image model \
+has a hard ceiling on how many things it can hold at once, and past it \
+the whole frame degrades rather than just the last detail. Across a \
+beat's `action`, `lighting`, `contact` and every `staging` entry \
+together, name no more than about five things the image must get right, and \
+drop the least important one rather than keeping it. A beat a human \
+cannot picture from its own text will not be rendered correctly either.
+- One beat is ONE SPACE: everything the frame shows must be inside the \
+`location_id` this beat points at. Do not ask a single shot to hold an \
+interior and the structure outside its windows, a room and the floor \
+below it, or a corridor and what is at the far end of another corridor. \
+A beat that stayed inside one space rendered cleanly while the beat \
+before it, splitting attention between a cabin interior and the tower \
+underneath, did not. If the action needs the other space, that is a \
+different beat, and the camera goes there.
+- Never put a CHARACTER'S REFLECTION in a beat -- not in glass, a mirror, \
+a window, water or polished metal, in any field. Image models do not \
+render a reflected person as a reflection; they render a second copy of \
+that person standing in the frame, which reads as a continuity error \
+rather than as the effect intended. Reflected LIGHT is fine and often \
+good: a beam thrown across wet ground, a glow on a pane, a sweep of a \
+beacon over metal. It is reflected people that are banned.
+- Leave out physical minutiae a still frame at phone resolution cannot \
+carry: a character's visible breath, individual beads of condensation, \
+a chipped tooth seen from across a room, the exact grain of a surface. \
+Each one spends part of the budget above and none of them survives into \
+the picture.
+- One dominant light source per beat, named in `lighting`, with anything \
+else clearly secondary. Two competing sources of similar strength \
+produce a flat, sourceless image with no readable shadow.
+"""
+
+
 _PLANNING_RULES_AND_SHAPE = """\
 Planning rules:
+{complexity_budget_rule}\
 - A LOCATION is one physical space the action happens in -- if the scene \
 visits multiple distinct spaces (e.g. a street, then a building's \
 interior), each is its own Location. Describe architecture in physical, \
@@ -596,12 +655,60 @@ that puts something between them, a hand that stops halfway to a pocket. \
 But that reaction ALONE does not satisfy the rule above: a victim \
 reacting to a threat that is doing nothing to her is the exact failure \
 this pair of rules exists to prevent.
+- Whenever two characters physically TOUCH in a beat -- a grab, a hand \
+on a shoulder, a body pinned against a rail -- you must also fill in that \
+beat's `contact` field, and write it as ONE shape seen from the camera, \
+not as two people's separate movements: "its grey hand closes round her \
+right forearm at the centre of the frame, her arm pulled straight between \
+them, their two bodies overlapping from this angle". Each `staging` entry \
+describes one character on their own, so a grab written only there is two \
+unrelated sentences, and the image comes back as two people standing near \
+each other not touching. A real beat said "its bare hand is clamped around \
+her right wrist" in one entry and "hauls her right arm back toward her \
+sternum" in the other, and rendered no contact whatsoever. Name the two \
+body parts that meet, where in the frame they meet, and what the contact \
+does to the shape of both bodies. Leave `contact` empty only when nobody \
+is touching anybody.
+- Every beat needs an `intensity`: how much physical force is in this \
+moment, plus the evidence a single frozen frame would show of it. Every \
+other field on a beat says where people are and how big they read, so \
+with no field for force the whole scene comes out still, and a threat \
+that never moves is what this pipeline keeps producing. State the level \
+and then the frozen proof of it: "still -- nothing moving but her eyes"; \
+"sudden -- her hair already swung past her cheek, one heel off the \
+floor"; "violent -- the slicker flared out mid-lunge, the lantern swung \
+wide on its arc, one boot clear of the grating, her sleeve wrenched out \
+of shape where the hand has hold of it". Force in a still image reads \
+through displaced hair and fabric, weight thrown off balance, limbs \
+splayed past their resting line and objects caught out of position -- \
+name those, never a process verb.
+- `intensity` must CHANGE across the scene and must reach a real peak. A \
+scene whose every beat is quiet has no escalation in it, only a series of \
+poses. Horror in particular is not only the silent watcher: a threat that \
+is loud, fast, angry and physically committed -- lunging, seizing, \
+thrashing, bearing a victim backwards -- is most of the genre, and a \
+figure that merely stands present in every beat while nothing happens to \
+anyone reads as bored rather than frightening. If the scene builds to \
+violence, the last beats must say so in `intensity`, in `contact` and in \
+each character's `action` together.
 - If a character gets closer, more threatening, or more exposed as the \
 scene progresses, that change must show in the BODY -- a stoop, a reach, \
 weight shifted onto the front foot, a hand leaving a pocket. Never encode \
 an escalation only as a larger `size_in_frame`: a real run escalated a \
 stalker purely from "finger-height in frame" to "a quarter of the frame" \
 and got one motionless man rendered at four zoom levels.
+- Only stage characters the camera can actually SEE. `staging` is the \
+list of people the image model will draw, so a character behind a solid \
+floor, on the far side of a wall, in another room, or outside the frame \
+does not get an entry at all -- not even a tiny one. Asking for a \
+character that is both invisible and a stated fraction of the picture is \
+a contradiction, and the image model settles it by drawing them somewhere \
+arbitrary. It is then unfixable: no human correction can move a figure to \
+a place the plan never named. A real beat put a threat a floor below the \
+camera, behind the metal grating the camera was standing on, and still \
+asked for a sixth of the image height. If the threat needs to be seen, \
+put it in the same space as the camera and hide it partially with \
+something the camera can see past.
 - Give EVERY character a `blocking`, a `size_in_frame` AND an \
 `occlusion`, including the focal one.
 - `blocking` says where they STAND and nothing else -- their place in \
@@ -664,6 +771,10 @@ this exact shape:
           "size_in_frame": "<how much of the image they occupy>",
           "occlusion": "<what physically hides them and how much survives, or 'nothing'>"}}
       ],
+      "contact": "<the ONE shape two touching characters make, seen from the camera;
+        empty string if nobody is touching anybody>",
+      "intensity": "<how much physical force is in this moment, and what a frozen
+        frame shows of it>",
       "camera": "...", "lighting": "...",
       "audio": "...", "duration_seconds": "..."}}
   ]
@@ -785,6 +896,123 @@ def check_beat_character_references(beats: list, characters: list) -> None:
                 "One entry per character -- put everything they do in that one entry."
             )
 
+
+
+#: Occlusion wordings that mean "the camera cannot see this character at
+#: all". A staged character is one the image model is told to draw, so a
+#: total occluder there is a plan contradicting itself -- and the model
+#: resolves the contradiction by drawing them anyway, wherever it likes.
+_TOTAL_OCCLUSION_PATTERNS = (
+    "completely hidden",
+    "entirely hidden",
+    "fully hidden",
+    "hidden entirely",
+    "completely covered",
+    "entirely covered",
+    "completely obscured",
+    "entirely obscured",
+    "not visible",
+    "no part of",
+    "out of frame",
+    "off frame",
+    "off-camera",
+    "off camera",
+    "out of shot",
+    "outside the frame",
+)
+
+
+def check_staging_visibility(beats: list) -> None:
+    """Raise ScenePlanningError if a beat stages a character it also says
+    the camera cannot see.
+
+    `staging` is the list of characters the image model is told to draw,
+    and every entry carries a `size_in_frame` claiming a share of the
+    picture. A plan that assigns a share of the frame to something it has
+    also placed behind a total occluder has stated two incompatible facts,
+    and the image model resolves that by drawing the character in an
+    arbitrary place at an arbitrary size -- which is unfixable by human
+    feedback, because no correction can name a position the plan never
+    gave. A real run put a threat "on the stair landing one flight below
+    the catwalk" behind "the floor grating of the catwalk above" and still
+    asked for a sixth of the image height; telling it to be smaller and
+    further away simply moved it somewhere else arbitrary
+    (docs/decisions/0071).
+
+    A character the camera genuinely cannot see belongs out of `staging`
+    altogether. Partial occlusion -- the case this project relies on for
+    threat presence -- is untouched: "covers everything but one shoulder"
+    names what survives and is not caught here.
+
+    Re-run after human edits, like the other checks here
+    (docs/decisions/0028).
+    """
+    for beat in beats:
+        for staged in beat.staging:
+            lowered = staged.occlusion.lower()
+            hit = next((p for p in _TOTAL_OCCLUSION_PATTERNS if p in lowered), None)
+            if hit is None:
+                continue
+            # "covers everything but his left shoulder" is partial, and
+            # several of the patterns above appear inside exactly that
+            # construction ("no part of him survives" vs "no part of him
+            # but the hand"). An explicit exception clause means the plan
+            # named what the camera still sees, which is what this check
+            # is asking for.
+            if any(word in lowered for word in (" but ", " except ", " apart from ", " save ")):
+                continue
+            raise ScenePlanningError(
+                f"A beat at {beat.location_id!r} stages character {staged.character_id!r} "
+                f"but its 'occlusion' says the camera cannot see it ({hit!r}: "
+                f"{staged.occlusion!r}), while 'size_in_frame' claims "
+                f"{staged.size_in_frame!r} of the picture. A character the camera cannot "
+                "see must not be staged at all; if it should be visible, say what part of "
+                "it survives the occluder (docs/decisions/0071)."
+            )
+
+
+#: Opaque surfaces that a camera cannot see through at all. Named as an
+#: occluder these usually mean the character is in a different space from
+#: the camera, which is the beat-2 failure in docs/decisions/0071 -- but
+#: they are also legitimate partial occluders from the right angle (a
+#: figure behind a wall's near corner), so this warns rather than raises.
+_SOLID_OCCLUDER_WORDS = ("floor", "ceiling", "grating", "roof", "ground")
+
+
+def beat_visibility_warnings(beats: list) -> list[str]:
+    """Warn where a beat looks like it is asking one frame to show two
+    separate spaces, or to show a person reflected.
+
+    Both are failures of the same kind: the plan is legible as prose and
+    unrenderable as one image. Warnings rather than errors, following the
+    identity-field heuristic's reasoning (docs/decisions/0048) -- these
+    are keyword matches over free text, and the human is already reviewing
+    every beat.
+    """
+    warnings = []
+    for n, beat in enumerate(beats, start=1):
+        for staged in beat.staging:
+            lowered = staged.occlusion.lower()
+            solid = sorted({w for w in _SOLID_OCCLUDER_WORDS if w in lowered})
+            if solid:
+                warnings.append(
+                    f"Beat {n} hides {staged.character_id!r} behind {', '.join(solid)} "
+                    f"({staged.occlusion!r}). A camera cannot see through those, so this "
+                    "usually means the character is in a different space from the camera "
+                    "-- one frame cannot show both (docs/decisions/0071)."
+                )
+        text = " ".join(
+            [beat.action, beat.lighting, beat.contact]
+            + [s.action for s in beat.staging]
+        ).lower()
+        if "reflect" in text or "reflection" in text:
+            warnings.append(
+                f"Beat {n} describes a reflection. A reflected person renders as a second "
+                "copy of that person standing in the frame, not as a reflection "
+                "(docs/decisions/0071). Reflected light is fine; a reflected character "
+                "is not."
+            )
+    return warnings
 
 
 def check_beat_location_references(beats: list, locations: list) -> None:
@@ -914,14 +1142,28 @@ def load_scene_plan(data: object, *, strict: bool = False) -> ScenePlan:
              "duration_seconds"],
             item_desc="A beat",
         )
+        if strict and not item.get("intensity"):
+            raise ScenePlanningError(
+                f"A beat has no 'intensity' (beat subject: {item.get('subject')!r}). It is "
+                "the only field carrying physical force; without it the planner writes "
+                "stillness into every beat (docs/decisions/0071)."
+            )
+        optional_beat_fields = {"staging", "contact", "intensity"}
         beats.append(
             Beat(
-                **{f: item[f] for f in Beat.__dataclass_fields__ if f != "staging"},
+                **{
+                    f: item[f]
+                    for f in Beat.__dataclass_fields__
+                    if f not in optional_beat_fields
+                },
+                contact=item.get("contact", ""),
+                intensity=item.get("intensity", ""),
                 staging=_parse_staging(item, characters, strict=strict),
             )
         )
     check_beat_location_references(beats, locations)
     check_beat_character_references(beats, characters)
+    check_staging_visibility(beats)
 
     if not beats:
         raise ScenePlanningError("Scene-planning response has no beats")
@@ -1006,6 +1248,7 @@ def run_scene_planning_stage(
         character_trait_hint=_random_character_trait_hint(rng or random.Random())
     )
     prompt = preamble + _PLANNING_RULES_AND_SHAPE.format(
+        complexity_budget_rule=_COMPLEXITY_BUDGET_RULE,
         composition_rule=composition_rule,
         threat_rule=threat_rule,
         character_variety_rule=character_variety_rule,

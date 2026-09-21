@@ -395,6 +395,11 @@ def _build_beat_prompt(
     accurate scene, Time: X, Place: Y" template is scoped to the original
     single-scene flow, not a planned multi-beat shot list.
 
+    CONTACT and INTENSITY lead the prompt when the beat has them, before
+    the character blocks: they are the two facts `staging` structurally
+    cannot carry, since it describes each character independently
+    (docs/decisions/0071).
+
     STYLE appears exactly once, and only the run's chosen preset can
     supply it. The beat's own `cinematography` text (lens, depth of field,
     grain, colour grade) is legitimate beat-to-beat variety, so it is kept
@@ -407,6 +412,17 @@ def _build_beat_prompt(
     (evals/) had that construction lose on style 5-0.
     """
     parts = []
+    # Both lead the prompt, ahead of the per-character blocks. What the
+    # bodies are doing to each other, and how hard, is what these images
+    # kept failing to show -- and `staging` cannot state either, because
+    # it describes each character in isolation (docs/decisions/0071).
+    if beat.contact:
+        parts.append(
+            f"PHYSICAL CONTACT -- the single most important thing in this image, "
+            f"the two bodies actually meeting: {beat.contact}"
+        )
+    if beat.intensity:
+        parts.append(f"INTENSITY: {beat.intensity}")
     # One block per character present, labelled, so a beat with more than
     # one has a way to say which is which. Before docs/decisions/0041 only
     # the scene's first character was ever passed here, so a planned
@@ -457,7 +473,7 @@ def _build_beat_prompt(
     # which is the shape of a plan captured before 0049 and replayed.
     if not anyone_is_doing_something:
         parts.append(f"ACTION: {beat.action}")
-    if len(beat.staging) > 1:
+    if len(beat.staging) > 1 and not beat.contact:
         parts.append(
             "These characters are in the same moment and must react to each other -- "
             "their gazes, distances and body angles have to agree, not read as separate "

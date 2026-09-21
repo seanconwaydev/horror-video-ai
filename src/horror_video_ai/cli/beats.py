@@ -49,10 +49,17 @@ def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     which by then is hundreds of lines up the scrollback
     (docs/decisions/0053). Camera and staging specifically: those are what
     an image most visibly honours or ignores, and checking them was the
-    judgement the interface made hardest to perform.
+    judgement the interface made hardest to perform. `contact` and
+    `intensity` for the same reason (docs/decisions/0071) -- whether two
+    characters are actually touching is the fastest thing to check and the
+    one these images fail most often.
     """
     by_id = {c.id: c for c in characters}
     lines = [f"Judging against -- beat: {beat.action}", f"  camera: {beat.camera}"]
+    if beat.intensity:
+        lines.append(f"  intensity: {beat.intensity}")
+    if beat.contact:
+        lines.append(f"  contact: {beat.contact}")
     for staged in beat.staging:
         name = by_id[staged.character_id].id if staged.character_id in by_id else staged.character_id
         lines.append(f"  {name} doing: {staged.action}")
@@ -501,6 +508,13 @@ def generate_beats_with_choices(
         # different facts, and the recorded beat should stay as it was
         # written (docs/decisions/0057).
         corrections: list[str] = []
+        # Monotonic across cycles, never reset. It names the candidate
+        # files, and a cycle-local counter meant (f)eedback or an (e)dit
+        # restarted it at 1 and the next attempt overwrote the paid-for
+        # images of the one the human had just rejected. Same failure the
+        # rejected-image archive already had, reintroduced by the
+        # candidate filenames (see runlog.next_archive_path).
+        attempt_n = 0
         cycle = 0
         while True:
             cycle += 1
@@ -514,7 +528,6 @@ def generate_beats_with_choices(
                     f"\n=== beat {i}/{len(scene_plan.beats)} -- restarting, "
                     f"attempt cycle {cycle} ==="
                 )
-            attempt_n = 0
             beat_was_edited = False
 
             def _on_reviewed(

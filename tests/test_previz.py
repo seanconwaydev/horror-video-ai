@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import json
 from types import SimpleNamespace
 
@@ -960,3 +961,74 @@ def test_previz_review_retries_a_transient_error(tmp_path):
     assert review.accepted is True
     assert calls["n"] == 2, "the review call should have been retried once"
     assert retries == [1]
+
+
+# --- docs/decisions/0071: contact and intensity lead the prompt ---
+
+
+def test_contact_leads_the_beat_prompt_ahead_of_the_character_blocks():
+    """`staging` describes each character alone, so a grab written only
+    there is two unrelated sentences and renders as two people standing
+    near each other. CONTACT is the one line that states the shape they
+    make together, and it goes first."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        contact="its grey hand closes round her right forearm at frame centre",
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="hauls her arm back toward her sternum",
+                blocking="backed against the railing",
+                size_in_frame="about half the image height",
+            )
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "PHYSICAL CONTACT" in prompt
+    assert "closes round her right forearm" in prompt
+    assert prompt.index("PHYSICAL CONTACT") < prompt.index("CHARACTER")
+
+
+def test_intensity_gets_its_own_line():
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    beat = _beat(intensity="violent -- the slicker flared out mid-lunge")
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+    assert "INTENSITY: violent -- the slicker flared out mid-lunge" in prompt
+
+
+def test_a_beat_without_contact_or_intensity_carries_neither_line():
+    """Archived plans predate both fields and must not gain empty labels."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    prompt = _build_beat_prompt(_beat(), characters=[_character()], location=None)
+    assert "PHYSICAL CONTACT" not in prompt
+    assert "INTENSITY" not in prompt
+
+
+def test_contact_replaces_the_generic_react_to_each_other_line():
+    """The generic line is a weaker restatement of what CONTACT says
+    precisely, and a beat's prompt has a complexity budget
+    (docs/decisions/0071)."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    staging = [
+        Staging(character_id="influencer", action="pulls away", blocking="at the rail"),
+        Staging(character_id="bearer", action="keeps hold of her wrist", blocking="between her and the door"),
+    ]
+    characters = [_character(), dataclasses.replace(_character(), id="bearer")]
+
+    without = _build_beat_prompt(_beat(staging=staging), characters=characters, location=None)
+    with_contact = _build_beat_prompt(
+        _beat(staging=staging, contact="its fist and her forearm meet at frame centre"),
+        characters=characters,
+        location=None,
+    )
+
+    assert "must react to each other" in without
+    assert "must react to each other" not in with_contact

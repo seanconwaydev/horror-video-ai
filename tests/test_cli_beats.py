@@ -279,10 +279,10 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
 
 
 def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(tmp_path, monkeypatch):
-    # "e" to edit -- a beat's edit is restricted to action/camera/lighting
-    # (BEAT_QUICK_EDIT_FIELDS), not every field -- then a new action,
-    # blank for camera/lighting, then "a" to accept.
-    responses = iter(["e", "smiles warmly", "", "", "a"])
+    # "e" to edit -- a beat's edit is restricted to BEAT_QUICK_EDIT_FIELDS,
+    # not every field -- then a new action, blank for
+    # contact/intensity/camera/lighting, then "a" to accept.
+    responses = iter(["e", "smiles warmly", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -410,10 +410,10 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     # something baked into the beat's own text (not bad luck) needs an
     # edit-and-retry path, not just three guaranteed-to-fail blind
     # attempts. (e)dit at the on-rejection prompt, then blank through
-    # action/camera/lighting (BEAT_QUICK_EDIT_FIELDS, keep as-is for
-    # this test), should restart a fresh attempt cycle that can then be
-    # accepted normally.
-    responses = iter(["e", "", "", "", "a"])
+    # every BEAT_QUICK_EDIT_FIELDS prompt (keep as-is for this test),
+    # should restart a fresh attempt cycle that can then be accepted
+    # normally.
+    responses = iter(["e", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -575,7 +575,8 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     original '=== beat i/N: <action> ===' header, which read as a new beat
     being generated rather than the same one starting over."""
     # An (e)dit restarts the cycle; a plain (r)etry now stays inside it.
-    responses = iter(["e", "", "", "", "a"])
+    # The blanks keep every BEAT_QUICK_EDIT_FIELDS value as it was.
+    responses = iter(["e", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -799,3 +800,38 @@ def test_beats_generate_with_no_conditioning_when_references_are_off(tmp_path, m
     assert results[0]["image_path"] is not None
     # The character's own description still reaches the model as text.
     assert "white crop top" in seen[0]["prompt"]
+
+
+def test_feedback_retry_does_not_overwrite_the_rejected_attempts_candidates(
+    tmp_path, monkeypatch
+):
+    """(f)eedback starts a new attempt cycle, and the cycle counter used to
+    reset the candidate filenames to _1_*, so the next attempt wrote over
+    the images the human had just rejected. They were paid for; nothing a
+    regeneration does may destroy them."""
+
+    def _respond(prompt):
+        if "Keep which" in prompt:
+            return "1"
+        if "Feedback" in prompt:
+            return "the figure is too large and too close"
+        return "f" if _respond.calls.append(1) or len(_respond.calls) == 1 else "a"
+
+    _respond.calls = []
+    monkeypatch.setattr("builtins.input", _respond)
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
+
+    generate_beats_with_choices(
+        scene_plan,
+        character_refs={},
+        location_refs={},
+        candidates=2,
+        **_generate_beats_with_choices_kwargs(tmp_path),
+    )
+
+    images = sorted(p.name for p in (tmp_path / "beat_1").glob("*.png"))
+    # 2 candidates per attempt over 2 attempts. The one chosen in attempt 1
+    # was archived rather than deleted, so it is here under its archive name.
+    assert len(images) == 4, f"an image from attempt 1 was destroyed: {images}"
+    assert "candidate_1_2.png" in images
+    assert {"candidate_2_1.png", "candidate_2_2.png"} <= set(images)
