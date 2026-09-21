@@ -90,6 +90,10 @@ Done:
 - `evals/export_judgements.py` flattens run logs into one labelled JSONL
   dataset, one row per candidate image, carrying the siblings it was shown
   against. Verified end to end against a real `--mock` run.
+- The dataset itself is committed at `evals/judgements.jsonl`, written by
+  `--update-dataset`, which merges rather than overwrites -- `outputs/` is
+  gitignored and gets pruned, so an overwrite would delete every label
+  whose images are gone ([ADR 0074](../decisions/0074-judgements-are-committed-and-merged.md)).
 - The run log now records `style` too.
 
 Two bugs were caught by running the export against real data rather than

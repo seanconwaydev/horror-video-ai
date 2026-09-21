@@ -18,8 +18,15 @@ negative than one passed over for a specific sibling.
 `gave_up` marks a beat the owner abandoned entirely -- the strongest negative
 available, and the case where every candidate lost and no sibling won.
 
+`--update-dataset` merges the rows into `evals/judgements.jsonl`, which is
+committed. `outputs/` is gitignored and gets pruned, so a label whose images
+are gone survives only if it was written somewhere tracked; the merge is a
+union that never drops a row, because an overwrite from a pruned `outputs/`
+would delete exactly the history this file exists to keep (docs/decisions/0074).
+
 Usage:
     uv run python evals/export_judgements.py                     # summary only
+    uv run python evals/export_judgements.py --update-dataset    # after a run
     uv run python evals/export_judgements.py --out judgements.jsonl
     uv run python evals/export_judgements.py --runs outputs --out -
 """
@@ -34,6 +41,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The committed dataset. Deliberately not under evals/results/, which is
+# gitignored -- a label is only durable if it is tracked.
+DATASET_PATH = REPO_ROOT / "evals" / "judgements.jsonl"
+
+# What makes one labelled image itself. The image path alone is not enough:
+# a beat's candidate filenames restart per run, so the run has to be in the
+# key, and an attempt's kept candidate is rewritten to its archived path.
+_IDENTITY_FIELDS = ("run", "beat_index", "cycle", "attempt", "image_path")
+
 # Run-level context every row is stamped with. A judgement is only
 # comparable to another made under the same conditions -- a rejection under
 # one image model or style preset says nothing about a different one.
@@ -46,6 +62,20 @@ _RUN_FIELDS = (
     "scene_planning_model",
     "requires_grounding",
 )
+
+
+def _repo_relative(path: str) -> str:
+    """A run log stores absolute image paths, which cannot be committed.
+
+    They are machine-specific and they are part of a row's identity, so the
+    same image exported from a clone would merge as a second row. Anything
+    genuinely outside the repo (a --runs pointed elsewhere) is left alone
+    rather than mangled into a wrong relative path.
+    """
+    try:
+        return str(Path(path).resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return path
 
 
 def _run_logs(runs_dir: Path) -> Iterator[tuple[Path, dict]]:
@@ -102,13 +132,17 @@ def _beat_rows(run_path: Path, log: dict) -> Iterator[dict]:
             unattended = bool(attempt.get("unattended"))
             kept_paths = [c["path"] for c in candidates if c.get("kept")]
             for candidate in candidates:
-                siblings = [c["path"] for c in candidates if c["path"] != candidate["path"]]
+                siblings = [
+                    _repo_relative(c["path"])
+                    for c in candidates
+                    if c["path"] != candidate["path"]
+                ]
                 yield {
                     "run": run_path.parent.name,
                     "beat_index": beat_result.get("index"),
                     "cycle": attempt.get("cycle"),
                     "attempt": attempt.get("attempt"),
-                    "image_path": candidate["path"],
+                    "image_path": _repo_relative(candidate["path"]),
                     # The exact text sent to the image model. The whole
                     # point: a beat's fields can't reconstruct it, because
                     # _build_beat_prompt changes over time.
@@ -139,6 +173,72 @@ def _beat_rows(run_path: Path, log: dict) -> Iterator[dict]:
                     "n_characters": len(beat.get("staging", [])),
                     **run_context,
                 }
+
+
+def _row_identity(row: dict) -> tuple:
+    """What makes one labelled image itself, for merging."""
+    return tuple(row.get(field) for field in _IDENTITY_FIELDS)
+
+
+def _sort_key(row: dict) -> tuple:
+    """A total order over rows, so the committed file diffs as an append.
+
+    Ints are kept as ints rather than stringified so beat 10 sorts after
+    beat 2; a missing or wrong-typed field sorts first instead of raising,
+    since a write that aborts on one odd row loses every other row with it.
+    """
+
+    def _n(value: object) -> int:
+        return value if isinstance(value, int) else -1
+
+    return (
+        str(row.get("run") or ""),
+        _n(row.get("beat_index")),
+        _n(row.get("cycle")),
+        _n(row.get("attempt")),
+        str(row.get("image_path") or ""),
+    )
+
+
+def _read_dataset(path: Path) -> list[dict]:
+    """Rows already committed, or none if the dataset does not exist yet.
+
+    A malformed line fails loud rather than being skipped. Everywhere else
+    in this script a bad input is skipped with a warning, because the run
+    logs are disposable and one truncated run must not block the rest --
+    but this file is the only copy of its labels, and silently dropping a
+    line here would delete data on the next write.
+    """
+    if not path.exists():
+        return []
+    rows = []
+    for number, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"{path}:{number}: corrupt dataset line ({exc})") from exc
+    return rows
+
+
+def _merge(existing: list[dict], fresh: list[dict]) -> list[dict]:
+    """Union of both, fresh winning on a collision -- never fewer rows.
+
+    A run log is the better source while it still exists: a beat the human
+    had not ruled on yet exports no row at all, and gets one once they do.
+    But `outputs/` is pruned, so rows whose run is gone have no fresh
+    counterpart and must survive untouched (docs/decisions/0074).
+    """
+    merged = {_row_identity(row): row for row in existing}
+    merged.update({_row_identity(row): row for row in fresh})
+    return sorted(merged.values(), key=_sort_key)
+
+
+def _write_dataset(path: Path, rows: list[dict]) -> None:
+    # sort_keys so a field's position in the line never moves, and the diff
+    # shows what actually changed rather than a reshuffle.
+    path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
 
 
 def _summarise(rows: list[dict]) -> str:
@@ -195,6 +295,17 @@ def main() -> None:
         "--out",
         help="write JSONL here; '-' for stdout. Omit to print only the summary.",
     )
+    parser.add_argument(
+        "--update-dataset",
+        nargs="?",
+        const=str(DATASET_PATH),
+        default=None,
+        metavar="PATH",
+        help=(
+            "merge these rows into the committed dataset "
+            f"(default: {DATASET_PATH.relative_to(REPO_ROOT)}) and rewrite it"
+        ),
+    )
     args = parser.parse_args()
 
     # A missing outputs/ is the normal state of a fresh checkout -- it is
@@ -219,7 +330,21 @@ def main() -> None:
         else:
             Path(args.out).write_text(lines)
             print(f"Wrote {len(rows)} row(s) to {args.out}")
-    print(_summarise(rows), file=sys.stderr if args.out == "-" else sys.stdout)
+
+    # The merged dataset, not this export, is what later studies read, so
+    # it is what gets summarised once there is one.
+    summarised = rows
+    if args.update_dataset:
+        dataset = Path(args.update_dataset)
+        existing = _read_dataset(dataset)
+        summarised = _merge(existing, rows)
+        _write_dataset(dataset, summarised)
+        print(
+            f"{dataset}: {len(summarised)} row(s), "
+            f"{len(summarised) - len(existing)} new from {runs_dir}"
+        )
+
+    print(_summarise(summarised), file=sys.stderr if args.out == "-" else sys.stdout)
 
 
 if __name__ == "__main__":
