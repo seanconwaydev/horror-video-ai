@@ -281,8 +281,8 @@ def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_pat
 def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(tmp_path, monkeypatch):
     # "e" to edit -- a beat's edit is restricted to BEAT_QUICK_EDIT_FIELDS,
     # not every field -- then a new action, blank for
-    # contact/intensity/camera/lighting, then "a" to accept.
-    responses = iter(["e", "smiles warmly", "", "", "", "", "a"])
+    # contact/facing/intensity/camera/lighting, then "a" to accept.
+    responses = iter(["e", "smiles warmly", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -413,7 +413,7 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     # every BEAT_QUICK_EDIT_FIELDS prompt (keep as-is for this test),
     # should restart a fresh attempt cycle that can then be accepted
     # normally.
-    responses = iter(["e", "", "", "", "", "", "a"])
+    responses = iter(["e", "", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -576,7 +576,7 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     being generated rather than the same one starting over."""
     # An (e)dit restarts the cycle; a plain (r)etry now stays inside it.
     # The blanks keep every BEAT_QUICK_EDIT_FIELDS value as it was.
-    responses = iter(["e", "", "", "", "", "", "a"])
+    responses = iter(["e", "", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)

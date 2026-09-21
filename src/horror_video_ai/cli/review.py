@@ -98,11 +98,14 @@ def print_item_fields(item: ItemT) -> None:
 # mismatch (the wrong action, the wrong framing, a missing shadow), so
 # this skips the fields that don't drive the picture -- notably
 # location_id, which shouldn't change here without the revalidation
-# decisions/0028 requires for a real structural edit. `contact` and
-# `intensity` earn their place because the two failures they exist to fix
-# -- characters not touching, nobody moving -- are exactly what a human
-# rejects an image for (docs/decisions/0071).
-BEAT_QUICK_EDIT_FIELDS = ("staging", "action", "contact", "intensity", "camera", "lighting")
+# decisions/0028 requires for a real structural edit. `contact`,
+# `facing` and `intensity` earn their place because the failures they
+# exist to fix -- characters not touching, characters not turned at each
+# other, nobody moving -- are exactly what a human rejects an image for
+# (docs/decisions/0071, 0072).
+BEAT_QUICK_EDIT_FIELDS = (
+    "staging", "action", "contact", "facing", "intensity", "camera", "lighting",
+)
 
 
 def edit_item_fields(item: ItemT, *, fields: tuple[str, ...] | None = None) -> ItemT:

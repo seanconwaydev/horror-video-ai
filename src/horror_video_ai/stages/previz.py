@@ -395,10 +395,14 @@ def _build_beat_prompt(
     accurate scene, Time: X, Place: Y" template is scoped to the original
     single-scene flow, not a planned multi-beat shot list.
 
-    CONTACT and INTENSITY lead the prompt when the beat has them, before
-    the character blocks: they are the two facts `staging` structurally
+    CONTACT, FACING and INTENSITY lead the prompt when the beat has them,
+    before the character blocks: they are the facts `staging` structurally
     cannot carry, since it describes each character independently
-    (docs/decisions/0071).
+    (docs/decisions/0071, 0072). The generic "must react to each other"
+    line below is the fallback for a beat that states neither of the first
+    two -- it was the only thing saying so before FACING existed, and a
+    real multi-character beat that relied on it rendered both characters
+    facing the camera instead of each other.
 
     STYLE appears exactly once, and only the run's chosen preset can
     supply it. The beat's own `cinematography` text (lens, depth of field,
@@ -412,14 +416,20 @@ def _build_beat_prompt(
     (evals/) had that construction lose on style 5-0.
     """
     parts = []
-    # Both lead the prompt, ahead of the per-character blocks. What the
-    # bodies are doing to each other, and how hard, is what these images
-    # kept failing to show -- and `staging` cannot state either, because
-    # it describes each character in isolation (docs/decisions/0071).
+    # These lead the prompt, ahead of the per-character blocks. What the
+    # bodies are doing to each other, which way they are turned, and how
+    # hard, is what these images kept failing to show -- and `staging`
+    # cannot state any of it, because it describes each character in
+    # isolation (docs/decisions/0071, 0072).
     if beat.contact:
         parts.append(
             f"PHYSICAL CONTACT -- the single most important thing in this image, "
             f"the two bodies actually meeting: {beat.contact}"
+        )
+    if beat.facing:
+        parts.append(
+            f"HOW THESE TWO ARE AIMED AT EACH OTHER -- which way each of them is "
+            f"turned relative to the other, and the space between them: {beat.facing}"
         )
     if beat.intensity:
         parts.append(f"INTENSITY: {beat.intensity}")
@@ -473,7 +483,7 @@ def _build_beat_prompt(
     # which is the shape of a plan captured before 0049 and replayed.
     if not anyone_is_doing_something:
         parts.append(f"ACTION: {beat.action}")
-    if len(beat.staging) > 1 and not beat.contact:
+    if len(beat.staging) > 1 and not beat.contact and not beat.facing:
         parts.append(
             "These characters are in the same moment and must react to each other -- "
             "their gazes, distances and body angles have to agree, not read as separate "

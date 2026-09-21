@@ -146,6 +146,21 @@ class Beat:
     #: Rook's right wrist" and "hauls her right arm back" and rendered no
     #: contact at all. See docs/decisions/0071.
     contact: str = ""
+    #: How two characters who are NOT touching are aimed at each other,
+    #: written once from the camera's point of view ("he is turned three
+    #: quarters toward her across the open hatch, her shoulders square to
+    #: him, two paces of bare floor between them"). Empty when the beat
+    #: has one character, or when `contact` already describes the shape
+    #: they make.
+    #:
+    #: `contact` gave bodies that meet a field of their own; two that do
+    #: not meet still had none, so "they face each other" existed only as
+    #: a separate sentence inside each `staging` entry and the image came
+    #: back with both of them aimed at the lens. A real beat wrote "its
+    #: eyes fixed up onto her face" and "her eyes locked down on the
+    #: hatch" and rendered the threat staring into camera. See
+    #: docs/decisions/0072.
+    facing: str = ""
     #: How much physical force is in this moment and what a frozen frame
     #: shows of it -- "still, nothing moving but her eyes" through to
     #: "violent: the slicker flared out mid-lunge, the lantern swung wide
@@ -336,13 +351,25 @@ fraction of the image it occupies; in `blocking` say where it stands \
 relative to the camera and the other characters; in `occlusion` name the \
 specific object doing the hiding. Its `action` is a separate question and must still give it \
 something to DO.
+- Give the threat a FACE as well, named in its own `staging` entry's \
+`action`, and make it predatory -- teeth bared, eyes narrowed and locked \
+on her, head lowered and tracking. Every other expression rule here is \
+written for the protagonist, so an embodied threat routinely gets pure \
+mechanics and no face at all, and an image model draws a blank one: a \
+real run wrote "its burned right hand clamps flat on the hatch's lip and \
+hauls its shoulders up out of the floor" and the figure came back looking \
+puzzled rather than hunting, and in the next beat, its face "lowered to \
+hers" with still no expression named, its body language read as lifting \
+her out of danger rather than attacking her. A threat that is not \
+visibly enjoying this is furniture.
 - An embodied threat is made ominous by OCCLUSION, not by distance. Do \
 NOT place it far away from the protagonist or deep in the background: a \
 figure written as distant rendered as merely a few feet off in 21 of 22 \
 measured images, whatever `size_in_frame` said, so the shot reads as a \
 mistake rather than as distance. Put it CLOSE and HIDDEN instead -- \
-behind the near edge of a pillar, a door frame, a parked car, with \
-`occlusion` naming exactly how much of it survives. That is the version \
+behind the near edge of a pillar, a door frame, a parked car, or inside \
+the fog, smoke or unlit dark the location already has, with `occlusion` \
+naming exactly how much of it survives. That is the version \
 this pipeline renders reliably, and it is scarier: a thing thirty metres \
 away is a thing you have time to escape.
 - Across the scene the threat's CONCEALMENT must change, and the moment \
@@ -352,6 +379,17 @@ visibly smaller `occlusion` than the one before, and an `action` that \
 comes out from behind whatever was covering it: weight onto the front \
 foot, shoulders squared at her, no longer holding still. A threat equally \
 hidden in every beat has no story in it, only three poses.
+- The beat where the protagonist first sees the threat in the open is the \
+TOP of her fear arc, and it has to be written as panic rather than \
+concern. A person who has just found a monster a couple of paces away is \
+not worried or unsettled: name the face coming apart -- mouth wrenched \
+open, eyes stretched white all the way round, chin pulled back into her \
+own neck, one arm thrown up between them -- and put the same level in the \
+beat's `intensity`. `intensity` on its own will not carry this; it is \
+about how much force is in the moment, and a woman standing still with a \
+mildly alarmed expression satisfies every other rule here while killing \
+the scene. Anything short of the maximum at this beat leaves nowhere for \
+the beats after it to go.
 - If the scene describes a threat that escalates or transforms gradually \
 over its course (a shadow growing more distorted, an environment \
 decaying, a sound growing louder), give EVERY beat its own explicit, \
@@ -470,8 +508,9 @@ _COMPLEXITY_BUDGET_RULE = """\
 - Budget each beat's complexity instead of maximising it. An image model \
 has a hard ceiling on how many things it can hold at once, and past it \
 the whole frame degrades rather than just the last detail. Across a \
-beat's `action`, `lighting`, `contact` and every `staging` entry \
-together, name no more than about five things the image must get right, and \
+beat's `action`, `lighting`, `contact`, `facing` and every `staging` \
+entry together, name no more than about five things the image must get \
+right, and \
 drop the least important one rather than keeping it. A beat a human \
 cannot picture from its own text will not be rendered correctly either.
 - One beat is ONE SPACE: everything the frame shows must be inside the \
@@ -552,7 +591,13 @@ behind them strains their eyes toward it before their head arrives -- \
 "her eyes cut hard to the right, whites showing on the far side, her head \
 only starting to follow". Fear with the eyes aimed at nothing reads as \
 distraction, not fear: a real run produced a woman who "looks scared but \
-is just looking randomly" while the threat stood behind her.
+is just looking randomly" while the threat stood behind her. Do this in \
+EVERY `staging` entry too, not only in the beat's own `action` -- an \
+entry is the only text bound to that one character, so eyes named once \
+at beat level leave everybody else aimed at nothing. A beat whose \
+`action` read "she stares past her own pinned arm at the thing crouched \
+over her" but whose `staging` entry for her named no eyes at all came \
+back with her looking off into the distance in three of four candidates.
 - If the scene describes or implies a character's emotional state \
 building or shifting over its course (fear or dread escalating, \
 excitement rising, calm curdling into panic), give every beat its own \
@@ -669,6 +714,20 @@ sternum" in the other, and rendered no contact whatsoever. Name the two \
 body parts that meet, where in the frame they meet, and what the contact \
 does to the shape of both bodies. Leave `contact` empty only when nobody \
 is touching anybody.
+- Whenever a beat has two or more characters who are NOT touching, fill \
+in that beat's `facing` field instead, and write it the same way -- ONE \
+line seen from the camera saying which way each of them is turned \
+relative to the other and how much space is between them: "he is turned \
+three quarters toward her across the open hatch, her shoulders square to \
+him, two paces of bare floor between them". `camera` carries a single \
+subject orientation for the whole shot, and `staging` describes each \
+character alone, so without this field "they face each other" is only a \
+sentence in each of their separate entries and the image comes back with \
+both of them aimed at the lens. A real beat gave the threat "its eyes \
+fixed up onto her face" and the protagonist "her eyes locked down on the \
+hatch" and rendered the threat staring straight into camera past her. \
+Say it once, for the pair. Leave `facing` empty for a one-character beat, \
+or when `contact` already describes the shape the two of them make.
 - Every beat needs an `intensity`: how much physical force is in this \
 moment, plus the evidence a single frozen frame would show of it. Every \
 other field on a beat says where people are and how big they read, so \
@@ -691,6 +750,17 @@ figure that merely stands present in every beat while nothing happens to \
 anyone reads as bored rather than frightening. If the scene builds to \
 violence, the last beats must say so in `intensity`, in `contact` and in \
 each character's `action` together.
+- Let the LOCATION escalate too, not only the people in it. When several \
+beats share a `location_id`, every later beat should show physical \
+evidence of what has already happened there -- a chair gone over, a lamp \
+down on the floor throwing its light from a new angle, a door that was \
+shut now standing open, paper off the table and scattered. State the \
+change in that beat's `intensity` or `action` so the frame has to show \
+it, and never quietly reset a space to undisturbed once something has \
+disturbed it. This is the cheapest escalation available: the props are \
+already in the location's `fixed_props`, the shot does not have to hold \
+anything new, and on a real run a single overturned chair sold a struggle \
+better than any description of the struggle did.
 - If a character gets closer, more threatening, or more exposed as the \
 scene progresses, that change must show in the BODY -- a stoop, a reach, \
 weight shifted onto the front foot, a hand leaving a pocket. Never encode \
@@ -734,7 +804,16 @@ Give every character one, always.
 - `occlusion` names what physically stands between the camera and them \
 and roughly how much of them survives it -- "the pillar's near face \
 covers everything but his left shoulder and half his head", "nothing, she \
-is fully in the open". Keep all three separate: `blocking` is WHERE THEY \
+is fully in the open". An occluder does not have to be solid: fog, smoke, \
+rain, spray and unlit darkness hide a figure as well as an object does, \
+and are usually the better choice when the location already has one -- a \
+run set in a fogged-in forest hid its threat behind a pine trunk and left \
+it otherwise fully lit, with the fog concealing nothing in any beat. \
+Write an atmospheric occluder to exactly the same standard as a solid \
+one, naming what survives it: "the fog between him and the camera leaves \
+the lantern's halo and a head-and-shoulder silhouette, no face". What \
+fails to render is a vague adjective, not a soft occluder. Keep all three \
+separate: `blocking` is WHERE THEY \
 STAND, `size_in_frame` is HOW BIG THEY READ, `occlusion` is WHAT HIDES \
 THEM. Hiding written into either of the other two is ignored -- across a \
 four-beat run the position half of a combined field was right in three \
@@ -773,6 +852,9 @@ this exact shape:
       ],
       "contact": "<the ONE shape two touching characters make, seen from the camera;
         empty string if nobody is touching anybody>",
+      "facing": "<the ONE line between two characters who are NOT touching -- which way
+        each is turned relative to the other and the space between them, seen from the
+        camera; empty string for a one-character beat or when 'contact' is filled in>",
       "intensity": "<how much physical force is in this moment, and what a frozen
         frame shows of it>",
       "camera": "...", "lighting": "...",
@@ -1002,7 +1084,7 @@ def beat_visibility_warnings(beats: list) -> list[str]:
                     "-- one frame cannot show both (docs/decisions/0071)."
                 )
         text = " ".join(
-            [beat.action, beat.lighting, beat.contact]
+            [beat.action, beat.lighting, beat.contact, beat.facing]
             + [s.action for s in beat.staging]
         ).lower()
         if "reflect" in text or "reflection" in text:
@@ -1148,7 +1230,7 @@ def load_scene_plan(data: object, *, strict: bool = False) -> ScenePlan:
                 "the only field carrying physical force; without it the planner writes "
                 "stillness into every beat (docs/decisions/0071)."
             )
-        optional_beat_fields = {"staging", "contact", "intensity"}
+        optional_beat_fields = {"staging", "contact", "facing", "intensity"}
         beats.append(
             Beat(
                 **{
@@ -1157,6 +1239,7 @@ def load_scene_plan(data: object, *, strict: bool = False) -> ScenePlan:
                     if f not in optional_beat_fields
                 },
                 contact=item.get("contact", ""),
+                facing=item.get("facing", ""),
                 intensity=item.get("intensity", ""),
                 staging=_parse_staging(item, characters, strict=strict),
             )

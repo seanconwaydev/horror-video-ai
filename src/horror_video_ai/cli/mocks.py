@@ -77,6 +77,7 @@ def mock_scene_planning_completion(**kwargs: object) -> SimpleNamespace:
                         }
                     ],
                     "contact": "[MOCK]",
+                    "facing": "[MOCK]",
                     "intensity": "[MOCK]",
                     "camera": "[MOCK]",
                     "lighting": "[MOCK]",

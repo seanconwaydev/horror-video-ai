@@ -49,10 +49,11 @@ def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     which by then is hundreds of lines up the scrollback
     (docs/decisions/0053). Camera and staging specifically: those are what
     an image most visibly honours or ignores, and checking them was the
-    judgement the interface made hardest to perform. `contact` and
-    `intensity` for the same reason (docs/decisions/0071) -- whether two
-    characters are actually touching is the fastest thing to check and the
-    one these images fail most often.
+    judgement the interface made hardest to perform. `contact`, `facing` and
+    `intensity` for the same reason (docs/decisions/0071, 0072) -- whether
+    two characters are actually touching, and whether they are turned at
+    each other rather than at the lens, are the fastest things to check
+    and the ones these images fail most often.
     """
     by_id = {c.id: c for c in characters}
     lines = [f"Judging against -- beat: {beat.action}", f"  camera: {beat.camera}"]
@@ -60,6 +61,8 @@ def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
         lines.append(f"  intensity: {beat.intensity}")
     if beat.contact:
         lines.append(f"  contact: {beat.contact}")
+    if beat.facing:
+        lines.append(f"  facing: {beat.facing}")
     for staged in beat.staging:
         name = by_id[staged.character_id].id if staged.character_id in by_id else staged.character_id
         lines.append(f"  {name} doing: {staged.action}")

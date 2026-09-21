@@ -1223,6 +1223,30 @@ def test_contact_is_optional_and_round_trips():
     assert _parse_scene_plan(json.dumps(payload)).beats[0].contact == ""
 
 
+def test_facing_is_optional_and_round_trips():
+    """Optional both ways: a one-character beat has no pair to aim, and an
+    archived plan predates the field (docs/decisions/0072)."""
+    payload = _valid_payload()
+    payload["beats"][0]["facing"] = "he is turned three quarters toward her across the hatch"
+    plan = _parse_scene_plan(json.dumps(payload))
+    assert plan.beats[0].facing == "he is turned three quarters toward her across the hatch"
+
+    payload["beats"][0].pop("facing")
+    assert _parse_scene_plan(json.dumps(payload)).beats[0].facing == ""
+    assert load_scene_plan(payload).beats[0].facing == ""
+
+
+def test_a_reflection_written_into_facing_is_warned_about():
+    """`facing` is free text describing two bodies, so it can smuggle in a
+    reflected person exactly as `contact` can."""
+    from horror_video_ai.stages.scene_planning import beat_visibility_warnings
+
+    payload = _valid_payload()
+    payload["beats"][0]["facing"] = "she is square to his reflection in the window glass"
+    warnings = beat_visibility_warnings(_parse_scene_plan(json.dumps(payload)).beats)
+    assert any("reflection" in w for w in warnings)
+
+
 def test_staging_a_character_the_camera_cannot_see_is_refused():
     """The beat-2 failure in docs/decisions/0071: a threat placed behind a
     total occluder and still given a share of the frame. The image model
@@ -1290,6 +1314,13 @@ def test_a_clean_beat_produces_no_visibility_warnings():
         "One beat is ONE SPACE",
         "Never put a CHARACTER'S REFLECTION",
         "One dominant light source per beat",
+        # docs/decisions/0072's unconditional rules, one per failure each
+        # was written for. The two that live in the threat rule are
+        # checked separately, below, since that block is genre-gated.
+        "fill in that beat's `facing` field",
+        "Do this in EVERY `staging` entry too",
+        "An occluder does not have to be solid",
+        "Let the LOCATION escalate too",
     ],
 )
 def test_planning_prompt_carries_the_0071_rules(phrase):
@@ -1319,4 +1350,40 @@ def test_planning_prompt_asks_for_contact_and_intensity_in_its_json_shape():
     run_scene_planning_stage(_scene(), completion_fn=_completion)
     prompt = captured["messages"][0]["content"]
     assert '"contact":' in prompt
+    assert '"facing":' in prompt
     assert '"intensity":' in prompt
+
+
+# docs/decisions/0072: the owner's review of a real four-beat run found
+# the threat rendering as puzzled rather than hunting, and the protagonist
+# merely concerned while a monster stood a pace away in open view. Both
+# rules belong to the genre-gated threat block.
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Give the threat a FACE as well",
+        "an embodied threat routinely gets pure mechanics and no face",
+        "TOP of her fear arc",
+        "written as panic rather than concern",
+        # the threat's own occluder list is no longer solid-only
+        "the fog, smoke or unlit dark the location already has",
+    ],
+)
+def test_threat_rule_gives_the_threat_a_face_and_the_victim_a_ceiling(phrase):
+    captured = {}
+
+    def _completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
+        )
+
+    run_scene_planning_stage(
+        _scene(),
+        model="deepseek/deepseek-v4-flash",
+        genre="horror",
+        tone="dread",
+        completion_fn=_completion,
+    )
+
+    assert phrase in captured["messages"][0]["content"]

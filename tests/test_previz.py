@@ -1032,3 +1032,62 @@ def test_contact_replaces_the_generic_react_to_each_other_line():
 
     assert "must react to each other" in without
     assert "must react to each other" not in with_contact
+
+
+# --- docs/decisions/0072: facing leads the prompt for two who do not touch ---
+
+
+def test_facing_leads_the_beat_prompt_ahead_of_the_character_blocks():
+    """The non-touching half of the same problem CONTACT solves: each
+    `staging` entry aims one character on its own, so the pair's axis has
+    to be stated once, for the pair, before the per-character blocks."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        facing="he is turned three quarters toward her across the open hatch",
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="rocks back onto her heels, eyes down at the hatch",
+                blocking="a pace back from the open hatch",
+                size_in_frame="about half the image height",
+            )
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "AIMED AT EACH OTHER" in prompt
+    assert "three quarters toward her" in prompt
+    assert prompt.index("AIMED AT EACH OTHER") < prompt.index("CHARACTER")
+
+
+def test_facing_replaces_the_generic_react_to_each_other_line():
+    """The generic line was the only thing saying so before this field,
+    and a real beat that relied on it rendered both characters facing the
+    camera instead of each other (docs/decisions/0072)."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    staging = [
+        Staging(character_id="influencer", action="backs into the chart table", blocking="at the window run"),
+        Staging(character_id="bearer", action="rises out of the floor hatch", blocking="at the centre of the room"),
+    ]
+    characters = [_character(), dataclasses.replace(_character(), id="bearer")]
+
+    with_facing = _build_beat_prompt(
+        _beat(staging=staging, facing="the two are square to each other across the hatch"),
+        characters=characters,
+        location=None,
+    )
+
+    assert "must react to each other" not in with_facing
+
+
+def test_a_beat_without_facing_carries_no_facing_line():
+    """Archived plans predate the field and must not gain an empty label."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    prompt = _build_beat_prompt(_beat(), characters=[_character()], location=None)
+    assert "AIMED AT EACH OTHER" not in prompt

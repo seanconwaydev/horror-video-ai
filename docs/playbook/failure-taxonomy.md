@@ -1,6 +1,6 @@
 # Image/video generation failure taxonomy — playbook
 
-Last updated: 2026-09-19
+Last updated: 2026-09-21
 
 > **Before trusting an "→ Addressed" line below:** several of them were
 > addressed by something that has since been deleted, which makes a
@@ -492,3 +492,28 @@ Feedback could not repair it: "i actually tried giving feedback with this one, s
 **And the threat still never moves.** "it also doesn't have any sense of danger or urgency, just kinda hanging out." The owner's wider point is the important one: "this 'silent evil sneaks up without emotion' can work in _some_ horror cases, but it would require them to slowly be revealed, and for the beat escalation to be really good at ramping things up. a lot of horror will just involve the enemy being violent and loud and angry and visceral and thrashing about, which is _never_ really depicted in these images." Every field a beat carries is positional, so force was unsayable and the planner wrote stillness every time. What did land: "his holding the lantern is fine", and the protagonist reads correctly in most beats.
 
 **Separately, a data-loss bug.** Giving feedback on a beat and regenerating deleted the candidate images it had just rejected: the attempt counter that names candidate files reset at the start of each attempt cycle, so cycle 2 wrote `candidate_1_1.png` over cycle 1's. The owner: "the initial images are deleted. this should NOT happen... it should create 2_1 and 2_2 in a situation like this", and explicitly for **any** kind of regeneration, not just feedback. The counter is now monotonic per beat. This is the second time this exact bug has appeared — the rejected-image archive had it and was fixed with `next_archive_path`, and the candidate filenames reintroduced it against a different counter.
+
+
+**2026-09-21** · Real run, fire-lookout-tower scene again (`--style painterly`, `--max-beats 4 --candidates 2`), images generated · *category: a fact about a PAIR of characters that no field can state* · genre: horror, embodied threat — **[ADR 0072](../decisions/0072-facing-and-the-threats-own-face.md)**
+
+The first run with `contact`, `intensity` and the reflection ban in force. Reading each complaint against the plan text that produced it splits them cleanly: three the plan got right and the image ignored, five the plan never stated at all.
+
+**The no-reflection ban worked, and the cost is acceptable.** Beat 1 replaced its reflection with fog on the glass, which made "what is she even looking at?" hard to read. The owner: "it's a definite improvement, and vagueness like that isn't a deal-breaker, especially in horror, and especially during the initial low-tension scenes where a character isn't aware of danger." The first entry in this log where a fix's side effect was inspected and explicitly accepted rather than treated as a new failure.
+
+**Single-entity beats are confirmed working.** Beat 2: "i like that it's JUST him in the image, showing that we can now have scenes with only 1 entity when it makes sense, and the environment and his body position look good." Together with the previous run's beat 1 (no threat staged, no threat rendered), the presence rules are staying inside the beats that ask for them.
+
+**Two characters would not face each other, and the plan had said they should.** Beat 3's threat rose out of a floor hatch with "its eyes fixed up onto her face"; the protagonist's entry said "her eyes locked down on the hatch". Both correct, both written in their own `staging` entry, and the render put the threat square to the camera. The owner: "given her positioning in the back left of the room, it would make more sense (and look better) if the enemy was facing her instead of the camera... if they were actually facing each other, even if the girl was the one closer to the camera, that overall would probably be enough for the scene to work." This is the same shape as the previous run's contact failure — a two-body fact written as two one-body sentences — and `contact` had fixed only the touching case. The prompt's generic "their gazes, distances and body angles have to agree" line fired here and lost.
+
+**The threat has no face because every expression rule is written for the protagonist.** Beat 3's antagonist was pure mechanics (clamps, hauls, eyes up): "he also looks a little confused, more than like he's trying to hunt someone. it's almost like a jack-o-lantern showing him, instead of him creeping in." Beat 4's was "its face lowered to hers", still with no expression named, and read as rescue rather than attack: "some of the body language is more like 'he's holding her, saving her from danger, maybe picking her up to check if she's ok', not something dangerous and scary."
+
+**Eye direction is required of `beat.action` and not of each `staging.action`.** Beat 4's beat-level action had her staring at the thing crouched over her; her own entry named no eyes at all. "the girl however, suffers from 'staring off into the distance' in 3 out of the 4 photos, which seems to keep happening with her more than him at this point."
+
+**Concealment was solid-object-only, in a scene made of fog.** Beat 2's threat got a pine trunk and was otherwise fully lit: "the only issue i really have with it is that he's just completely visible, where it would be a perfect opportunity for fog to be covering him, partially or completely, so the viewer isn't just presented with the monster right away." Every occlusion example in the prompt names a pillar, a door frame, a parked car. The fog rendered everywhere except on the one figure it should have hidden.
+
+**Fear has an arc rule but no ceiling.** "when a human encounters an actual monster in full-view, they need to be _freaking out_, not just a little scared/concerned like she looks in beat 3." `intensity` must peak, but it is about physical force; the emotional-arc rule only asks for a distinct point per beat, so a mildly alarmed woman a pace from a monster satisfies everything.
+
+**Environmental storytelling is the cheapest escalation available and nothing asked for it.** Beat 4's overturned chair was the planner's own instinct: "the overturned chair is quite good, showing a struggle (perhaps environmental storytelling is particularly useful to convey movement/escalation/story progression in the same space)."
+
+**And the escalation still under-delivers overall.** "the escalation isn't escalating 'enough' and should be really ramped up more in the later photos, once the actual encounter has happened." `contact` did land, though, and it landed on the beat the owner rated best: "the two characters are actually entwined and seemingly wrestling... this aspect is quite good."
+
+**Unfixable by any rule:** a lanyard worn backwards in beat 1 and legs that do not resolve in beat 4. Worth recording for the owner's reasoning on the first, which generalises: "normally this is a potentially true thing a human can do, but in AI generation it just screams 'mistake'." Plausibility is not the bar — whether it *reads* as an error is.
