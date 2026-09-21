@@ -25,8 +25,7 @@ import litellm
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.image_utils import build_image_content_block
 from historical_video_ai.json_utils import parse_json_response
-from historical_video_ai.stages.fact_check import FactCheckResult
-from historical_video_ai.stages.scene_planning import Beat, Character, Location
+from historical_video_ai.stages.scene_planning import Beat, Character, Location, Scene
 
 # Errors worth retrying automatically -- transient in nature (server
 # overload, a network blip, a rate limit that clears with time), unlike
@@ -532,55 +531,30 @@ def run_beat_image_stage(
     return PrevizResult(image_path=image_path, prompt_used=prompt)
 
 
+# One template. There used to be two, routed by `requires_grounding`
+# (docs/decisions/0034): an anachronism-detection framing, and a
+# plan-fidelity-only one for scenes that were never claiming to be real.
+# docs/decisions/0069 deleted historical grounding entirely, so what
+# survives is the plan-fidelity check (0032) -- which is the only half
+# that was ever measured as doing anything.
+#
+# This reviewer is NOT in the pipeline: docs/decisions/0055 removed it
+# after measuring 56% agreement with the owner against 79% for accepting
+# everything. It stays for evals/, which ask whether any grader can beat
+# that bar.
 _REVIEW_PROMPT_TEMPLATE = """\
-You are independently reviewing a generated image against a historically \
-accurate scene description. Your job has two parts:
-
-1. Does the image depict anything that could not have existed or happened \
-at this time and place -- anachronistic objects or technology, or an \
-outright fictional/fantastical element shown as if it's literally, \
-physically present? Even if the text description was appropriately hedged \
-("resembles", "believed to be"), a generated image can still render that \
-thing as unambiguously real, which is exactly the failure mode you're \
-checking for here.
-2. Does the image actually match what was planned -- the right character \
-in the right role doing the right thing, not some other person performing \
-an action that was never described (e.g. the wrong character shown \
-running a shop, serving food, or holding an object that belongs to \
-someone else in the scene)?
-
-Scene -- Time: {time} | Place: {place} | What happens: {description}
-
-Claims the image should be consistent with:
-{claims_block}
-{acknowledged_fiction_block}{planned_details_block}{previous_concerns_block}
-Look at the image and respond with ONLY a JSON object (no prose, no \
-markdown fences) matching this exact shape:
-
-{{
-  "accepted": <true if the image is historically plausible AND matches what was
-    planned, false if it depicts something that could not have existed or
-    happened, or fails to match what was planned>,
-  "concern": "<if accepted is false, specifically what's wrong with the image; null
-    if accepted is true>"
-}}
-"""
-
-# docs/decisions/0034: for a scene that was never claiming to be real, the
-# anachronism-detection framing above is actively wrong, not just extra
-# overhead -- "could not have existed" is the point of a creative/meme
-# scene, not a defect. Only the plan-fidelity check (0032) still applies.
-_UNGROUNDED_REVIEW_PROMPT_TEMPLATE = """\
 You are independently reviewing a generated image against a planned \
-creative scene. This scene is not meant to be historically or factually \
-accurate -- do NOT flag anything as implausible, anachronistic, or \
-"could not have existed" on those terms; that's the point, not a defect.
+scene.
 
 Your only job: does the image actually match what was planned -- the \
 right character in the right role doing the right thing, not some other \
 person performing an action that was never described (e.g. the wrong \
 character shown running a shop, serving food, or holding an object that \
 belongs to someone else in the scene)?
+
+Do NOT flag anything as implausible, impossible or "could not have \
+existed". This pipeline makes fiction; an unexplained or impossible \
+detail is a valid outcome, not a defect (docs/decisions/0031).
 
 Scene -- Setting: {time}, {place} | What happens: {description}
 {planned_details_block}{previous_concerns_block}
@@ -614,11 +588,10 @@ def _parse_review(raw_content: str) -> PrevizReview:
 
 def run_previz_review_stage(
     image_path: Path,
-    fact_check_result: FactCheckResult,
+    scene: Scene,
     *,
     characters: Sequence[Character] = (),
     beat: Beat | None = None,
-    requires_grounding: bool = True,
     previous_concerns: list[str] | None = None,
     model: str | None = None,
     completion_fn: Callable[..., Any] = litellm.completion,
@@ -626,21 +599,23 @@ def run_previz_review_stage(
     on_transient_retry: Callable[[int, Exception], None] | None = None,
 ) -> PrevizReview:
     """Independently review a previz-generated image against the scene it
-    was supposed to depict -- an adversarial check on the actual image, not
-    just the text prompt (docs/decisions/0009).
+    was supposed to depict.
 
-    `character`/`beat`, if given (docs/decisions/0032), list their already
-    scene-plan-approved details (wardrobe, distinguishing detail, the
-    beat's own action) as settled and not to be re-flagged as
-    anachronisms -- a re-derived-from-scratch historical-plausibility
-    judgment is the wrong check for something a human already reviewed and
-    approved at scene-plan-review time (docs/decisions/0023). Only the
-    single-scene flow (which predates scene-planning) omits these.
+    NOT part of the pipeline: docs/decisions/0055 deleted it after
+    measuring 56% agreement with the owner's own keep/discard calls,
+    against 79% for a reviewer that accepts everything. It survives for
+    evals/, which ask whether any grader beats that bar.
 
-    `requires_grounding` (docs/decisions/0034), when False, drops the
-    anachronism-detection check entirely -- wrong, not just unnecessary,
-    for a scene that was never claiming to be real -- and only checks
-    plan-fidelity (0032).
+    Its only question is plan fidelity (docs/decisions/0032): does the
+    image show the right character doing the right thing. The
+    anachronism-detection half is gone with historical grounding
+    (docs/decisions/0069) -- this pipeline makes fiction, and an
+    impossible detail is a valid outcome (docs/decisions/0031).
+
+    `characters`/`beat`, if given (docs/decisions/0032), list their
+    already scene-plan-approved details (wardrobe, distinguishing detail,
+    the beat's own action) as settled, so the reviewer does not re-open
+    something a human approved at scene-plan-review time.
 
     `previous_concerns`, if given, lists the rejection reason(s) from
     earlier automatic-retry attempts on this same beat -- observed in a
@@ -654,19 +629,17 @@ def run_previz_review_stage(
     potentially inconsistent judgment every attempt.
 
     `model` defaults to the pinned "previz_review" model -- deliberately
-    vision-capable and a different provider than previz's own image model,
-    same reasoning as fact_check vs. research. `completion_fn` is an
-    injection point for tests. Confirmed working against a real key,
-    including catching real anachronisms in generated images.
+    vision-capable and a different provider than previz's own image
+    model, so it is not a model checking its own work. `completion_fn` is
+    an injection point for tests.
 
     Raises PrevizError if the model's response isn't valid JSON or is
     missing required fields.
     """
     resolved_model = model or get_stage_model("previz_review")
-    fact_sheet = fact_check_result.fact_sheet
-    # docs/decisions/0032: a further, distinct allowlist -- these details
-    # were approved at scene-plan-review time (0023), not derived from the
-    # original premise-conflict text, so they need naming here separately.
+    # docs/decisions/0032: these details were approved at
+    # scene-plan-review time (0023), so the reviewer is told not to
+    # re-open them.
     planned_details_block = ""
     if characters or beat is not None:
         planned_lines = []
@@ -674,7 +647,7 @@ def run_previz_review_stage(
             planned_lines.append(
                 f"- Character {character.id} is deliberately planned and present in this "
                 f"shot -- do NOT flag them as unplanned or unexpected, and do NOT flag "
-                f"their appearance as anachronistic in isolation: wardrobe is "
+                f"their appearance as a problem in isolation: wardrobe is "
                 f"{character.wardrobe_signature} ({character.wardrobe_flexible}); "
                 f"{character.distinguishing_detail}"
             )
@@ -701,7 +674,7 @@ def run_previz_review_stage(
         planned_details_block = (
             "\nThe following specific details were already deliberately planned "
             "and human-reviewed as part of this scene -- do NOT flag them as "
-            "anachronisms or problems on their own, no matter how implausible "
+            "problems on their own, no matter how implausible "
             "they'd look in isolation; only flag if the image fails to actually "
             "depict them faithfully, or introduces a DIFFERENT, new problem not "
             "covered here. A physical distinguishing detail (a scar, a chipped "
@@ -725,36 +698,13 @@ def run_previz_review_stage(
             "judge the image acceptable in general. If the same issue is "
             f"still present, reject again for it:\n{concern_lines}\n"
         )
-    if requires_grounding:
-        detail_lines = "\n".join(f"- {c.text}" for c in fact_sheet.claims)
-        # docs/decisions/0026: an explicit allowlist, not left to inference --
-        # LLM judges are documented to have high refusal rates on exceptions
-        # to a stated policy unless told about them directly.
-        acknowledged_fiction_block = ""
-        if fact_check_result.acknowledged_fiction:
-            acknowledged_fiction_block = (
-                "\nThe following has already been explicitly acknowledged as "
-                "intentional, deliberate fiction by a human reviewer -- do NOT "
-                "flag this specific thing as a problem, only flag genuinely "
-                f"new or different issues:\n{fact_check_result.acknowledged_fiction}\n"
-            )
-        prompt = _REVIEW_PROMPT_TEMPLATE.format(
-            time=fact_sheet.time,
-            place=fact_sheet.place,
-            description=fact_sheet.description,
-            claims_block=detail_lines or "(no claims)",
-            acknowledged_fiction_block=acknowledged_fiction_block,
-            planned_details_block=planned_details_block,
-            previous_concerns_block=previous_concerns_block,
-        )
-    else:
-        prompt = _UNGROUNDED_REVIEW_PROMPT_TEMPLATE.format(
-            time=fact_sheet.time,
-            place=fact_sheet.place,
-            description=fact_sheet.description,
-            planned_details_block=planned_details_block,
-            previous_concerns_block=previous_concerns_block,
-        )
+    prompt = _REVIEW_PROMPT_TEMPLATE.format(
+        time=scene.time,
+        place=scene.place,
+        description=scene.description,
+        planned_details_block=planned_details_block,
+        previous_concerns_block=previous_concerns_block,
+    )
 
     # Same transient-retry treatment the image calls have had since
     # docs/decisions/0016. It was never applied here, so a single network

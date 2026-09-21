@@ -1,4 +1,4 @@
-"""Scene-planning stage -- inserted between fact-check and previz. See
+"""Scene-planning stage -- the pipeline's first, feeding previz. See
 docs/decisions/0023-scene-planning-stage.md.
 
 Turns a verified fact sheet into a full plan (characters, locations, and
@@ -21,7 +21,6 @@ import litellm
 
 from historical_video_ai.config import get_stage_model
 from historical_video_ai.json_utils import parse_json_response
-from historical_video_ai.stages.fact_check import FactCheckResult
 
 
 class ScenePlanningError(Exception):
@@ -53,6 +52,25 @@ class Location:
     architecture: str
     fixed_props: str
     ambient_light: str
+
+
+@dataclass(frozen=True)
+class Scene:
+    """What the human asked for: when, where, and what happens.
+
+    The planner's input. It used to be a `FactCheckResult`, because a
+    verified fact sheet was what fed this stage -- see
+    docs/decisions/0069 for why research and fact-check were deleted and
+    what the planner needs from a scene now, which is exactly these three
+    strings.
+
+    `time` and `place` are a *setting*, not a historical claim: "present
+    day" and "an underground car park at night" are the normal case.
+    """
+
+    time: str
+    place: str
+    description: str
 
 
 @dataclass(frozen=True)
@@ -135,34 +153,18 @@ class ScenePlan:
     beats: list[Beat] = field(default_factory=list)
 
 
-# docs/decisions/0034: two preambles, not one -- historical grounding
-# framing ("verified claims", "must hold at this time") is actively wrong
-# for a scene that was never claiming to be real in the first place. The
-# shared planning rules below apply to both; only the framing and whether
-# claims get woven in differs.
-_GROUNDED_PREAMBLE = """\
-You are a shot-list planner for a short historical video scene. Break the \
-scene below into a full plan BEFORE any image gets generated: the \
-character(s) involved, the distinct locations the action moves through, \
-and the individual beats (shots) that tell the story.
-
-Scene -- Time: {time} | Place: {place} | What happens: {description}
-{genre_tone_line}
-Verified claims about this place (use these to ground locations and \
-beats in real detail; some may describe other eras and must not be \
-depicted unless they hold at {time} specifically):
-{claims_block}
-{max_beats_line}
-"""
-
-_CREATIVE_PREAMBLE = """\
-You are a shot-list planner for a short creative video scene. This scene \
-is not meant to be historically or factually accurate -- do not treat \
-anything in it as needing real-world grounding, and do not flag anything \
-as implausible on those terms. Break the scene below into a full plan \
-BEFORE any image gets generated: the character(s) involved, the distinct \
-locations the action moves through, and the individual beats (shots) \
-that tell the story.
+# One preamble. There used to be two, routed by `requires_grounding`
+# (docs/decisions/0034/0035): a historical framing that wove in verified
+# claims, and a creative one that explicitly disclaimed accuracy.
+# docs/decisions/0069 deleted the research and fact-check stages, so
+# there are no claims to weave and nothing to disclaim -- and the
+# disclaimer itself was only ever needed to undo the other preamble's
+# framing. What remains states the scene and gets out of the way.
+_PREAMBLE = """\
+You are a shot-list planner for a short video scene. Break the scene \
+below into a full plan BEFORE any image gets generated: the character(s) \
+involved, the distinct locations the action moves through, and the \
+individual beats (shots) that tell the story.
 
 Scene -- Setting: {time}, {place} | What happens: {description}
 {genre_tone_line}
@@ -170,8 +172,8 @@ Scene -- Setting: {time}, {place} | What happens: {description}
 """
 
 # docs/decisions/0036: composition_mode is an early-resolved, closed-set
-# routing signal -- generalizing the requires_grounding pattern (0034/0035)
-# to a second axis -- computed once from genre/tone before the rule text
+# routing signal -- generalizing the `requires_grounding` pattern
+# (0034/0035, itself deleted by 0069) to a second axis -- computed once from genre/tone before the rule text
 # is assembled, rather than left to the planning LLM's own inline
 # judgment of hedged prose the way PR #44's "unless genre signals X" rule
 # text did before this. Keyword-based on purpose: research
@@ -250,8 +252,8 @@ _COMPOSITION_RULES = {
     "chaotic": _CHAOTIC_COMPOSITION_RULE,
 }
 
-# A third early-resolved, closed-set routing signal alongside
-# requires_grounding (0034/0035) and composition_mode (0036): whether this
+# Another early-resolved, closed-set routing signal, alongside
+# composition_mode (0036): whether this
 # scene has a threat/antagonist that needs to stay visibly present across
 # beats. Added after a real horror test run (2026-09-14) showed the threat
 # mentioned in only 2 of 9 beats' text -- previz only ever paints what a
@@ -928,18 +930,17 @@ def load_scene_plan(data: object, *, strict: bool = False) -> ScenePlan:
 
 
 def run_scene_planning_stage(
-    fact_check_result: FactCheckResult,
+    scene: Scene,
     *,
     model: str | None = None,
     max_beats: int | None = None,
-    requires_grounding: bool = True,
     genre: str | None = None,
     tone: str | None = None,
     completion_fn: Callable = litellm.completion,
     rng: random.Random | None = None,
 ) -> ScenePlan:
     """Build a full `ScenePlan` (characters, locations, beats) from a
-    verified fact sheet, before any image generation happens.
+    `Scene`, before any image generation happens.
 
     `model` defaults to the pinned "scene_planning" model. `completion_fn`
     is an injection point for tests.
@@ -953,18 +954,14 @@ def run_scene_planning_stage(
     flag (useful while iterating on image/video quality) needs a real
     guarantee, not just hope that the model honored the instruction.
 
-    `requires_grounding` (docs/decisions/0034) selects which preamble is
-    used -- historical-accuracy framing is actively wrong for a scene that
-    was never claiming to be real (a meme/creative premise), not just
-    unnecessary overhead. When False, `fact_sheet.claims` is ignored (a
-    stub FactCheckResult for an ungrounded run has none anyway).
-
     `genre`/`tone` (docs/decisions/0035), if given, are woven into the
     prompt and are meant to actually shape staging/expression/wardrobe
-    choices, not just be echoed back -- see the "Genre and/or Tone" \
-    planning rule. `genre` is only shown when `requires_grounding` is
-    False (it's always "historical" otherwise, redundant with the
-    preamble's own framing).
+    choices, not just be echoed back -- see the "Genre and/or Tone"
+    planning rule. `genre` now always reaches the prompt: it used to be
+    shown only on an ungrounded run, because on a grounded one it was
+    always the string "historical" and the preamble said so already. With
+    grounding gone (docs/decisions/0069) a default run's genre is real
+    information the planner was not being given.
 
     `genre`/`tone` also resolve `composition_mode` (docs/decisions/0036)
     -- a second early, closed-set routing signal, selecting between
@@ -982,36 +979,24 @@ def run_scene_planning_stage(
     required fields, or a beat references an undefined location.
     """
     resolved_model = model or get_stage_model("scene_planning")
-    fact_sheet = fact_check_result.fact_sheet
     max_beats_line = (
         f"\nKeep this scene tight: produce at most {max_beats} beat(s) total, not more.\n"
         if max_beats is not None
         else ""
     )
     genre_tone_parts = []
-    if not requires_grounding and genre:
+    if genre:
         genre_tone_parts.append(f"Genre: {genre}.")
     if tone:
         genre_tone_parts.append(f"Tone: {tone}.")
     genre_tone_line = " ".join(genre_tone_parts)
-    if requires_grounding:
-        claims_block = "\n".join(f"- {c.text}" for c in fact_sheet.claims) or "(no claims)"
-        preamble = _GROUNDED_PREAMBLE.format(
-            time=fact_sheet.time,
-            place=fact_sheet.place,
-            description=fact_sheet.description,
-            claims_block=claims_block,
-            max_beats_line=max_beats_line,
-            genre_tone_line=genre_tone_line,
-        )
-    else:
-        preamble = _CREATIVE_PREAMBLE.format(
-            time=fact_sheet.time,
-            place=fact_sheet.place,
-            description=fact_sheet.description,
-            genre_tone_line=genre_tone_line,
-            max_beats_line=max_beats_line,
-        )
+    preamble = _PREAMBLE.format(
+        time=scene.time,
+        place=scene.place,
+        description=scene.description,
+        genre_tone_line=genre_tone_line,
+        max_beats_line=max_beats_line,
+    )
     composition_rule = (
         _BASE_COMPOSITION_RULE
         + _COMPOSITION_RULES[_resolve_composition_mode(genre, tone)]

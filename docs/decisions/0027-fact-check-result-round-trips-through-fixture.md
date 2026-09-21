@@ -4,6 +4,9 @@ Date: 2026-09-02
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): --fixture is deleted, because what it
+saved -- a paid research and fact-check pass -- no longer happens.
 ## Context
 
 Right after 0026 fixed `previz_review` not knowing about a human's

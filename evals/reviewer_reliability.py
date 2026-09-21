@@ -38,10 +38,8 @@ from collections import Counter
 from pathlib import Path
 
 from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import run_previz_review_stage
-from historical_video_ai.stages.research import FactSheet
-from historical_video_ai.stages.scene_planning import load_scene_plan
+from historical_video_ai.stages.scene_planning import Scene, load_scene_plan
 
 EVALS_DIR = Path(__file__).parent
 
@@ -67,10 +65,8 @@ def main() -> None:
 
     load_environment()
     review_model = get_stage_model("previz_review")
-    fact_check = FactCheckResult(
-        fact_sheet=FactSheet(
-            time=scene["time"], place=scene["place"], description=scene["description"], claims=[]
-        )
+    scene_input = Scene(
+        time=scene["time"], place=scene["place"], description=scene["description"]
     )
 
     rows = []
@@ -81,10 +77,9 @@ def main() -> None:
         for _ in range(args.repeats):
             review = run_previz_review_stage(
                 image,
-                fact_check,
+                scene_input,
                 characters=[character],
                 beat=beats[index - 1],
-                requires_grounding=False,
                 model=review_model,
             )
             verdicts.append(bool(review.accepted))

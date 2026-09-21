@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An AI pipeline that turns a scene idea into a finished, YouTube-ready video. Different LLMs handle different stages (research, script, shot list, prompts), with a human review gate before every stage that costs real money. See `docs/architecture.md` for the full vision and the stage diagram, and `docs/pipeline.md` for what each of the 12 stages does and reviews.
+An AI pipeline that turns a scene idea into a finished, YouTube-ready video. Different LLMs handle different stages (planning, prompts), with a human review gate before every stage that costs real money. See `docs/architecture.md` for the full vision and the stage diagram, and `docs/pipeline.md` for what each of the 12 stages does and reviews.
 
-**The goal is videos worth watching, not historical accuracy for its own sake** — see `docs/decisions/0031-goal-is-quality-video-not-historical-accuracy.md`. Historical settings are what's been built and tested against so far; which genres are actually worth specializing in is meant to be discovered empirically, not assumed from this project's name or its historical-genre-heavy implementation history so far. Don't let that history steer a design decision or a piece of research toward treating historical accuracy as the point — read 0031 before assuming it is.
+**Nothing here is grounded in the real world, and the name is a leftover.** `docs/decisions/0031` reset the goal to videos worth watching rather than accurate ones, and `docs/decisions/0069` finished the job: research, fact-check, premise conflicts, acknowledged fiction and the whole historical framing are deleted. A scene is three strings — time, place, description — and impossible things are welcome. The package is still `historical_video_ai` and the command is still `historical-video-ai`; that rename is a deliberate separate change. Don't let the name steer a design decision toward accuracy, and don't reintroduce a verification step because a scene mentions a real place.
 
-**Current build is deliberately narrower than that full vision** — see `docs/decisions/0006-narrow-v1-scope-single-image.md`. Implemented so far: stage 2 (research, `stages/research.py`), stage 3 (fact-check, `stages/fact_check.py`), scene planning (`stages/scene_planning.py`, `docs/decisions/0023`) which breaks a scene into beats with characters and locations, stage 8 (previz, `stages/previz.py`) which renders one image per beat, and stage 9 (video generation, `stages/video_generation.py`, `docs/decisions/0010`, `0037`). `cli/` wires research/fact-check/scene-planning/previz into one interactive run (`uv run historical-video-ai`); video generation is a deliberately separate, standalone invocation (`--video-gen-from`), not yet part of that same run — see `docs/decisions/0010`'s reasoning (previz is the spend gate; video generation should always be a distinct, deliberate step). Stages 5–7 and 10–12 are not built.
+**Current build is deliberately narrower than that full vision** — see `docs/decisions/0006-narrow-v1-scope-single-image.md` for the original scoping, though not for the current state. Implemented: scene planning (`stages/scene_planning.py`, `docs/decisions/0023`), which takes a `Scene` and breaks it into beats with characters and locations; stage 8 (previz, `stages/previz.py`), which renders one image per beat; and stage 9 (video generation, `stages/video_generation.py`, `docs/decisions/0010`, `0037`). `cli/` wires scene-planning and previz into one interactive run (`uv run historical-video-ai`); video generation is a deliberately separate, standalone invocation (`--video-gen-from`) — see `docs/decisions/0010` (previz is the spend gate; crossing it should be a distinct, deliberate step). Stages 2–3 were built and then deleted (`docs/decisions/0069`); stages 5–7 and 10–12 were never built.
 
-The single-image previz flow that `docs/decisions/0006` originally scoped — one image straight from the fact-checked scene — was deleted once scene planning made it unreachable (`docs/decisions/0051`). Every image now comes from a beat. Archived runs in that old shape are still *readable* by `--video-gen-from`; only the generation path is gone.
+The single-image previz flow that `docs/decisions/0006` originally scoped — one image straight from the scene — was deleted once scene planning made it unreachable (`docs/decisions/0051`). Every image now comes from a beat. Archived runs in that old shape are still *readable* by `--video-gen-from`; only the generation path is gone.
 
 Two docs are worth reading before touching pipeline design: `docs/architecture.md`'s "Design principles" section (cheap-before-expensive stage ordering, every stage produces a reviewable artifact, adversarial review passes, no hardcoded format) and its "Open questions" section (undecided items like the video-gen model — check there before assuming something is settled).
 
@@ -26,8 +26,8 @@ uv run ruff check .                    # lint
 uv run mypy                            # type check src/, evals/, tests/ -- must be clean
 uv run pytest --cov                    # tests + coverage floor (94%)
 uv run historical-video-ai --mock      # run the pipeline with no API keys / no network calls
-uv run historical-video-ai --time "July 1969" --place "Cape Canaveral, Florida" \
-    --description "watches a rocket launch from the crowd."
+uv run historical-video-ai --time "present day" --place "an underground car park at night" \
+    --description "a woman notices someone standing between the pillars."
 ```
 
 Copy `.env.example` to `.env` and fill in real API keys before running anything that calls a model (never commit `.env`; it's gitignored).
@@ -79,12 +79,12 @@ If the real tool genuinely can't be run in the current environment, say so plain
 
 **Secrets** load via `config.load_environment()` (wraps `python-dotenv`), called explicitly at a run's entry point — importing `config.py` has no side effects on the environment.
 
-**Stage code**: one module per pipeline stage under `src/historical_video_ai/stages/`, added incrementally as each stage in `docs/pipeline.md` gets implemented (currently: `research.py`, `fact_check.py`, `scene_planning.py`, `previz.py`, `moderation.py`, `video_generation.py`). Established pattern: a frozen-dataclass artifact type for the stage's reviewable output, a stage-specific `<Stage>Error` exception that fails loud on malformed model output (matching `ConfigError`'s convention in `config.py`), and a `run_<stage>_stage(...)` function taking an injectable `completion_fn`/`image_fn`/`video_fn` (default `litellm.completion`/`litellm.image_generation`/`litellm.video_generation`) so tests never need a live API call.
+**Stage code**: one module per pipeline stage under `src/historical_video_ai/stages/`, added incrementally as each stage in `docs/pipeline.md` gets implemented (currently: `scene_planning.py`, `previz.py`, `moderation.py`, `video_generation.py`). Established pattern: a frozen-dataclass artifact type for the stage's reviewable output, a stage-specific `<Stage>Error` exception that fails loud on malformed model output (matching `ConfigError`'s convention in `config.py`), and a `run_<stage>_stage(...)` function taking an injectable `completion_fn`/`image_fn`/`video_fn` (default `litellm.completion`/`litellm.image_generation`/`litellm.video_generation`) so tests never need a live API call.
 
-**CLI code** (`src/historical_video_ai/cli/`): seven modules, not one file — a 2,491-line `cli.py` is what this replaced. Which module a new CLI feature belongs in follows from a deliberate one-way import direction, and adding an import that points back up it is how the single file grows again:
+**CLI code** (`src/historical_video_ai/cli/`): six modules, not one file — a 2,491-line `cli.py` is what this replaced. Which module a new CLI feature belongs in follows from a deliberate one-way import direction, and adding an import that points back up it is how the single file grows again:
 
 - `app.py` — argument parser and `main()`; the only module that knows the whole run's shape. Imports every other module.
-- `beats.py` / `research_flow.py` / `video_gen.py` — one per stage-facing flow: beat images + their review loop, research→fact-check, and the standalone `--video-gen-from` path.
+- `beats.py` / `video_gen.py` — one per stage-facing flow: beat images + their review loop, and the standalone `--video-gen-from` path.
 - `review.py` / `runlog.py` — shared primitives the flows sit on: interactive confirm/edit prompts, and reading/writing a run's `run_log.json`.
 - `mocks.py` — the `--mock` fixtures, imported by `app.py` and `video_gen.py` only.
 

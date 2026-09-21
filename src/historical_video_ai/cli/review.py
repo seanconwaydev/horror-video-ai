@@ -152,11 +152,10 @@ def edit_item_fields(item: ItemT, *, fields: tuple[str, ...] | None = None) -> I
 def review_item(item: ItemT, *, item_desc: str, auto_yes: bool = False) -> ItemT:
     """Print one scene-plan item (Character/Location/Beat) and let a human
     accept it as-is or edit it field-by-field -- docs/decisions/0023's
-    per-item review loop. Editing replaces the item directly; unlike
-    _resolve_premise_conflict's corrected description, an edit here is
-    never re-verified through another LLM pass, since these are creative
-    fields (a character's hairstyle, a location's lighting), not factual
-    claims to check.
+    per-item review loop. Editing replaces the item directly and is never
+    re-verified through another LLM pass: these are creative fields (a
+    character's hairstyle, a location's lighting), and there is nothing
+    to check them against.
 
     Generic over any frozen dataclass with string fields -- Character,
     Location, and Beat all qualify, so one function serves all three

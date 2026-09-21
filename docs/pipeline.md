@@ -1,30 +1,34 @@
 # Pipeline stages — detail
 
-Last updated: 2026-08-12
+Last updated: 2026-09-21
+
+> Stages 2 and 3 (Research, Fact-check) were built and then deleted by
+> [decisions/0069](./decisions/0069-delete-historical-grounding.md).
+> Nothing in this pipeline is verified against the real world any more,
+> and the numbering below keeps its gaps rather than renumbering, so
+> stage 8 still means previz everywhere it is cited. What actually runs
+> today is **scene planning -> previz -> video generation**; see
+> CLAUDE.md for the current build.
 
 See [architecture.md](./architecture.md) for the high-level diagram this expands on. Each stage below produces a reviewable artifact and, for most stages, has a review gate before the pipeline continues.
 
 ### 1. Topic selection
 
-Input: a historical topic or era, chosen by you (at least initially — this could become model-assisted later, e.g. suggesting topics based on what's performing well in the space, but that's a v2 concern).
+Input: a scene — a time, a place, and what happens — chosen by you (at least initially; this could become model-assisted later, e.g. suggesting ideas based on what's performing well in the space, but that's a v2 concern). "Time" and "place" are a setting, not a claim about the world: "present day" and "an underground car park at night" are the normal case.
 
-### 2. Research
+### 2. Research — deleted
 
-A model with web search / grounding (not relying purely on parametric knowledge) produces a structured fact sheet: claims, dates, names, and a citation or source for each. Historical accuracy is the thing most likely to publicly embarrass the channel if it's wrong, so nothing here should be unsourced.
+### 3. Fact-check pass — deleted
 
-**Review gate:** you read the fact sheet. Is it accurate, are the sources real and credible, is anything missing that a good treatment of this topic would need?
+Both stages are gone ([decisions/0069](./decisions/0069-delete-historical-grounding.md)). Research produced a sourced fact sheet and fact-check verified it; together they grounded every scene in real-world claims, refused impossible premises, and made the human resolve each flag before planning. [decisions/0031](./decisions/0031-goal-is-quality-video-not-historical-accuracy.md) had already settled that accuracy is not this project's goal, and a horror short set in a car park was paying for sourced claims it could not use.
 
-### 3. Fact-check pass
-
-A second, independent model pass reviews the research output specifically for accuracy — cross-checking claims, flagging anything uncertain or contested, catching hallucinated specifics (invented quotes, wrong dates, misattributed events). This model should be prompted to be skeptical of the research stage's output, not to summarize it.
-
-**Review gate:** you see any flags raised and resolve them (accept the claim, cut it, or soften the language to reflect genuine historical uncertainty where it exists).
+Consequence for the stages below: wherever one of them says "the verified fact sheet" or "stay strictly within the bounds of the verified facts", read it as the scene the human wrote. Nothing verifies anything now.
 
 ### 4. Narrative / script
 
-Using only the verified fact sheet, a model writes the actual script — the thing a viewer will hear (or, if the video has no narration, the thing that drives the visual/audio design — see stage 10). This stage is optimized for a different skill than research: hook strength, pacing, narrative throughline, an ending that lands. It should stay strictly within the bounds of the verified facts; it doesn't get to introduce new claims. Point of view (first- vs. third-person) and narrative format (see the playbook) are decided here, per video.
+From the scene, a model writes the actual script — the thing a viewer will hear (or, if the video has no narration, the thing that drives the visual/audio design — see stage 10). This stage is optimized for a different skill than research: hook strength, pacing, narrative throughline, an ending that lands. Point of view (first- vs. third-person) and narrative format (see the playbook) are decided here, per video.
 
-**Review gate:** you read the script for both faithfulness to the research (did it stay accurate) and craft (is this something you'd actually want to watch).
+**Review gate:** you read the script for craft — is this something you'd actually want to watch.
 
 ### 5. Narrative quality review
 

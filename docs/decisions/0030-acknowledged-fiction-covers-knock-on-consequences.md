@@ -4,6 +4,9 @@ Date: 2026-09-02
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md), with the rest of the acknowledged-fiction
+mechanism.
 ## Context
 
 Found in a real Pompeii run, after ADR 0026's fix was already confirmed

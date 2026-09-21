@@ -56,7 +56,6 @@ from typing import Any
 from selection import select
 
 from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import (
     _style_instruction,
     build_character_sheet_prompt,
@@ -65,11 +64,11 @@ from historical_video_ai.stages.previz import (
     run_previz_review_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.research import FactSheet
 from historical_video_ai.stages.scene_planning import (
     Beat,
     Character,
     Location,
+    Scene,
     load_scene_plan,
 )
 
@@ -177,13 +176,10 @@ def _load_scene() -> tuple[dict, Character, list[Location], list[Beat]]:
     return raw["scene"], plan.characters[0], plan.locations, plan.beats
 
 
-def _fact_check_result(scene: dict) -> FactCheckResult:
-    """previz_review takes one; this scene is ungrounded horror, so it
-    carries no claims."""
-    return FactCheckResult(
-        fact_sheet=FactSheet(
-            time=scene["time"], place=scene["place"], description=scene["description"], claims=[]
-        )
+def _scene_input(scene: dict) -> Scene:
+    """previz_review takes one: just when, where and what happens."""
+    return Scene(
+        time=scene["time"], place=scene["place"], description=scene["description"]
     )
 
 
@@ -258,7 +254,7 @@ def main() -> None:
     run_dir = EVALS_DIR / "results" / f"anchor-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     run_dir.mkdir(parents=True)
     locations_by_id = {location.id: location for location in locations}
-    fact_check = _fact_check_result(scene)
+    fact_check = _scene_input(scene)
     manifest: list[dict] = []
 
     # Location references are identical across arms -- only the character
@@ -328,7 +324,6 @@ def main() -> None:
                 fact_check,
                 characters=[character],
                 beat=beat,
-                requires_grounding=False,
                 model=review_model,
                 **review_kwargs,
             )

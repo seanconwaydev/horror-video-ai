@@ -17,7 +17,6 @@ from PIL import Image
 
 from historical_video_ai.cli.mocks import (
     MOCK_PNG_B64,
-    mock_completion,
     mock_download,
     mock_image,
     mock_image_edit,
@@ -25,36 +24,11 @@ from historical_video_ai.cli.mocks import (
     mock_prediction,
     mock_scene_planning_completion,
 )
-from historical_video_ai.stages.fact_check import _PROMPT_TEMPLATE
-from historical_video_ai.stages.research import Claim
 from historical_video_ai.stages.scene_planning import _parse_scene_plan
 
 
 def _content(response):
     return json.loads(response.choices[0].message.content)
-
-
-def test_mock_completion_returns_research_claims_by_default():
-    payload = _content(mock_completion(messages=[{"content": "Research this scene."}]))
-    claims = [Claim(**claim) for claim in payload["claims"]]
-    assert claims
-    assert all("[MOCK]" in claim.text for claim in claims)
-
-
-def test_mock_completion_returns_fact_check_flags_for_a_fact_check_prompt():
-    # Research and fact-check share litellm.completion, so the fake
-    # distinguishes them by the prompt's "Claims to check" marker. If
-    # fact_check.py's prompt ever drops that phrase, --mock silently
-    # starts answering fact-check with research output.
-    payload = _content(mock_completion(messages=[{"content": "Claims to check: ..."}]))
-    assert payload == {"flags": []}
-
-
-def test_fact_check_prompt_still_contains_the_marker_the_fake_keys_on():
-    # The fake's branch is only correct while the real prompt still says
-    # this. Drop the phrase from fact_check.py and every --mock run
-    # silently answers fact-check with research output instead.
-    assert "Claims to check" in _PROMPT_TEMPLATE
 
 
 @pytest.mark.parametrize("fake", [mock_image, mock_image_edit])

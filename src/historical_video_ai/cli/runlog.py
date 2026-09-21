@@ -2,9 +2,13 @@
 
 Every path a run writes is built here: the run directory itself, the
 archive name for a rejected image, and the sanitised form of a
-model-authored id before it is used as a directory name. Reading is the
-same surface in reverse -- run_log.json back out as a FactSheet or a full
-FactCheckResult, which is what --fixture replays.
+model-authored id before it is used as a directory name, plus reading a
+run's log back.
+
+It used to reconstruct a FactSheet/FactCheckResult from a saved log,
+which is what --fixture replayed. docs/decisions/0069 deleted research
+and fact-check, so there is nothing expensive left to replay: a scene is
+three strings on the command line.
 
 Two of these encode bugs found in real runs rather than anything
 self-evident, and their docstrings say which: `next_archive_path` (a
@@ -19,31 +23,6 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar
-
-from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
-from historical_video_ai.stages.research import Claim, FactSheet
-
-_T = TypeVar("_T")
-
-
-def rebuild_from_log(cls: type[_T], data: dict) -> _T:
-    """Build one of the research-side dataclasses from a run log's dict,
-    ignoring keys the class no longer has.
-
-    A plain `Cls(**data)` raises `TypeError: unexpected keyword argument`
-    the moment a field is removed or renamed, which breaks every fixture
-    ever saved. That is not hypothetical here: the same pattern as
-    `Beat(**beat)` killed both anchor eval scripts when ADR 0045 deleted
-    `Beat.cinematography`, and the fix was to route them through the real
-    parser, which ignores unknown keys
-    (docs/playbook/repo-audit-brief.md, finding 4). The research side kept
-    the splat.
-
-    A *missing* required field still raises, because that is a genuinely
-    malformed fixture rather than an older one.
-    """
-    return cls(**{f: data[f] for f in cls.__dataclass_fields__ if f in data})  # type: ignore[attr-defined]
 
 
 def safe_path_component(value: str) -> str:
@@ -189,75 +168,3 @@ def write_log(out_dir: Path, log: dict) -> None:
 
 def read_log(out_dir: Path) -> dict:
     return json.loads((out_dir / "run_log.json").read_text())
-
-
-def load_fact_sheet_from_fixture(path: Path) -> FactSheet:
-    """Reconstruct just the FactSheet (time/place/description/claims) from
-    a saved run_log.json -- the part every fixture has, whether or not
-    fact-check ever ran against it (docs/decisions/0015 persists research
-    before fact-check, so a run that crashed at fact-check still has a
-    usable fixture here, just not a full one -- see `load_fixture`).
-
-    Raises ValueError if time/place/description are missing or empty
-    (docs/decisions/0006), and KeyError as-is if research_claims is absent.
-    """
-    data = json.loads(path.read_text())
-    for required_field in ("time", "place", "description"):
-        if not data.get(required_field):
-            raise ValueError(f"Fixture {path} is missing a non-empty '{required_field}'")
-    claims = [rebuild_from_log(Claim, c) for c in data["research_claims"]]
-    return FactSheet(
-        time=data["time"],
-        place=data["place"],
-        description=data["description"],
-        claims=claims,
-    )
-
-
-def load_fixture(path: Path) -> FactCheckResult:
-    """Reconstruct a real FactSheet + FactCheckResult from a previously
-    saved run_log.json (or anything matching its shape), so research and
-    fact-check don't need to run -- and cost nothing -- again. Requires the
-    fixture to have a completed fact-check result already (a
-    `fact_check_flags` key) -- for a fixture that only has research so
-    far, use `load_fact_sheet_from_fixture` and run fact-check for real.
-
-    Raises FileNotFoundError / KeyError as-is if the fixture is missing or
-    malformed, rather than silently degrading into an empty scene.
-    """
-    data = json.loads(path.read_text())
-    fact_sheet = load_fact_sheet_from_fixture(path)
-    claims = fact_sheet.claims
-    flags = [rebuild_from_log(ClaimFlag, f) for f in data["fact_check_flags"]]
-
-    # Same invariant fact_check.py's _parse_flags enforces on a live model
-    # response -- a fixture captured before that validation existed (or
-    # hand-edited) could still have a flag whose claim_text doesn't match
-    # any claim verbatim, which would otherwise crash _resolve_flags with a
-    # raw KeyError instead of a clear, actionable error.
-    known_claim_texts = {c.text for c in claims}
-    for flag in flags:
-        if flag.claim_text not in known_claim_texts:
-            raise ValueError(
-                f"Fixture {path} has a flag whose claim_text doesn't exactly "
-                f"match any research claim: {flag.claim_text!r}"
-            )
-
-    raw_premise_conflict = data.get("premise_conflict")
-    premise_conflict = (
-        rebuild_from_log(PremiseConflict, raw_premise_conflict)
-        if raw_premise_conflict is not None
-        else None
-    )
-    # docs/decisions/0027: read back alongside premise_conflict -- a
-    # fixture saved before this ADR won't have this key, so .get() rather
-    # than a required field, same graceful-absence handling as
-    # premise_conflict itself.
-    acknowledged_fiction = data.get("acknowledged_fiction")
-
-    return FactCheckResult(
-        fact_sheet=fact_sheet,
-        flags=flags,
-        premise_conflict=premise_conflict,
-        acknowledged_fiction=acknowledged_fiction,
-    )

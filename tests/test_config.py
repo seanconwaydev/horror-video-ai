@@ -77,8 +77,6 @@ def test_real_project_config_is_valid():
     configs = load_stage_configs(REPO_ROOT / "config" / "models.yaml")
 
     expected_stages = {
-        "research",
-        "fact_check",
         "scene_planning",
         "previz",
         "previz_review",

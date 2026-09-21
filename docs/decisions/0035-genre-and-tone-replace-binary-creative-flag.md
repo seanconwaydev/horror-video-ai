@@ -6,6 +6,11 @@ Status: Accepted
 
 Supersedes: [decisions/0034](./0034-creative-flag-skips-historical-grounding.md)
 
+
+Narrowed by [0069](./0069-delete-historical-grounding.md): --genre no longer selects whether a
+run is grounded, since nothing is. Genre and tone themselves survive, and
+now reach the planning prompt on every run rather than only an ungrounded
+one.
 ## Context
 
 The project owner asked for real research (not guesswork) on what shape a video-generation pipeline's entry point should actually take, given this project's own was still three free-text strings plus an ad hoc `--creative` boolean. The research (`docs/playbook/human-input-and-tools.md`) converged on a consistent answer across sources: production AI-content systems structure input as a **creative brief** -- objective, audience, tone, constraints, deliverables -- not a freeform prompt, and **genre specifically** is a real, evidenced field (a book-generation case study showed genre alone measurably affects output success rate), not an invented one.

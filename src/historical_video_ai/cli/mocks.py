@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import uuid
 from types import SimpleNamespace
-from typing import Any
 
 # 90x160 (9:16, tiny for speed). The aspect-ratio guard that originally
 # forced a real image here is gone with Sora (docs/decisions/0038) -- the
@@ -29,28 +28,6 @@ MOCK_PNG_B64 = (
     "coQcIUfIEXKEHCFHyBFyhBwhR8gRcoQcIUfIEXKEHCFHyBFyhBwhR8gxtxdJIAI/Sl4X"
     "NwAAAABJRU5ErkJggg=="
 )
-
-
-def mock_completion(**kwargs: Any) -> SimpleNamespace:
-    """Research and fact-check both go through litellm.completion, so the
-    prompt is what distinguishes them: only fact-check's carries the
-    claims it was asked to check."""
-    prompt = kwargs["messages"][0]["content"]
-    if "Claims to check" in prompt:
-        content = json.dumps({"flags": []})
-    else:
-        content = json.dumps(
-            {
-                "claims": [
-                    {
-                        "text": "[MOCK] A placeholder claim standing in for real research.",
-                        "source": "[MOCK] no real source -- this is a dry run",
-                        "date": None,
-                    }
-                ]
-            }
-        )
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def mock_image(**kwargs: object) -> SimpleNamespace:

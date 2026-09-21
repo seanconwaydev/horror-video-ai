@@ -1,4 +1,4 @@
-"""main() end to end under --mock, once per entry shape.
+"""main() end to end under --mock.
 
 cli/app.py sat at 22% coverage with main() never called by the suite,
 while every other module was above 94%. Its only automated exercise was
@@ -53,69 +53,57 @@ _BASE = [
 ]
 
 
-def test_a_grounded_historical_run_records_its_stages(run_in):
-    log = run_in(
-        [*_BASE, "--time", "1969", "--place", "Florida", "--description", "she watches"]
-    )
-
-    assert log["genre"] == "historical"
-    assert log["requires_grounding"] is True
-    # Research and fact-check really ran (mocked), rather than the
-    # ungrounded branch being taken by accident.
-    assert log["research_claims"]
-    assert "fact_check_flags" in log
-    assert log["research_model"] and log["fact_check_model"]
-    assert log["scene_plan"]["beats"]
-    assert log["previz_beats"]
-
-
-def test_an_ungrounded_genre_skips_research_and_says_so_in_the_log(run_in):
-    """docs/decisions/0034/0035: a scene never claiming to be real gets no
-    value from historical-accuracy machinery."""
+def test_a_run_plans_a_scene_and_produces_beat_images(run_in):
     log = run_in(
         [
             *_BASE,
             "--genre",
-            "meme",
+            "horror",
+            "--tone",
+            "dread",
             "--time",
-            "now",
+            "present day",
             "--place",
-            "a kitchen",
+            "an underground car park",
             "--description",
-            "a cat knocks a glass over",
+            "a woman notices someone between the pillars",
         ]
     )
 
-    assert log["genre"] == "meme"
-    assert log["requires_grounding"] is False
-    assert log["research_claims"] == []
-    # Neither stage ran, so neither model is recorded. The run log is the
-    # judgement dataset (docs/decisions/0053): a field naming what
-    # produced a row is worse than absent if it names something that
-    # never ran.
-    assert "research_model" not in log
-    assert "fact_check_model" not in log
+    assert log["genre"] == "horror"
+    assert log["tone"] == "dread"
+    assert log["time"] == "present day"
     assert log["scene_plan"]["beats"]
+    assert log["previz_beats"]
 
 
-def test_a_fixture_run_records_the_genre_it_actually_used(run_in, tmp_path):
-    """The genre routes composition mode and threat mode whether or not
-    the run is grounded, so `--fixture X --genre horror` really does plan
-    a horror scene. Recording a hardcoded "historical" made the run log
-    disagree with the run -- and evals/export_judgements.py stamps every
-    judgement row with this field so that rows made under different
-    conditions are never compared."""
-    source = run_in(
-        [*_BASE, "--time", "1969", "--place", "Florida", "--description", "she watches"]
+def test_a_run_records_nothing_about_research_or_fact_check(run_in):
+    """docs/decisions/0069 deleted both stages. The run log is the
+    judgement dataset (docs/decisions/0053), so a leftover key here would
+    be a column of nulls in every exported row."""
+    log = run_in(
+        [*_BASE, "--time", "now", "--place", "a kitchen", "--description", "a cat jumps"]
     )
-    fixture_path = tmp_path / "fixture.json"
-    fixture_path.write_text(json.dumps(source))
 
-    log = run_in([*_BASE, "--genre", "horror", "--fixture", str(fixture_path)])
+    for gone in (
+        "research_model",
+        "fact_check_model",
+        "research_claims",
+        "fact_check_flags",
+        "premise_conflict",
+        "acknowledged_fiction",
+        "requires_grounding",
+        "fixture",
+    ):
+        assert gone not in log, f"{gone!r} is still being written to the run log"
+
+
+def test_genre_defaults_to_horror_and_reaches_the_plan(run_in):
+    """`historical` was the default, and on that default the genre was
+    never shown to the planner at all -- it was only passed through when
+    a run was *un*grounded. Both halves of that are gone."""
+    log = run_in(
+        [*_BASE, "--time", "now", "--place", "a stairwell", "--description", "she looks up"]
+    )
 
     assert log["genre"] == "horror"
-    # Still grounded: a fixture's fact sheet was verified for real and
-    # --genre cannot un-ground it.
-    assert log["requires_grounding"] is True
-    assert log["fixture"] == str(fixture_path)
-    assert log["scene_plan"]["beats"]

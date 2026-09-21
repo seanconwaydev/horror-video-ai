@@ -398,7 +398,7 @@ def generate_beats_with_choices(
     the beat's text and retry fresh, or give up on this beat now --
     otherwise Enter keeps the existing blind-retry behavior. This matters
     because some rejections are attributable to something baked into the
-    prompt itself (e.g. an anachronistic detail on the shared Character),
+    prompt itself (e.g. a wrong detail on the shared Character),
     which fails identically on every blind attempt -- see the real run
     that motivated this. Under `auto_yes` there's no human to ask, so the
     hook instead applies a cheap heuristic: an identical rejection concern

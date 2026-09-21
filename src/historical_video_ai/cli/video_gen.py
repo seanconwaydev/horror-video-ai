@@ -193,8 +193,8 @@ def _record_video_gen_result(
 def load_previz_output(run_dir: Path, *, prompt_override: str | None = None) -> tuple[Path, str]:
     """Load a previously generated previz image and its prompt from an
     existing run's run_log.json, so --video-gen-from can run stage 9
-    standalone instead of requiring a fresh research/fact-check/previz
-    pass every time (docs/decisions/0010).
+    standalone instead of requiring a fresh planning/previz pass every
+    time (docs/decisions/0010).
 
     `prompt_override` (--video-prompt), if given, is returned instead of
     the saved previz prompt -- lets a hand-written, video-specific prompt
@@ -284,8 +284,8 @@ def run_video_generation_only(
     video_prompt: str | None = None,
 ) -> None:
     """Run stage 9 (video generation) standalone against one or more
-    already-completed previz outputs, skipping research/fact-check/previz
-    for this invocation (docs/decisions/0010). Each run_dir expands into
+    already-completed previz outputs, skipping planning and previz for
+    this invocation (docs/decisions/0010). Each run_dir expands into
     one or more `VideoGenTarget`s (`load_video_gen_targets`) -- a single
     target for an old-style single-image run, or one target per accepted
     beat for a new-style multi-beat scene-plan run (docs/decisions/0023/

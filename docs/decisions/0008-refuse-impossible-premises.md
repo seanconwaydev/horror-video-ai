@@ -9,6 +9,10 @@ Superseded in part by [0025](./0025-keep-premise-conflict-as-intentional-fiction
 [0051](./0051-remove-the-single-image-previz-flow.md), which deleted the refusal
 with the flow that carried it.
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): fact-check no longer runs, so nothing
+detects an impossible premise and nothing refuses one. Impossible is now
+allowed by default.
 ## Context
 
 Manual testing (`--time "1995 sept 20" --place "harbin, china" --description

@@ -15,8 +15,6 @@ from pathlib import Path
 import pytest
 
 from historical_video_ai.cli.runlog import (
-    load_fact_sheet_from_fixture,
-    load_fixture,
     new_run_dir,
     project_root,
     read_log,
@@ -24,8 +22,6 @@ from historical_video_ai.cli.runlog import (
     slugify,
     write_log,
 )
-from historical_video_ai.stages.fact_check import ClaimFlag, FactCheckResult, PremiseConflict
-from historical_video_ai.stages.research import Claim, FactSheet
 
 
 def _write_fixture(tmp_path, **overrides):
@@ -46,147 +42,6 @@ def _write_fixture(tmp_path, **overrides):
     path = tmp_path / "fixture.json"
     path.write_text(json.dumps(payload))
     return path
-
-
-def test_load_fixture_reconstructs_fact_check_result(tmp_path):
-    path = _write_fixture(tmp_path)
-
-    result = load_fixture(path)
-
-    assert result == FactCheckResult(
-        fact_sheet=FactSheet(
-            time="December 1903",
-            place="Kitty Hawk, North Carolina",
-            description="watches a flying machine lift off from the dunes.",
-            claims=[
-                Claim(
-                    text="The dunes at Kitty Hawk were largely undeveloped in 1903.",
-                    source="NPS",
-                )
-            ],
-        ),
-        flags=[],
-    )
-
-
-def test_load_fixture_reconstructs_flags(tmp_path):
-    path = _write_fixture(
-        tmp_path,
-        fact_check_flags=[
-            {
-                "claim_text": "The dunes at Kitty Hawk were largely undeveloped in 1903.",
-                "concern": "Source doesn't specifically support 'largely'.",
-                "severity": "uncertain",
-            }
-        ],
-    )
-
-    result = load_fixture(path)
-
-    assert result.flags == [
-        ClaimFlag(
-            claim_text="The dunes at Kitty Hawk were largely undeveloped in 1903.",
-            concern="Source doesn't specifically support 'largely'.",
-            severity="uncertain",
-        )
-    ]
-
-
-def test_load_fact_sheet_from_fixture_works_without_fact_check_flags(tmp_path):
-    # Regression test: a fixture saved after a real fact-check-stage crash
-    # has research but no "fact_check_flags" key at all (docs/decisions/
-    # 0015 persists research before fact-check runs) -- this must still
-    # load, unlike load_fixture which requires a completed fact-check.
-    payload = {
-        "time": "December 1903",
-        "place": "Kitty Hawk, North Carolina",
-        "description": "watches a flying machine lift off from the dunes.",
-        "research_claims": [
-            {"text": "A claim.", "source": "A source", "date": None}
-        ],
-    }
-    path = tmp_path / "fixture.json"
-    path.write_text(json.dumps(payload))
-
-    fact_sheet = load_fact_sheet_from_fixture(path)
-
-    assert fact_sheet.time == "December 1903"
-    assert fact_sheet.claims == [Claim(text="A claim.", source="A source")]
-
-
-@pytest.mark.parametrize("missing_field", ["time", "place", "description"])
-def test_load_fixture_raises_for_empty_required_field(tmp_path, missing_field):
-    path = _write_fixture(tmp_path, **{missing_field: ""})
-
-    with pytest.raises(ValueError, match=missing_field):
-        load_fixture(path)
-
-
-def test_load_fixture_reconstructs_premise_conflict(tmp_path):
-    path = _write_fixture(
-        tmp_path,
-        premise_conflict={
-            "explanation": "Nothing like this existed yet.",
-            "suggested_alternative": "A close, true version.",
-        },
-    )
-
-    result = load_fixture(path)
-
-    assert result.premise_conflict == PremiseConflict(
-        explanation="Nothing like this existed yet.",
-        suggested_alternative="A close, true version.",
-    )
-
-
-def test_load_fixture_defaults_premise_conflict_to_none_when_absent(tmp_path):
-    path = _write_fixture(tmp_path)
-
-    result = load_fixture(path)
-
-    assert result.premise_conflict is None
-
-
-def test_load_fixture_reconstructs_acknowledged_fiction(tmp_path):
-    # docs/decisions/0027: a fixture saved after a scene was kept as
-    # intentional fiction must round-trip that decision back out, not
-    # just the (by-then-null) premise_conflict.
-    path = _write_fixture(
-        tmp_path,
-        premise_conflict=None,
-        acknowledged_fiction="A smartphone did not exist in 79 AD.",
-    )
-
-    result = load_fixture(path)
-
-    assert result.premise_conflict is None
-    assert result.acknowledged_fiction == "A smartphone did not exist in 79 AD."
-
-
-def test_load_fixture_defaults_acknowledged_fiction_to_none_when_absent(tmp_path):
-    # A fixture saved before 0027 won't have this key at all.
-    path = _write_fixture(tmp_path)
-
-    result = load_fixture(path)
-
-    assert result.acknowledged_fiction is None
-
-
-def test_load_fixture_raises_when_flag_claim_text_does_not_match(tmp_path):
-    path = _write_fixture(
-        tmp_path,
-        fact_check_flags=[
-            {
-                "claim_text": "The dunes at Kitty Hawk were largely undeveloped in 1903. "
-                "(date: null) [source: NPS]",
-                "concern": "Paraphrased instead of copied verbatim.",
-                "severity": "uncertain",
-            }
-        ],
-    )
-
-    with pytest.raises(ValueError, match="doesn't exactly match any research claim"):
-        load_fixture(path)
 
 
 def test_slugify_lowercases_and_hyphenates():
@@ -292,59 +147,3 @@ def test_write_log_round_trips_and_leaves_no_temp_file_behind(tmp_path):
 
     assert read_log(tmp_path) == {"beats": [{"id": "b1"}]}
     assert [p.name for p in tmp_path.iterdir()] == ["run_log.json"]
-
-
-def _fixture_with(tmp_path, **overrides):
-    log = {
-        "time": "1969",
-        "place": "Florida",
-        "description": "she watches",
-        "research_claims": [{"text": "Apollo 11 launched.", "source": "s"}],
-        "fact_check_flags": [],
-        "premise_conflict": None,
-    }
-    log.update(overrides)
-    path = tmp_path / "run_log.json"
-    path.write_text(json.dumps(log))
-    return path
-
-
-def test_a_fixture_carrying_a_field_the_code_no_longer_has_still_loads(tmp_path):
-    """`Cls(**data)` raises on an unexpected keyword the moment a field is
-    removed or renamed, which breaks every fixture ever saved. That is the
-    same failure `Beat(**beat)` caused when ADR 0045 deleted
-    Beat.cinematography and killed both anchor eval scripts
-    (docs/playbook/repo-audit-brief.md, finding 4). The research side kept
-    the splat until now -- and `Claim.names` is currently written by
-    research and read by nothing, so it is exactly the field someone would
-    delete next."""
-    path = _fixture_with(
-        tmp_path,
-        research_claims=[
-            {"text": "Apollo 11 launched.", "source": "s", "retired_field": "from an older schema"}
-        ],
-        fact_check_flags=[
-            {
-                "claim_text": "Apollo 11 launched.",
-                "concern": "c",
-                "severity": "uncertain",
-                "also_retired": True,
-            }
-        ],
-        premise_conflict={"explanation": "e", "suggested_alternative": None, "gone": 1},
-    )
-
-    result = load_fixture(path)
-
-    assert [c.text for c in result.fact_sheet.claims] == ["Apollo 11 launched."]
-    assert [f.concern for f in result.flags] == ["c"]
-    assert result.premise_conflict.explanation == "e"
-
-
-def test_a_fixture_missing_a_required_field_still_fails(tmp_path):
-    """Tolerating *extra* keys must not tolerate absent ones -- a claim
-    with no text is malformed, not merely older."""
-    path = _fixture_with(tmp_path, research_claims=[{"source": "s"}])
-
-    with pytest.raises(TypeError, match="text"):
-        load_fact_sheet_from_fixture(path)

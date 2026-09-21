@@ -1,5 +1,4 @@
 import base64
-import dataclasses
 import json
 from types import SimpleNamespace
 
@@ -7,7 +6,6 @@ import litellm
 import pytest
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.fact_check import FactCheckResult
 from historical_video_ai.stages.previz import (
     _STYLE_INSTRUCTIONS,
     DEFAULT_STYLE,
@@ -19,8 +17,7 @@ from historical_video_ai.stages.previz import (
     run_previz_review_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.research import Claim, FactSheet
-from historical_video_ai.stages.scene_planning import Beat, Character, Location
+from historical_video_ai.stages.scene_planning import Beat, Character, Location, Scene
 
 # A tiny valid 1x1 PNG, base64-encoded, so tests never touch a real API or
 # write anything that isn't a real (if trivial) image file.
@@ -30,17 +27,12 @@ _TINY_PNG_B64 = (
 )
 
 
-def _fact_check_result(flags=None) -> FactCheckResult:
-    fact_sheet = FactSheet(
-        time="December 1903",
-        place="Kitty Hawk, North Carolina",
-        description="watches a flying machine lift off from the dunes.",
-        claims=[
-            Claim(text="The dunes at Kitty Hawk were largely undeveloped in 1903.", source="NPS"),
-            Claim(text="This claim will be contradicted.", source="somewhere"),
-        ],
+def _scene() -> Scene:
+    return Scene(
+        time="present day",
+        place="an underground car park at night",
+        description="a woman notices someone standing between the pillars.",
     )
-    return FactCheckResult(fact_sheet=fact_sheet, flags=flags or [])
 
 
 def _fake_image_fn(b64_json: str):
@@ -641,7 +633,7 @@ def test_run_previz_review_stage_accepts(tmp_path):
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(json.dumps(payload)),
     )
@@ -660,7 +652,7 @@ def test_run_previz_review_stage_parses_response_wrapped_in_markdown_fence(tmp_p
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(f"```json\n{json.dumps(payload)}\n```"),
     )
@@ -674,7 +666,7 @@ def test_run_previz_review_stage_rejects_with_concern(tmp_path):
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(json.dumps(payload)),
     )
@@ -690,7 +682,7 @@ def test_run_previz_review_stage_raises_when_rejected_without_concern(tmp_path):
     with pytest.raises(PrevizError, match="missing 'concern'"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion(json.dumps(payload)),
         )
@@ -702,7 +694,7 @@ def test_run_previz_review_stage_raises_for_invalid_json(tmp_path):
     with pytest.raises(PrevizError, match="not valid JSON"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion("not json"),
         )
@@ -715,7 +707,7 @@ def test_run_previz_review_stage_raises_for_non_bool_accepted(tmp_path):
     with pytest.raises(PrevizError, match="must be true or false"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion(json.dumps(payload)),
         )
@@ -736,59 +728,12 @@ def test_run_previz_review_stage_sends_image_as_base64(tmp_path):
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     content = captured["messages"][0]["content"]
     image_part = next(part for part in content if part["type"] == "image_url")
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
-
-
-def test_run_previz_review_stage_includes_acknowledged_fiction_when_set(tmp_path):
-    # docs/decisions/0026: an explicit allowlist for a human-acknowledged
-    # intentional fictional element, so the reviewer doesn't re-flag it.
-    image_path = _write_tiny_png(tmp_path)
-    fact_check_result = dataclasses.replace(
-        _fact_check_result(),
-        acknowledged_fiction="A smartphone with a time-travel app did not exist in 79 AD.",
-    )
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path, fact_check_result, model="anthropic/claude-sonnet-5", completion_fn=_completion
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "already been explicitly acknowledged as" in prompt_text
-    assert "A smartphone with a time-travel app did not exist in 79 AD." in prompt_text
-
-
-def test_run_previz_review_stage_omits_acknowledged_fiction_block_when_not_set(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "already been explicitly acknowledged as" not in prompt_text
 
 
 def test_run_previz_review_stage_includes_planned_details_when_character_and_beat_given(tmp_path):
@@ -805,7 +750,7 @@ def test_run_previz_review_stage_includes_planned_details_when_character_and_bea
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         characters=[_character()],
         beat=_beat(),
         model="anthropic/claude-sonnet-5",
@@ -836,7 +781,7 @@ def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     prompt_text = next(
@@ -862,7 +807,7 @@ def test_run_previz_review_stage_includes_previous_concerns_when_given(tmp_path)
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         previous_concerns=["Shot lacks the described extreme fisheye-from-below perspective."],
         model="anthropic/claude-sonnet-5",
         completion_fn=_completion,
@@ -886,7 +831,7 @@ def test_run_previz_review_stage_omits_previous_concerns_block_when_not_given(tm
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     prompt_text = next(
@@ -909,8 +854,7 @@ def test_run_previz_review_stage_includes_previous_concerns_when_ungrounded(tmp_
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
-        requires_grounding=False,
+        _scene(),
         previous_concerns=["The vinyl record element is missing from the frame."],
         model="anthropic/claude-sonnet-5",
         completion_fn=_completion,
@@ -921,33 +865,6 @@ def test_run_previz_review_stage_includes_previous_concerns_when_ungrounded(tmp_
     )
     assert "This is a retry" in prompt_text
     assert "The vinyl record element is missing from the frame." in prompt_text
-
-
-def test_run_previz_review_stage_drops_anachronism_check_when_ungrounded(tmp_path):
-    # docs/decisions/0034
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path,
-        _fact_check_result(),
-        requires_grounding=False,
-        model="anthropic/claude-sonnet-5",
-        completion_fn=_completion,
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "not meant to be historically or factually accurate" in prompt_text
-    assert "historically accurate scene description" not in prompt_text
-    assert "Claims the image should be consistent with" not in prompt_text
 
 
 def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):
@@ -964,7 +881,7 @@ def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_
             ]
         )
 
-    run_previz_review_stage(image_path, _fact_check_result(), completion_fn=_completion)
+    run_previz_review_stage(image_path, _scene(), completion_fn=_completion)
 
     assert captured["model"] == get_stage_model("previz_review")
 
@@ -998,7 +915,7 @@ def test_previz_review_is_told_the_beats_lighting_not_just_its_action(tmp_path):
 
     run_previz_review_stage(
         image,
-        _fact_check_result(),
+        _scene(),
         beat=beat,
         completion_fn=_completion,
         model="anthropic/claude-sonnet-5",
@@ -1033,7 +950,7 @@ def test_previz_review_retries_a_transient_error(tmp_path):
 
     review = run_previz_review_stage(
         image,
-        _fact_check_result(),
+        _scene(),
         completion_fn=_flaky_completion,
         model="anthropic/claude-sonnet-5",
         sleep_fn=lambda _s: None,

@@ -5,11 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.fact_check import FactCheckResult
-from historical_video_ai.stages.research import Claim, FactSheet
 from historical_video_ai.stages.scene_planning import (
     Beat,
     Character,
+    Scene,
     ScenePlanningError,
     Staging,
     _parse_scene_plan,
@@ -22,14 +21,12 @@ from historical_video_ai.stages.scene_planning import (
 )
 
 
-def _fact_check_result() -> FactCheckResult:
-    fact_sheet = FactSheet(
+def _scene() -> Scene:
+    return Scene(
         time="79 AD, Pompeii",
         place="a thermopolium in Pompeii",
         description="an influencer visits an eatery and reviews a dish.",
-        claims=[Claim(text="Thermopolia served hot prepared food and wine.", source="NPS")],
     )
-    return FactCheckResult(fact_sheet=fact_sheet)
 
 
 def _valid_payload(**overrides) -> dict:
@@ -107,7 +104,7 @@ def _fake_completion(content: str):
 
 def test_run_scene_planning_stage_parses_full_plan():
     plan = run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         completion_fn=_fake_completion(json.dumps(_valid_payload())),
     )
@@ -121,7 +118,7 @@ def test_run_scene_planning_stage_parses_full_plan():
 def test_run_scene_planning_stage_parses_response_wrapped_in_markdown_fence():
     payload = _valid_payload()
     plan = run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         completion_fn=_fake_completion(f"```json\n{json.dumps(payload)}\n```"),
     )
@@ -132,7 +129,7 @@ def test_run_scene_planning_stage_parses_response_wrapped_in_markdown_fence():
 def test_run_scene_planning_stage_raises_for_invalid_json():
     with pytest.raises(ScenePlanningError, match="not valid JSON"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion("not json"),
         )
@@ -142,7 +139,7 @@ def test_run_scene_planning_stage_raises_when_no_beats():
     payload = _valid_payload(beats=[])
     with pytest.raises(ScenePlanningError, match="no beats"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -153,7 +150,7 @@ def test_run_scene_planning_stage_raises_when_beat_references_unknown_location()
     payload["beats"][0]["location_id"] = "nonexistent"
     with pytest.raises(ScenePlanningError, match="doesn't match any defined location"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -165,7 +162,7 @@ def test_run_scene_planning_stage_raises_on_duplicate_character_ids():
     payload["characters"].append(second_character)  # same id as the first
     with pytest.raises(ScenePlanningError, match="Duplicate character id"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -177,7 +174,7 @@ def test_run_scene_planning_stage_raises_on_duplicate_location_ids():
     payload["locations"].append(second_location)  # same id as the first
     with pytest.raises(ScenePlanningError, match="Duplicate location id"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -188,7 +185,7 @@ def test_run_scene_planning_stage_raises_when_character_missing_field():
     del payload["characters"][0]["hair"]
     with pytest.raises(ScenePlanningError, match="missing or has an empty 'hair'"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -199,7 +196,7 @@ def test_run_scene_planning_stage_raises_when_location_field_empty():
     payload["locations"][0]["architecture"] = ""
     with pytest.raises(ScenePlanningError, match="missing or has an empty 'architecture'"):
         run_scene_planning_stage(
-            _fact_check_result(),
+            _scene(),
             model="deepseek/deepseek-v4-flash",
             completion_fn=_fake_completion(json.dumps(payload)),
         )
@@ -210,7 +207,7 @@ def test_run_scene_planning_stage_allows_no_characters():
     # character at all.
     payload = _valid_payload(characters=[])
     plan = run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         completion_fn=_fake_completion(json.dumps(payload)),
     )
@@ -226,7 +223,7 @@ def test_run_scene_planning_stage_resolves_model_from_config_when_not_passed():
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
         )
 
-    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
 
     assert captured["model"] == get_stage_model("scene_planning")
 
@@ -238,7 +235,7 @@ def test_run_scene_planning_stage_truncates_to_max_beats():
     payload["beats"].append(second_beat)
 
     plan = run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         max_beats=1,
         completion_fn=_fake_completion(json.dumps(payload)),
@@ -250,7 +247,7 @@ def test_run_scene_planning_stage_truncates_to_max_beats():
 
 def test_run_scene_planning_stage_leaves_beats_alone_when_under_max_beats():
     plan = run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         max_beats=5,
         completion_fn=_fake_completion(json.dumps(_valid_payload())),
@@ -269,7 +266,7 @@ def test_run_scene_planning_stage_includes_max_beats_in_prompt_when_given():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", max_beats=4, completion_fn=_completion
+        _scene(), model="deepseek/deepseek-v4-flash", max_beats=4, completion_fn=_completion
     )
 
     prompt = captured["messages"][0]["content"]
@@ -286,13 +283,13 @@ def test_run_scene_planning_stage_omits_max_beats_line_when_not_given():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+        _scene(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
     )
 
     assert "at most" not in captured["messages"][0]["content"]
 
 
-def test_run_scene_planning_stage_includes_genre_and_tone_when_ungrounded():
+def test_run_scene_planning_stage_includes_genre_and_tone():
     # docs/decisions/0035
     captured = {}
 
@@ -303,9 +300,8 @@ def test_run_scene_planning_stage_includes_genre_and_tone_when_ungrounded():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="meme",
         tone="comedic",
         completion_fn=_completion,
@@ -332,7 +328,7 @@ def test_run_scene_planning_stage_includes_location_physical_consistency_rule():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+        _scene(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
     )
 
     prompt = captured["messages"][0]["content"]
@@ -354,7 +350,7 @@ def test_run_scene_planning_stage_includes_within_location_position_rule():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+        _scene(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
     )
 
     prompt = captured["messages"][0]["content"]
@@ -377,7 +373,7 @@ def test_run_scene_planning_stage_includes_facial_expression_rule():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
+        _scene(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
     )
 
     prompt = captured["messages"][0]["content"]
@@ -406,7 +402,7 @@ def test_run_scene_planning_stage_includes_character_variety_rule_with_trait_hin
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
         completion_fn=_completion,
         rng=random.Random(42),
@@ -416,73 +412,6 @@ def test_run_scene_planning_stage_includes_character_variety_rule_with_trait_hin
     expected_hint = _random_character_trait_hint(random.Random(42))
     assert "Vary each Character's physical appearance meaningfully" in prompt
     assert expected_hint in prompt
-
-
-def test_run_scene_planning_stage_omits_genre_when_grounded():
-    # "historical" is always the genre when grounded -- redundant with the
-    # preamble's own framing, so it's not echoed.
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
-        )
-
-    run_scene_planning_stage(
-        _fact_check_result(),
-        model="deepseek/deepseek-v4-flash",
-        requires_grounding=True,
-        genre="historical",
-        tone="sincere",
-        completion_fn=_completion,
-    )
-
-    prompt = captured["messages"][0]["content"]
-    assert "Genre:" not in prompt
-    assert "Tone: sincere." in prompt
-
-
-def test_run_scene_planning_stage_includes_claims_in_prompt():
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
-        )
-
-    run_scene_planning_stage(
-        _fact_check_result(), model="deepseek/deepseek-v4-flash", completion_fn=_completion
-    )
-
-    prompt = captured["messages"][0]["content"]
-    assert "Thermopolia served hot prepared food and wine." in prompt
-    assert "79 AD, Pompeii" in prompt
-
-
-def test_run_scene_planning_stage_uses_creative_framing_when_ungrounded():
-    # docs/decisions/0034
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
-        )
-
-    run_scene_planning_stage(
-        _fact_check_result(),
-        model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
-        completion_fn=_completion,
-    )
-
-    prompt = captured["messages"][0]["content"]
-    assert "not meant to be historically or factually accurate" in prompt
-    assert "historical video scene" not in prompt
-    assert "Verified claims" not in prompt
-    assert "Thermopolia served hot prepared food and wine." not in prompt
 
 
 # docs/decisions/0036: composition_mode is an early-resolved, closed-set
@@ -528,9 +457,8 @@ def test_run_scene_planning_stage_uses_chaotic_composition_rule_for_surreal_genr
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="surreal photo collage",
         tone="deadpan",
         completion_fn=_completion,
@@ -589,9 +517,8 @@ def test_run_scene_planning_stage_includes_fear_driven_motivation_rule_for_horro
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         completion_fn=_completion,
     )
@@ -610,9 +537,8 @@ def test_run_scene_planning_stage_includes_threat_presence_rule_for_horror_genre
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread-filled",
         completion_fn=_completion,
@@ -634,9 +560,8 @@ def test_run_scene_planning_stage_omits_threat_presence_rule_by_default():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=True,
         genre="historical",
         completion_fn=_completion,
     )
@@ -655,9 +580,8 @@ def test_run_scene_planning_stage_uses_staged_composition_rule_by_default():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=True,
         genre="historical",
         completion_fn=_completion,
     )
@@ -688,9 +612,8 @@ def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, t
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre=genre,
         tone=tone,
         completion_fn=_completion,
@@ -793,9 +716,8 @@ def test_threat_rule_asks_for_occlusion_rather_than_distance():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -825,9 +747,8 @@ def test_threat_rule_requires_concealment_to_change_when_noticed():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -849,9 +770,8 @@ def test_interaction_rule_binds_the_non_focal_character_not_just_any_entry():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -875,9 +795,8 @@ def test_blocking_rule_forbids_stating_which_way_a_character_faces():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -898,9 +817,8 @@ def test_planning_prompt_routes_each_compositional_part_to_its_own_field():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -929,9 +847,8 @@ def test_planning_rules_carry_no_unless_its_the_point_escape_hatches():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(),
+        _scene(),
         model="deepseek/deepseek-v4-flash",
-        requires_grounding=False,
         genre="horror",
         tone="dread",
         completion_fn=_completion,
@@ -1000,7 +917,7 @@ def test_a_live_beat_without_staging_is_refused_rather_than_silently_downgraded(
         )
 
     with pytest.raises(ScenePlanningError, match="no 'staging' entries"):
-        run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+        run_scene_planning_stage(_scene(), completion_fn=_completion)
 
 
 def test_a_live_staging_entry_without_size_in_frame_is_refused():
@@ -1016,7 +933,7 @@ def test_a_live_staging_entry_without_size_in_frame_is_refused():
         )
 
     with pytest.raises(ScenePlanningError, match="no 'size_in_frame'"):
-        run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+        run_scene_planning_stage(_scene(), completion_fn=_completion)
 
 
 def test_an_archived_staging_entry_without_size_in_frame_still_loads():
@@ -1041,7 +958,7 @@ def test_planning_prompt_tells_the_planner_to_list_an_embodied_threat():
         )
 
     run_scene_planning_stage(
-        _fact_check_result(), genre="horror", tone="dread", completion_fn=_completion
+        _scene(), genre="horror", tone="dread", completion_fn=_completion
     )
     prompt = captured["messages"][0]["content"]
     assert "GIVE IT ITS OWN `staging` ENTRY" in prompt
@@ -1119,7 +1036,7 @@ def test_planning_prompt_tells_the_planner_identity_fields_are_appearance_only()
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
         )
 
-    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
     prompt = captured["messages"][0]["content"]
     assert "never what they are doing" in prompt
     assert "an instruction the character can never escape" in prompt
@@ -1142,7 +1059,7 @@ def test_planning_prompt_asks_for_camera_in_model_actionable_terms():
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
         )
 
-    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
     prompt = captured["messages"][0]["content"]
 
     assert "SHOT SIZE" in prompt
@@ -1165,7 +1082,7 @@ def test_planning_prompt_asks_for_screen_direction_not_camera_side():
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
         )
 
-    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
     prompt = captured["messages"][0]["content"]
 
     assert "SCREEN DIRECTION" in prompt
@@ -1265,5 +1182,5 @@ def test_planning_prompt_carries_the_staging_rules(phrase):
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(_valid_payload())))]
         )
 
-    run_scene_planning_stage(_fact_check_result(), completion_fn=_completion)
+    run_scene_planning_stage(_scene(), completion_fn=_completion)
     assert phrase in captured["messages"][0]["content"]
