@@ -69,7 +69,7 @@ from pathlib import Path
 import litellm
 from selection import select
 
-from historical_video_ai.config import load_environment
+from horror_video_ai.config import load_environment
 
 EVALS_DIR = Path(__file__).parent
 

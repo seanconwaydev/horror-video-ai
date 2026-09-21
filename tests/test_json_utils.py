@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from historical_video_ai.json_utils import parse_json_response, strip_markdown_json_fence
+from horror_video_ai.json_utils import parse_json_response, strip_markdown_json_fence
 
 
 class _Err(Exception):

@@ -33,9 +33,9 @@ from typing import Any
 import litellm
 import yaml
 
-from historical_video_ai.config import load_environment
-from historical_video_ai.replicate_client import download_output, run_prediction
-from historical_video_ai.stages.moderation import run_moderation_policy_check
+from horror_video_ai.config import load_environment
+from horror_video_ai.replicate_client import download_output, run_prediction
+from horror_video_ai.stages.moderation import run_moderation_policy_check
 
 EVALS_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVALS_DIR))

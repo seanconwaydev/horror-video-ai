@@ -13,13 +13,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from historical_video_ai.cli.video_gen import (
+from horror_video_ai.cli.video_gen import (
     check_video_prompt_practices,
     load_previz_output,
     load_video_gen_targets,
     run_video_generation_only,
 )
-from historical_video_ai.replicate_client import ReplicateError
+from horror_video_ai.replicate_client import ReplicateError
 
 
 def _write_previz_run_log(run_dir, *, image_path=None, prompt="A prompt from previz."):
@@ -403,7 +403,7 @@ def test_a_failed_download_still_leaves_the_paid_prediction_in_the_log(tmp_path,
         raise ReplicateError("bad record mac")
 
     monkeypatch.setattr(
-        "historical_video_ai.cli.video_gen.mock_download", _exploding_download
+        "horror_video_ai.cli.video_gen.mock_download", _exploding_download
     )
 
     with pytest.raises(ReplicateError):

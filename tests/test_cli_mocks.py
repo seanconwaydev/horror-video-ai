@@ -15,7 +15,7 @@ import json
 import pytest
 from PIL import Image
 
-from historical_video_ai.cli.mocks import (
+from horror_video_ai.cli.mocks import (
     MOCK_PNG_B64,
     mock_download,
     mock_image,
@@ -24,7 +24,7 @@ from historical_video_ai.cli.mocks import (
     mock_prediction,
     mock_scene_planning_completion,
 )
-from historical_video_ai.stages.scene_planning import _parse_scene_plan
+from horror_video_ai.stages.scene_planning import _parse_scene_plan
 
 
 def _content(response):

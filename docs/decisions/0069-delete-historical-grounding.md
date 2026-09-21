@@ -22,6 +22,9 @@ research/fact-check halves of [0003](./0003-model-configuration-via-litellm.md)'
 config and [0007](./0007-research-fact-check-previz-models.md)'s model
 choices go with them.
 
+
+Completed by [0070](./0070-rename-to-horror-video-ai.md), which does the
+rename this ADR's final paragraph defers.
 ## Context
 
 [0031](./0031-goal-is-quality-video-not-historical-accuracy.md) settled

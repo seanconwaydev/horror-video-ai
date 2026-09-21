@@ -37,9 +37,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.previz import run_previz_review_stage
-from historical_video_ai.stages.scene_planning import Scene, load_scene_plan
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import run_previz_review_stage
+from horror_video_ai.stages.scene_planning import Scene, load_scene_plan
 
 EVALS_DIR = Path(__file__).parent
 

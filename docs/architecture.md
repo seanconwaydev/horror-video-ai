@@ -1,4 +1,4 @@
-# Historical AI Video Generator — Architecture
+# Horror Video AI — Architecture
 
 Last updated: 2026-08-20
 

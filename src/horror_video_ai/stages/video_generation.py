@@ -29,8 +29,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.replicate_client import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.replicate_client import (
     download_output,
     file_to_data_uri,
     run_prediction,

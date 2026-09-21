@@ -22,15 +22,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from historical_video_ai.cli.mocks import (
+from horror_video_ai.cli.mocks import (
     mock_download,
     mock_moderation_policy_check,
     mock_prediction,
 )
-from historical_video_ai.cli.runlog import read_log, write_log
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.moderation import run_moderation_policy_check
-from historical_video_ai.stages.video_generation import run_video_generation_stage
+from horror_video_ai.cli.runlog import read_log, write_log
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.moderation import run_moderation_policy_check
+from horror_video_ai.stages.video_generation import run_video_generation_stage
 
 
 @dataclasses.dataclass(frozen=True)

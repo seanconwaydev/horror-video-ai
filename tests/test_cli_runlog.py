@@ -2,7 +2,7 @@
 (cli/runlog.py).
 
 Split out of test_cli.py alongside the module itself. The monkeypatching
-here targets `historical_video_ai.cli.runlog.project_root`: patching the
+here targets `horror_video_ai.cli.runlog.project_root`: patching the
 old `cli.app` binding would leave these tests green while the code under
 test went on using the real filesystem.
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from historical_video_ai.cli.runlog import (
+from horror_video_ai.cli.runlog import (
     new_run_dir,
     project_root,
     read_log,
@@ -69,7 +69,7 @@ def test_project_root_raises_when_no_pyproject_toml_found(monkeypatch):
 
 
 def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):
-    monkeypatch.setattr("historical_video_ai.cli.runlog.project_root", lambda: tmp_path)
+    monkeypatch.setattr("horror_video_ai.cli.runlog.project_root", lambda: tmp_path)
 
     d = new_run_dir("a-flood-rescue-scene")
 
@@ -79,7 +79,7 @@ def test_run_dir_includes_slug_in_directory_name(tmp_path, monkeypatch):
 
 
 def test_run_dir_omits_slug_when_not_given(tmp_path, monkeypatch):
-    monkeypatch.setattr("historical_video_ai.cli.runlog.project_root", lambda: tmp_path)
+    monkeypatch.setattr("horror_video_ai.cli.runlog.project_root", lambda: tmp_path)
 
     d = new_run_dir()
 
@@ -91,7 +91,7 @@ def test_run_dir_never_reuses_an_existing_directory(tmp_path, monkeypatch):
     right after a failed attempt lands in the same second with the same
     slug, and `exist_ok=True` let the second run write straight over the
     first one's images and log."""
-    monkeypatch.setattr("historical_video_ai.cli.runlog.project_root", lambda: tmp_path)
+    monkeypatch.setattr("horror_video_ai.cli.runlog.project_root", lambda: tmp_path)
 
     first = new_run_dir("same-scene")
     (first / "previz.png").write_bytes(b"first run's image")

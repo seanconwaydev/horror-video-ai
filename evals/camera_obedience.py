@@ -40,8 +40,8 @@ from typing import Any
 import litellm
 from selection import select
 
-from historical_video_ai.config import load_environment
-from historical_video_ai.replicate_client import download_output, run_prediction
+from horror_video_ai.config import load_environment
+from horror_video_ai.replicate_client import download_output, run_prediction
 
 EVALS_DIR = Path(__file__).parent
 

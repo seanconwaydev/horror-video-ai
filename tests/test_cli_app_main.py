@@ -20,7 +20,7 @@ import sys
 
 import pytest
 
-from historical_video_ai.cli.app import main
+from horror_video_ai.cli.app import main
 
 
 @pytest.fixture
@@ -30,11 +30,11 @@ def run_in(tmp_path, monkeypatch):
     while the code under test used the real filesystem."""
     (tmp_path / "pyproject.toml").write_text("")
     monkeypatch.setattr(
-        "historical_video_ai.cli.runlog.project_root", lambda: tmp_path
+        "horror_video_ai.cli.runlog.project_root", lambda: tmp_path
     )
 
     def _run(argv: list[str]) -> dict:
-        monkeypatch.setattr(sys, "argv", ["historical-video-ai", *argv])
+        monkeypatch.setattr(sys, "argv", ["horror-video-ai", *argv])
         main()
         run_dirs = sorted((tmp_path / "outputs").glob("run_*"))
         assert run_dirs, "main() produced no run directory"

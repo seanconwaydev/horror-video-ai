@@ -29,8 +29,8 @@ from pathlib import Path
 
 import litellm
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.image_utils import build_image_content_block
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.image_utils import build_image_content_block
 
 
 class ModerationError(Exception):

@@ -9,7 +9,7 @@ log in runlog.py, and the --mock fakes in mocks.py.
 Collects a scene (time, place, description) and runs it through scene
 planning -> previz (docs/decisions/0023). Research and fact-check used to
 sit in front of that and were deleted by docs/decisions/0069. Run with
-`uv run historical-video-ai`. Every image comes from a beat of the
+`uv run horror-video-ai`. Every image comes from a beat of the
 reviewed scene plan; the single-image path was deleted once scene
 planning made it unreachable (docs/decisions/0051), though archived runs
 in that older shape are still readable by --video-gen-from.
@@ -43,40 +43,40 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
-from historical_video_ai.cli.beats import (
+from horror_video_ai.cli.beats import (
     beat_gallery_dir,
     generate_beats_with_choices,
     generate_scene_references,
 )
-from historical_video_ai.cli.mocks import (
+from horror_video_ai.cli.mocks import (
     mock_image,
     mock_image_edit,
     mock_scene_planning_completion,
 )
-from historical_video_ai.cli.review import (
+from horror_video_ai.cli.review import (
     confirm,
     prompt_if_missing,
     review_scene_plan,
 )
-from historical_video_ai.cli.runlog import (
+from horror_video_ai.cli.runlog import (
     new_run_dir,
     slugify,
     write_log,
 )
-from historical_video_ai.cli.video_gen import (
+from horror_video_ai.cli.video_gen import (
     run_video_generation_only,
 )
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.previz import (
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import (
     DEFAULT_STYLE,
     PHOTOREAL_STYLES,
     STYLE_PRESETS,
 )
-from historical_video_ai.stages.scene_planning import (
+from horror_video_ai.stages.scene_planning import (
     Scene,
     run_scene_planning_stage,
 )
-from historical_video_ai.stages.video_generation import (
+from horror_video_ai.stages.video_generation import (
     MAX_VIDEO_SECONDS,
     MIN_VIDEO_SECONDS,
 )

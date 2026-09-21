@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import litellm
 import pytest
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.previz import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.previz import (
     _STYLE_INSTRUCTIONS,
     DEFAULT_STYLE,
     STYLE_PRESETS,
@@ -17,7 +17,7 @@ from historical_video_ai.stages.previz import (
     run_previz_review_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.scene_planning import Beat, Character, Location, Scene
+from horror_video_ai.stages.scene_planning import Beat, Character, Location, Scene
 
 # A tiny valid 1x1 PNG, base64-encoded, so tests never touch a real API or
 # write anything that isn't a real (if trivial) image file.
@@ -319,8 +319,8 @@ def _beat(**overrides) -> Beat:
 # entire mechanism -- position got one in 0049 and is respected, while
 # hiding written as prose inside blocking lost in 4 of 4 beats.
 def test_beat_prompt_gives_occlusion_its_own_labelled_line():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -342,8 +342,8 @@ def test_beat_prompt_gives_occlusion_its_own_labelled_line():
 
 
 def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -359,8 +359,8 @@ def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
 # physicality already has its own DOING line since 0049 -- so emitting both
 # described the protagonist twice and everyone else once.
 def test_beat_prompt_does_not_restate_the_focal_character_action():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -383,7 +383,7 @@ def test_beat_prompt_does_not_restate_the_focal_character_action():
 def test_beat_prompt_keeps_the_action_when_no_character_block_carries_it():
     # A plan captured before 0049, or one whose staging names nobody in
     # `characters`, would otherwise reach the model with no verb at all.
-    from historical_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.previz import _build_beat_prompt
 
     beat = _beat(action="checks her phone", staging=[])
 
@@ -393,8 +393,8 @@ def test_beat_prompt_keeps_the_action_when_no_character_block_carries_it():
 
 
 def test_beat_prompt_carries_human_corrections_last():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(staging=[Staging(character_id="influencer", action="reaches", blocking="l")])
 
@@ -415,8 +415,8 @@ def test_beat_prompt_carries_human_corrections_last():
 # four blind runs, blocking without one never produced the right depth
 # ordering (0/10) and blocking with one never failed (14/14).
 def test_beat_prompt_gives_size_in_frame_its_own_labelled_line():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(
         staging=[
@@ -438,8 +438,8 @@ def test_beat_prompt_gives_size_in_frame_its_own_labelled_line():
 
 
 def test_beat_prompt_omits_the_size_line_when_a_plan_predates_the_field():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(
         staging=[Staging(character_id="influencer", action="reaches", blocking="left third")]
@@ -646,7 +646,7 @@ def test_run_previz_review_stage_parses_response_wrapped_in_markdown_fence(tmp_p
     # Regression test: this is the exact failure observed for real against
     # a live claude-sonnet-5 call reviewing a real Gemini-generated previz
     # image -- the same prompt returned raw JSON on one call and a
-    # ```json-fenced response on the next. See historical_video_ai.json_utils.
+    # ```json-fenced response on the next. See horror_video_ai.json_utils.
     image_path = _write_tiny_png(tmp_path)
     payload = {"accepted": True, "concern": None}
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from historical_video_ai.config import (
+from horror_video_ai.config import (
     REPO_ROOT,
     ConfigError,
     get_stage_model,

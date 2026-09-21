@@ -22,10 +22,10 @@ from typing import Any
 
 import litellm
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.image_utils import build_image_content_block
-from historical_video_ai.json_utils import parse_json_response
-from historical_video_ai.stages.scene_planning import Beat, Character, Location, Scene
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.image_utils import build_image_content_block
+from horror_video_ai.json_utils import parse_json_response
+from horror_video_ai.stages.scene_planning import Beat, Character, Location, Scene
 
 # Errors worth retrying automatically -- transient in nature (server
 # overload, a network blip, a rate limit that clears with time), unlike

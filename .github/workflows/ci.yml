@@ -131,7 +131,7 @@ jobs:
       # wiring between stages, which no unit test spans.
       - name: Pipeline runs offline
         run: |
-          uv run historical-video-ai --mock --yes \
+          uv run horror-video-ai --mock --yes \
             --genre horror --tone dread --candidates 2 --max-beats 2 \
             --time "present day" --place "an underground car park at night" \
             --description "a woman notices someone standing between the pillars"
@@ -146,4 +146,4 @@ jobs:
           set -e
           run_dir=$(ls -d outputs/run_* | head -1)
           echo "--- $run_dir"
-          uv run historical-video-ai --mock --yes --video-gen-from "$run_dir"
+          uv run horror-video-ai --mock --yes --video-gen-from "$run_dir"

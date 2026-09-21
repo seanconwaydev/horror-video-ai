@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 
 import litellm
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.json_utils import parse_json_response
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.json_utils import parse_json_response
 
 
 class ScenePlanningError(Exception):

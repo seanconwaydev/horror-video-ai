@@ -3,7 +3,7 @@ import base64
 import httpx
 import pytest
 
-from historical_video_ai.replicate_client import (
+from horror_video_ai.replicate_client import (
     API_BASE,
     ReplicateError,
     _default_download_fn,
@@ -166,7 +166,7 @@ def test_request_retries_a_throttle_and_waits_what_the_api_says(monkeypatch):
         ]
     )
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+        "horror_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
     )
     slept = []
 
@@ -186,7 +186,7 @@ def test_request_prefers_the_retry_after_header_over_the_body(monkeypatch):
         ]
     )
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+        "horror_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
     )
     slept = []
 
@@ -204,7 +204,7 @@ def test_request_does_not_retry_a_client_error(monkeypatch):
         calls["n"] += 1
         return _FakeResponse(404, text="no such model")
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _once)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.request", _once)
 
     with pytest.raises(ReplicateError, match="404"):
         _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
@@ -213,7 +213,7 @@ def test_request_does_not_retry_a_client_error(monkeypatch):
 
 def test_request_gives_up_after_the_retry_budget(monkeypatch):
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.request",
+        "horror_video_ai.replicate_client.httpx.request",
         lambda *a, **k: _FakeResponse(429, {"retry_after": 1}, text="throttled"),
     )
     with pytest.raises(ReplicateError, match="429"):
@@ -237,7 +237,7 @@ def test_request_retries_a_transport_failure_not_just_a_status_code(monkeypatch)
             raise httpx.ConnectError("bad record mac")
         return _FakeResponse(200, {"id": "p1"})
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _flaky)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.request", _flaky)
     slept = []
 
     result = _default_request_fn(
@@ -261,7 +261,7 @@ def test_a_post_is_not_retried_on_an_ambiguous_server_error(monkeypatch, status)
         calls["n"] += 1
         return _FakeResponse(status, {"detail": "boom"})
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _fails)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.request", _fails)
 
     with pytest.raises(ReplicateError, match=f"HTTP {status}"):
         _default_request_fn(
@@ -279,7 +279,7 @@ def test_a_post_is_not_retried_on_a_transport_failure(monkeypatch):
         calls["n"] += 1
         raise httpx.ConnectError("bad record mac")
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _always_fails)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.request", _always_fails)
 
     with pytest.raises(ReplicateError, match="bad record mac"):
         _default_request_fn(
@@ -300,7 +300,7 @@ def test_a_post_is_still_retried_on_a_throttle(monkeypatch):
         ]
     )
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
+        "horror_video_ai.replicate_client.httpx.request", lambda *a, **k: next(responses)
     )
 
     result = _default_request_fn(
@@ -314,7 +314,7 @@ def test_request_gives_up_on_a_persistent_transport_failure(monkeypatch):
     def _always_fails(*a, **k):
         raise httpx.ConnectError("bad record mac")
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.request", _always_fails)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.request", _always_fails)
 
     with pytest.raises(ReplicateError, match="bad record mac"):
         _default_request_fn("GET", "http://x", headers={}, json_body=None, sleep_fn=lambda _s: None)
@@ -334,7 +334,7 @@ def test_download_retries_a_transport_failure(monkeypatch):
             raise httpx.ConnectError("bad record mac")
         return _FakeResponse(200, content=b"video bytes")
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.get", _flaky)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.get", _flaky)
     slept = []
 
     assert _default_download_fn("http://cdn/x.mp4", sleep_fn=slept.append) == b"video bytes"
@@ -345,7 +345,7 @@ def test_download_retries_a_transport_failure(monkeypatch):
 def test_download_retries_a_transient_server_error(monkeypatch):
     responses = iter([_FakeResponse(503, {}), _FakeResponse(200, content=b"ok")])
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.get", lambda *a, **k: next(responses)
+        "horror_video_ai.replicate_client.httpx.get", lambda *a, **k: next(responses)
     )
 
     assert _default_download_fn("http://cdn/x.mp4", sleep_fn=lambda _s: None) == b"ok"
@@ -358,7 +358,7 @@ def test_download_does_not_retry_a_client_error(monkeypatch):
         calls["n"] += 1
         return _FakeResponse(404, {})
 
-    monkeypatch.setattr("historical_video_ai.replicate_client.httpx.get", _gone)
+    monkeypatch.setattr("horror_video_ai.replicate_client.httpx.get", _gone)
 
     with pytest.raises(ReplicateError, match="HTTP 404"):
         _default_download_fn("http://cdn/x.mp4", sleep_fn=lambda _s: None)
@@ -367,7 +367,7 @@ def test_download_does_not_retry_a_client_error(monkeypatch):
 
 def test_download_gives_up_after_the_retry_budget(monkeypatch):
     monkeypatch.setattr(
-        "historical_video_ai.replicate_client.httpx.get",
+        "horror_video_ai.replicate_client.httpx.get",
         lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("bad record mac")),
     )
 

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from historical_video_ai.stages.scene_planning import load_scene_plan
+from horror_video_ai.stages.scene_planning import load_scene_plan
 
 EVALS_DIR = Path(__file__).resolve().parents[1] / "evals"
 

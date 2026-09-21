@@ -36,9 +36,9 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.previz import PrevizError, run_previz_review_stage
-from historical_video_ai.stages.scene_planning import (
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import PrevizError, run_previz_review_stage
+from horror_video_ai.stages.scene_planning import (
     Beat,
     Character,
     Scene,

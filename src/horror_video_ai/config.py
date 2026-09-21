@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-# src/historical_video_ai/config.py -> src/historical_video_ai -> src -> repo root
+# src/horror_video_ai/config.py -> src/horror_video_ai -> src -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "models.yaml"
 

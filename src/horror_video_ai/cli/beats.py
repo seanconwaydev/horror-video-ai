@@ -22,13 +22,13 @@ import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from historical_video_ai.cli.review import (
+from horror_video_ai.cli.review import (
     BEAT_QUICK_EDIT_FIELDS,
     confirm,
     edit_item_fields,
 )
-from historical_video_ai.cli.runlog import next_archive_path, safe_path_component
-from historical_video_ai.stages.previz import (
+from horror_video_ai.cli.runlog import next_archive_path, safe_path_component
+from horror_video_ai.stages.previz import (
     DEFAULT_STYLE,
     PrevizResult,
     build_character_sheet_prompt,
@@ -36,7 +36,7 @@ from historical_video_ai.stages.previz import (
     run_beat_image_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
+from horror_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
 
 # See docs/decisions/0009-previz-image-review.md -- your call: bounded, not
 # tunable via a flag, to keep behavior predictable rather than open-ended.

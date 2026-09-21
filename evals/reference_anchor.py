@@ -55,8 +55,8 @@ from typing import Any
 
 from selection import select
 
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.previz import (
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import (
     _style_instruction,
     build_character_sheet_prompt,
     build_location_reference_prompt,
@@ -64,7 +64,7 @@ from historical_video_ai.stages.previz import (
     run_previz_review_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.scene_planning import (
+from horror_video_ai.stages.scene_planning import (
     Beat,
     Character,
     Location,

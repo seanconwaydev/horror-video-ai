@@ -32,8 +32,8 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageStat
 
-from historical_video_ai.config import load_environment
-from historical_video_ai.stages.video_generation import run_video_generation_stage
+from horror_video_ai.config import load_environment
+from horror_video_ai.stages.video_generation import run_video_generation_stage
 
 EVALS_DIR = Path(__file__).parent
 

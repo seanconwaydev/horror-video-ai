@@ -13,15 +13,15 @@ from types import SimpleNamespace
 import pytest
 from factories import TINY_PNG_B64, a_beat, a_character, a_location
 
-from historical_video_ai.cli.beats import (
+from horror_video_ai.cli.beats import (
     beat_gallery_dir,
     generate_beats_with_choices,
     generate_image_with_retries,
     generate_scene_references,
     link_beat_into_gallery,
 )
-from historical_video_ai.stages.previz import PrevizResult
-from historical_video_ai.stages.scene_planning import Character, ScenePlan
+from horror_video_ai.stages.previz import PrevizResult
+from horror_video_ai.stages.scene_planning import Character, ScenePlan
 
 
 def _fake_image_fn(**kwargs):

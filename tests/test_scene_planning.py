@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.scene_planning import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.scene_planning import (
     Beat,
     Character,
     Scene,
@@ -637,7 +637,7 @@ def test_run_scene_planning_stage_always_includes_base_composition_rule(genre, t
 # described -- a second statement of the same rule is the failure mode
 # this ADR exists to stop.
 def test_staging_parses_occlusion_and_defaults_it_for_older_plans():
-    from historical_video_ai.stages.scene_planning import load_scene_plan
+    from horror_video_ai.stages.scene_planning import load_scene_plan
 
     payload = _valid_payload()
     payload["beats"][0]["staging"] = [
@@ -662,7 +662,7 @@ def test_staging_parses_occlusion_and_defaults_it_for_older_plans():
 # saved before the split has to keep loading rather than becoming
 # unreadable.
 def test_staging_reads_a_pre_0059_frame_position_into_blocking():
-    from historical_video_ai.stages.scene_planning import load_scene_plan
+    from horror_video_ai.stages.scene_planning import load_scene_plan
 
     payload = _valid_payload()
     payload["beats"][0]["staging"] = [
@@ -684,7 +684,7 @@ def test_staging_reads_a_pre_0059_frame_position_into_blocking():
 
 
 def test_staging_parses_size_in_frame_and_defaults_it_for_older_plans():
-    from historical_video_ai.stages.scene_planning import load_scene_plan
+    from horror_video_ai.stages.scene_planning import load_scene_plan
 
     payload = _valid_payload()
     payload["beats"][0]["staging"] = [
@@ -860,7 +860,7 @@ def test_planning_rules_carry_no_unless_its_the_point_escape_hatches():
 
 
 def test_beat_renders_every_named_character_and_says_all_are_present():
-    from historical_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.previz import _build_beat_prompt
 
     woman = Character(
         id="w1", face_build="mid-forties, slender", hair="ash-blonde shag",
@@ -893,7 +893,7 @@ def test_an_archived_beat_without_staging_falls_back_to_the_first_character():
     """Reading a plan off disk stays lenient: a pre-ADR-0041 beat still
     produces a usable single-character beat, which is what --fixture,
     --video-gen-from and the eval harness replay (docs/decisions/0065)."""
-    from historical_video_ai.stages.scene_planning import load_scene_plan
+    from horror_video_ai.stages.scene_planning import load_scene_plan
 
     payload = _valid_payload()
     payload["beats"][0].pop("staging", None)
@@ -937,7 +937,7 @@ def test_a_live_staging_entry_without_size_in_frame_is_refused():
 
 
 def test_an_archived_staging_entry_without_size_in_frame_still_loads():
-    from historical_video_ai.stages.scene_planning import load_scene_plan
+    from horror_video_ai.stages.scene_planning import load_scene_plan
 
     payload = _valid_payload()
     del payload["beats"][0]["staging"][0]["size_in_frame"]
@@ -1096,7 +1096,7 @@ def test_each_characters_action_sits_in_that_characters_own_prompt_block():
     """A single shared ACTION paragraph gave the focal character the verb
     and left everyone else a static pose. Binding the verb to the person
     is the whole point of the schema change (docs/decisions/0049)."""
-    from historical_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.previz import _build_beat_prompt
 
     woman = Character(id="w1", face_build="early twenties", hair="blonde bun",
                       wardrobe_signature="green puffer", wardrobe_flexible="hood up",
@@ -1126,7 +1126,7 @@ def test_each_characters_action_sits_in_that_characters_own_prompt_block():
 def test_a_multi_character_beat_demands_the_characters_react_to_each_other():
     """The failure this addresses: "two independently-posed figures that
     happen to share a frame" in all four beats of a real run."""
-    from historical_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.previz import _build_beat_prompt
 
     chars = [
         Character(id=cid, face_build="x", hair="x", wardrobe_signature="x",
