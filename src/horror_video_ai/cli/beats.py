@@ -42,6 +42,63 @@ from horror_video_ai.stages.scene_planning import Beat, Character, Location, Sce
 # tunable via a flag, to keep behavior predictable rather than open-ended.
 MAX_PREVIZ_ATTEMPTS = 3
 
+#: Why a candidate was passed over, one keystroke each, stored as the slug
+#: before the dash. The judgement dataset (docs/decisions/0053) records
+#: which candidate won and which lost but almost never why: `feedback` is
+#: the richer signal and is optional, so it is absent on most rows. A bare
+#: keep/reject binary cannot teach a rubric to a judge or to a human
+#: reading the corpus back (docs/decisions/0076).
+#:
+#: Closed and short on purpose. Categories aggregate only if they repeat,
+#: and these are drawn from failures this project has actually recorded
+#: (docs/playbook/failure-taxonomy.md) rather than invented. "other" is
+#: load-bearing: without an escape hatch a forced choice pushes every
+#: unclassifiable rejection onto whichever label is nearest, which
+#: poisons the labels that are real.
+REJECTION_REASONS = {
+    "1": "anatomy -- bodies, hands or faces rendered wrong, merged or duplicated",
+    "2": "staging -- characters positioned, turned, or interacting wrong",
+    "3": "framing -- camera height, shot size or composition not what the beat asked for",
+    "4": "identity -- a character does not match their reference image",
+    "5": "mood -- not frightening; flat, generic, or wrongly calm",
+    "6": "missing -- something the plan asked for is absent from the image",
+    "7": "other",
+}
+
+#: How many times a mistyped reason is re-asked before the loop stops
+#: asking. See ask_rejection_reason for why this one is bounded.
+REASON_PROMPT_ATTEMPTS = 3
+
+
+def ask_rejection_reason() -> str:
+    """One keystroke naming the dominant defect in a passed-over image.
+
+    Asked on every non-accept choice including (f)eedback, where it sits
+    alongside the free text rather than instead of it -- the code is the
+    category and the text is the detail, and aggregating the first does
+    not require reading the second. See REJECTION_REASONS.
+    """
+    print("\n  Why? (the main problem, not every problem)")
+    for key, label in REJECTION_REASONS.items():
+        print(f"    {key}. {label}")
+    # Unlike every other prompt here, this one gives up rather than
+    # re-asking forever. It is a secondary question about a decision the
+    # human has already made, so refusing to move on until it is answered
+    # would let a label block the loop it exists to describe -- and a
+    # closed stdin (EOF) would spin it. Falling back to the escape
+    # category keeps the rejection recorded and honest: nobody said
+    # "other", so it must not be readable as if they had.
+    for _ in range(REASON_PROMPT_ATTEMPTS):
+        try:
+            choice = input(f"  Reason [1-{len(REJECTION_REASONS)}]: ").strip()
+        except EOFError:
+            break
+        if choice in REJECTION_REASONS:
+            return REJECTION_REASONS[choice].split(" -- ")[0]
+    print("  No reason given -- recording as unspecified.")
+    return "unspecified"
+
+
 def _beat_review_context(beat: Beat, characters: Sequence[Character]) -> str:
     """The plan text a candidate image is being judged against.
 
@@ -533,6 +590,33 @@ def generate_beats_with_choices(
                 )
             beat_was_edited = False
 
+            def _persist_human_action(
+                cycle: int,
+                attempt: int,
+                i: int = i,
+                beat: Beat = beat,
+                all_attempts: list[dict] = all_attempts,
+                human_actions: dict = human_actions,
+            ) -> None:
+                """Fold one attempt's human judgement into its already
+                persisted record and write the run log immediately.
+
+                The fold after `generate_image_with_retries` returns covers
+                a beat that finishes. Most runs do not finish -- they are
+                abandoned partway (docs/decisions/0056) -- and these
+                keystrokes are the one thing the loop exists to collect,
+                so they are written when they are typed rather than at a
+                boundary the run may never reach.
+                """
+                action = human_actions.get((cycle, attempt))
+                if not action:
+                    return
+                for n, entry in enumerate(all_attempts):
+                    if (entry["cycle"], entry["attempt"]) == (cycle, attempt):
+                        all_attempts[n] = {**entry, **action}
+                        _persist_in_progress(i, beat, all_attempts)
+                        return
+
             def _on_reviewed(
                 concern: str | None,
                 attempt: int,
@@ -571,8 +655,16 @@ def generate_beats_with_choices(
                     ).strip().lower()
                 human_actions[(cycle, attempt)] = {"human_action": choice}
                 if choice == "a":
+                    _persist_human_action(cycle, attempt)
                     return "accept"
+                # Every remaining choice passes this image over, so every
+                # one of them is a labelled rejection and gets a reason.
+                # Asked before the branch acts, because (e)dit and
+                # (f)eedback both block on further input the human may
+                # walk away from (docs/decisions/0076).
+                human_actions[(cycle, attempt)]["reason_code"] = ask_rejection_reason()
                 if choice == "e":
+                    _persist_human_action(cycle, attempt)
                     print(f"\nBeat {i}:")
                     beat = edit_item_fields(beat, fields=BEAT_QUICK_EDIT_FIELDS)
                     beat_was_edited = True
@@ -591,8 +683,10 @@ def generate_beats_with_choices(
                     # whole loop.
                     human_actions[(cycle, attempt)]["feedback"] = note
                     corrections.append(note)
+                    _persist_human_action(cycle, attempt)
                     beat_was_edited = True
                     return "stop"
+                _persist_human_action(cycle, attempt)
                 if choice == "g":
                     return "stop"
                 return "continue"
@@ -659,8 +753,17 @@ def generate_beats_with_choices(
                 i: int = i,
                 beat: Beat = beat,
                 all_attempts: list[dict] = all_attempts,
+                human_actions: dict = human_actions,
             ) -> None:
-                entry = {"cycle": cycle, **record}
+                # The human's judgement for this attempt is merged back in
+                # rather than dropped: this replaces the whole entry, and
+                # _persist_human_action may already have folded a
+                # reason_code into it (docs/decisions/0076).
+                entry = {
+                    "cycle": cycle,
+                    **record,
+                    **human_actions.get((cycle, record["attempt"]), {}),
+                }
                 # A provisional record for the same attempt is replaced,
                 # not duplicated -- it is fired before the accept/retry
                 # prompt precisely so quitting there keeps something.

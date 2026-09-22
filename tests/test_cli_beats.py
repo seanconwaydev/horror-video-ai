@@ -14,6 +14,7 @@ import pytest
 from factories import TINY_PNG_B64, a_beat, a_character, a_location
 
 from horror_video_ai.cli.beats import (
+    ask_rejection_reason,
     beat_gallery_dir,
     generate_beats_with_choices,
     generate_image_with_retries,
@@ -256,7 +257,9 @@ def test_generate_beats_with_choices_auto_accepts_under_yes(tmp_path):
 
 
 def test_generate_beats_with_choices_reroll_generates_again_then_accepts(tmp_path, monkeypatch):
-    responses = iter(["r", "a"])
+    # Every non-accept choice is followed by its reason keystroke
+    # (docs/decisions/0076) -- "3" is framing.
+    responses = iter(["r", "3", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     calls = {"n": 0}
@@ -282,7 +285,8 @@ def test_generate_beats_with_choices_edit_changes_the_beat_before_regenerating(t
     # "e" to edit -- a beat's edit is restricted to BEAT_QUICK_EDIT_FIELDS,
     # not every field -- then a new action, blank for
     # contact/facing/intensity/camera/lighting, then "a" to accept.
-    responses = iter(["e", "smiles warmly", "", "", "", "", "", "a"])
+    # "2" is the staging reason code, asked before the edit prompts.
+    responses = iter(["e", "2", "smiles warmly", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -304,7 +308,7 @@ def test_a_human_can_retry_past_the_unattended_attempt_cap(tmp_path, monkeypatch
         No image kept for this beat after 3 attempt(s).
     """
     # Four retries -- one more than MAX_PREVIZ_ATTEMPTS -- then accept.
-    responses = iter(["r", "r", "r", "r", "a"])
+    responses = iter(["r", "1", "r", "1", "r", "1", "r", "1", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -365,7 +369,7 @@ def test_generate_beats_with_choices_gives_up_early_when_human_declines_to_keep_
     # Only one rejected attempt should happen -- (g)ive up at the very
     # first on-rejection prompt must stop the retry loop immediately
     # rather than burning the remaining automatic attempts.
-    responses = iter(["g"])
+    responses = iter(["g", "7"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -384,7 +388,8 @@ def test_generate_beats_with_choices_lets_human_give_feedback_on_rejection_and_r
     # (f)eedback is a targeted correction to the render, not an edit to the
     # plan -- so it reaches the next attempt's prompt and leaves the
     # recorded beat exactly as it was written (docs/decisions/0057).
-    responses = iter(["f", "make her noticeably smaller", "a"])
+    # The reason code is asked before the free text, not instead of it.
+    responses = iter(["f", "3", "make her noticeably smaller", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -413,7 +418,7 @@ def test_generate_beats_with_choices_lets_human_edit_beat_on_rejection_and_retry
     # every BEAT_QUICK_EDIT_FIELDS prompt (keep as-is for this test),
     # should restart a fresh attempt cycle that can then be accepted
     # normally.
-    responses = iter(["e", "", "", "", "", "", "", "a"])
+    responses = iter(["e", "5", "", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -576,7 +581,7 @@ def test_a_restarted_cycle_says_so_instead_of_reprinting_the_beat_header(tmp_pat
     being generated rather than the same one starting over."""
     # An (e)dit restarts the cycle; a plain (r)etry now stays inside it.
     # The blanks keep every BEAT_QUICK_EDIT_FIELDS value as it was.
-    responses = iter(["e", "", "", "", "", "", "", "a"])
+    responses = iter(["e", "5", "", "", "", "", "", "", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -623,7 +628,7 @@ def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, m
     """A human can now retry an image the reviewer was happy with, so that
     image has to be archived like any other superseded attempt rather than
     silently overwritten by the next one."""
-    responses = iter(["r", "a"])
+    responses = iter(["r", "1", "a"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -639,7 +644,7 @@ def test_an_accepted_image_the_human_retried_is_kept_not_overwritten(tmp_path, m
 def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     """Enter used to mean "keep auto-retrying", so the cheapest keystroke
     was the one that spent money. Blank input is now simply re-prompted."""
-    responses = iter(["", "   ", "g"])
+    responses = iter(["", "   ", "g", "7"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)
@@ -652,6 +657,88 @@ def test_there_is_no_default_that_spends_money(tmp_path, monkeypatch):
     # one image was ever generated before the human gave up.
     assert results[0]["image_path"] is None
     assert len(results[0]["attempts"]) == 1
+
+
+def test_a_rejection_records_why_it_was_rejected(tmp_path, monkeypatch):
+    """A keep/reject binary can measure a judge's agreement but cannot
+    teach it a rubric, so every non-accept choice names its dominant
+    defect (docs/decisions/0076)."""
+    responses = iter(["r", "2", "a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+
+    results = generate_beats_with_choices(
+        scene_plan, character_refs={}, location_refs={}, **kwargs
+    )
+
+    attempts = results[0]["attempts"]
+    assert attempts[0]["reason_code"] == "staging"
+    # The accepted attempt was not passed over, so it has nothing to explain.
+    assert "reason_code" not in attempts[1]
+
+
+def test_a_judgement_survives_being_abandoned_at_the_next_prompt(tmp_path, monkeypatch):
+    """(e)dit and (f)eedback both block on further input after the
+    judgement has been made, and most runs are abandoned partway
+    (docs/decisions/0056) -- so the keystroke is written when it is typed
+    rather than when the beat finishes, which may never happen."""
+    # "e", its reason, then the human walks away at the first edit field.
+    responses = iter(["e", "2"])
+
+    def _input_then_abandon(prompt):
+        try:
+            return next(responses)
+        except StopIteration:
+            raise KeyboardInterrupt from None
+
+    monkeypatch.setattr("builtins.input", _input_then_abandon)
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+    snapshots = []
+
+    with pytest.raises(KeyboardInterrupt):
+        generate_beats_with_choices(
+            scene_plan,
+            character_refs={},
+            location_refs={},
+            on_beat_complete=lambda results: snapshots.append(
+                json.loads(json.dumps(results))
+            ),
+            **kwargs,
+        )
+
+    abandoned = snapshots[-1][-1]
+    assert abandoned["in_progress"]
+    assert abandoned["attempts"][0]["human_action"] == "e"
+    assert abandoned["attempts"][0]["reason_code"] == "staging"
+
+
+def test_an_unanswered_reason_is_recorded_as_unspecified(tmp_path, monkeypatch):
+    """The reason prompt stops asking rather than blocking the loop it
+    exists to describe -- and what it records then must not be readable
+    as a category the human chose."""
+    responses = iter(["g", "?", "??", "???"])
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
+    kwargs = _generate_beats_with_choices_kwargs(tmp_path)
+
+    results = generate_beats_with_choices(
+        scene_plan, character_refs={}, location_refs={}, **kwargs
+    )
+
+    assert results[0]["attempts"][0]["reason_code"] == "unspecified"
+
+
+def test_a_closed_stdin_does_not_spin_the_reason_prompt(monkeypatch):
+    """EOF on a re-asking prompt returns instantly and forever, so an
+    unbounded loop would spin on it rather than block."""
+    def _eof(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+
+    assert ask_rejection_reason() == "unspecified"
 
 
 def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
@@ -680,7 +767,7 @@ def test_candidates_are_all_generated_and_all_kept(tmp_path, monkeypatch):
 def test_rejecting_every_candidate_rejects_the_attempt_not_the_beat(tmp_path, monkeypatch):
     """"None of them" is a verdict on this attempt. The loop should then
     offer the usual choices rather than silently abandoning the beat."""
-    responses = iter(["n", "g"])
+    responses = iter(["n", "g", "4"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
     scene_plan = ScenePlan(characters=[], locations=[a_location()], beats=[a_beat()])
     kwargs = _generate_beats_with_choices_kwargs(tmp_path)

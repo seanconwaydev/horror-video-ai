@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -155,6 +156,11 @@ def _beat_rows(run_path: Path, log: dict) -> Iterator[dict]:
                     "human_action": attempt.get("human_action"),
                     "human_choice": attempt.get("human_choice"),
                     "feedback": attempt.get("feedback"),
+                    # The dominant defect, from the closed set in
+                    # cli/beats.py REJECTION_REASONS. None on rows
+                    # exported from runs recorded before
+                    # docs/decisions/0076, and on every accepted image.
+                    "reason_code": attempt.get("reason_code"),
                     # The judge's opinion, and ONLY on the image it
                     # actually scored. previz_review runs once per attempt,
                     # on the candidate the human kept -- copying its verdict
@@ -258,6 +264,7 @@ def _summarise(rows: list[dict]) -> str:
         )
     kept = sum(r["kept"] for r in rows)
     with_feedback = sum(r["feedback"] is not None for r in rows)
+    coded = Counter(r["reason_code"] for r in rows if r.get("reason_code"))
     given_up = len({(r["run"], r["beat_index"]) for r in rows if r["gave_up"]})
     runs = len({r["run"] for r in rows})
     # Where the judge ran on the image the human also judged. Agreement is
@@ -272,6 +279,13 @@ def _summarise(rows: list[dict]) -> str:
         f"  rejected:    {len(rows) - kept}",
         f"  beats given up on: {given_up}",
         f"  with written feedback: {with_feedback}",
+        f"  with a reason code:    {sum(coded.values())}",
+    ]
+    # Which defects actually dominate, rather than which ones the most
+    # recent run happened to hit -- the reason the codes are a closed set
+    # (docs/decisions/0076).
+    lines += [
+        f"    {reason}: {n}" for reason, n in coded.most_common()
     ]
     if both:
         lines.append(
