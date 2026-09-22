@@ -140,6 +140,18 @@ should propose a *removal* or a split, never an addition. Nothing in the
 retry path knows the difference between "you missed something" and "you
 got something wrong", and those want opposite edits.
 
+**Second instance, 2026-09-22 (gym run, beat 2).** Feedback naming an
+absent reaction — "she's not looking at the monster", then "she looks
+calm and casual" — produced an attempt 3 with her head turned fully
+away and both arms hanging straight down. The cause there was a beat
+whose reaction lived in a face the camera stood behind
+([0078](../decisions/0078-a-camera-behind-the-head-cannot-carry-a-face.md)),
+so the model's only lever was to rotate her further from the camera.
+That sharpens the diagnosis: the retry path does not know what the shot
+can physically show, so it passes on corrections the frame cannot act
+on. Two instances now, both where feedback made the image worse rather
+than merely failing to help.
+
 ## 5. Inserts: spend a frame rather than crowd one
 
 The owner's idea from the same run, offered tentatively and recorded here

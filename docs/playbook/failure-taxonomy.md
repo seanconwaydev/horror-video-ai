@@ -535,3 +535,22 @@ The first run whose plan visibly uses [0075](../decisions/0075-a-perception-mome
 **A drawn sound mark fixed an unreadable beat.** Beat 2 did not read as hearing something; feedback asking for a comic-style mark denoting the sound worked. The owner's own caveat is the interesting half — "though maybe only because it's a comic book style" — and whether the move generalises to realistic styles is [open-tasks 6](./open-tasks.md).
 
 **The owner proposed inserts, unprompted, in film terms.** A second tighter image revealing the machine and the footprints, instead of loading them onto the wide shot: "because we can't see 100% of the room anyway, the viewer would likely be more forgiving in terms of 'wait does this room layout even make sense'... i think i'm starting to look at this more as a film maker." Recorded as [open-tasks 5](./open-tasks.md).
+
+**2026-09-22** · Real run, school gymnasium after hours (4 beats, painterly style), images generated · *category: a reaction written into a face the camera is standing behind* · genre: horror, embodied threat
+
+The scene was chosen for physical affordance, per [open-tasks 1](./open-tasks.md), and the run used 0075's noticing pair for the second time. Two of four beats were accepted on the first attempt; beat 2 burned three attempts and was given up on, beat 4 one.
+
+**The pair's structure worked and its content did not.** The owner: the reverse from behind "worked", but "she never really looks at the entity at all, and usually looking casual as heck when she did".
+
+**The plan said what the camera could not show.** Beat 2's `staging` entry named "her eyes driven up and forward onto the figure's face", "the corner of her open mouth visible past her own shoulder", "head tipped back", with the beat's `action` adding "shock pulling her mouth open" — every one of them a fact about a face behind which the camera is standing. This is NOT the plan-stated-it-and-the-image-ignored-it class above: the image could not have honoured it.
+
+**The one visible body clause set the whole mood.** What the camera could see of the plan was "one hand still holding the keys against her hip", and the render is her standing hand-on-hip, arm loose, while the figure leans over the bleachers above her. In a shot with no face, a resting incidental is not a small inaccuracy — it is the frame's entire emotional content. Fixed by [0078](../decisions/0078-a-camera-behind-the-head-cannot-carry-a-face.md).
+
+**Feedback made it worse, for the second run running.** "she's not looking at the monster", then "the enemy is very creepy, but she looks calm and casual, and still isn't looking at him". Attempt 3 turned her head fully away — no face at all — and left both arms hanging straight down. Inside a from-behind camera the model's only lever is to rotate her further, so a correction aimed at the face can only push the body further out of reach. Second confirmed instance of [open-tasks 4](./open-tasks.md).
+
+**Camera obedience missed separately.** The beat asked for a close-up with "her head and near shoulder fill the left half of the image" and rendered a full-body wide. Untouched by 0078; that is what `evals/camera_obedience.py` measures.
+
+**The threat itself was not the problem.** "the enemy is very creepy" — with reference images off, in painterly style, on the first attempt.
+
+**First run with reason codes** ([0076](../decisions/0076-rejections-carry-a-reason-code.md)): beat 2's three rejections coded staging, mood, staging; beat 4's other. Every rejection in this entry was recoverable from the run log rather than from conversation, which is what the codes were for.
+

@@ -1173,6 +1173,10 @@ def test_a_staging_entry_missing_its_action_is_rejected():
         "State WHERE THE EYES ARE POINTED",
 
         "must show in the BODY",
+        # docs/decisions/0078: what a camera behind the head can carry.
+        "FACE IS NOT IN THE PICTURE",
+        "HELD SILHOUETTE",
+        "A transition is not a shape",
         "Never encode",
         "the field that makes depth render",
     ],

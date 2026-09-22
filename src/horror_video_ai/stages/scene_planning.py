@@ -637,6 +637,21 @@ from the look and the reverse, which is how film has always done it. \
 Budget for it: a noticing moment spends two of this scene's beats, so \
 plan one deliberately rather than compressing it into a single \
 unrenderable shot.
+- When a beat's `camera` orientation is "from behind", that character's \
+FACE IS NOT IN THE PICTURE, and it is the one case where the \
+facial-expression rule above cannot be satisfied. Carry the reaction in \
+a HELD SILHOUETTE instead, stated in that character's `staging` action: \
+shoulders hunched up toward the ears or wrenched round square, head \
+pulled back or dropped, weight back on one heel, hands open and tense \
+away from the sides. Two traps, both from one real run. A transition is \
+not a shape -- "her shoulders have snapped square", "her head comes \
+round" name a movement a still frame cannot show, so state the position \
+it ENDS in. And whatever relaxed incidental you mention will be the only \
+body fact the camera can see, so it sets the mood by itself: a beat \
+whose one visible body instruction was "one hand still holding the keys \
+against her hip" came back with her standing hand-on-hip while a monster \
+leaned over her. Never put the beat's emotional payload in eyes, mouth \
+or brow when the camera is behind the head that holds them.
 - If the scene describes or implies a character's emotional state \
 building or shifting over its course (fear or dread escalating, \
 excitement rising, calm curdling into panic), give every beat its own \
