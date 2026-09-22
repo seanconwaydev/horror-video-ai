@@ -110,7 +110,7 @@ jobs:
         run: |
           set -e
           for script in blocking_space camera_obedience conditioning_bakeoff \
-                        reference_anchor run_eval; do
+                        fidelity_probe reference_anchor run_eval; do
             echo "--- $script"
             uv run python "evals/$script.py" --dry-run
           done

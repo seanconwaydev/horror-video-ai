@@ -184,4 +184,29 @@ ambiguous item.
 
 ## Results
 
-Not yet run.
+**Model column: answered 2026-09-22, sealed.** All 71 claims answered by
+`anthropic/claude-sonnet-5` -- the `previz_review` pin, chosen because
+it is vision-capable and is not the model that drew the images. One
+call per image, claims only: the model never saw the beat text, the
+style, or anything about why the image was generated.
+
+The answers are in the gitignored `evals/results/probe2_model_answers.json`.
+**Do not open it before the owner column is filled in** -- one column
+visible to the other reader is the whole measurement gone.
+
+`evals/fidelity_probe.py` is the driver. It parses the claims out of
+this file rather than restating them, so the two columns cannot drift,
+and its `--dry-run` runs in CI so a change to this sheet's shape cannot
+break it silently. The instruction sent with each image is in that
+file's `INSTRUCTIONS`; the substance of it is: answer `y`/`n`/`?` per
+claim, `?` is a real answer because the output ships phone-sized, answer
+each claim on its own, and do not give the image the benefit of the
+doubt.
+
+**Owner column: not yet answered.** That is the next step, and nothing
+can be scored until it exists.
+
+One incident worth recording, since it bears on the shipped design: the
+first attempt died on an SSL error partway through, and the retry
+succeeded with no other change. Seven calls carrying a 1-2MB image each
+is a payload size the rest of this project never sends.
