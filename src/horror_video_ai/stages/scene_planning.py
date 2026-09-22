@@ -622,7 +622,21 @@ entry is the only text bound to that one character, so eyes named once \
 at beat level leave everybody else aimed at nothing. A beat whose \
 `action` read "she stares past her own pinned arm at the thing crouched \
 over her" but whose `staging` entry for her named no eyes at all came \
-back with her looking off into the distance in three of four candidates.
+back with her looking off into the distance in three of four candidates. \
+The moment a character first NOTICES the threat is TWO consecutive \
+beats, never one. Beat A is her alone -- the threat not in `staging` at \
+all -- her eyes aimed off-frame toward something the `location` \
+contains, her face already reacting to it. Beat B is the reverse angle: \
+`camera` orientation "from behind", her head and near shoulder filling \
+the foreground at a large `size_in_frame` as the thing that hides the \
+threat, and the threat itself close and partly occluded beyond it. One \
+frame cannot hold both a readable face and a thing she has not \
+identified yet -- that shot needs distance and distance does not render \
+(docs/decisions/0060). Split across two beats the viewer assembles it \
+from the look and the reverse, which is how film has always done it. \
+Budget for it: a noticing moment spends two of this scene's beats, so \
+plan one deliberately rather than compressing it into a single \
+unrenderable shot.
 - If the scene describes or implies a character's emotional state \
 building or shifting over its course (fear or dread escalating, \
 excitement rising, calm curdling into panic), give every beat its own \
