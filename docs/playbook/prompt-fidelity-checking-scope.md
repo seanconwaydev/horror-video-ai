@@ -216,7 +216,10 @@ Stated now so the result cannot be rationalised afterwards -- the same
 discipline `evals/judge_agreement.py` already applies.
 
 Repair the claim-writing defects above, then re-probe on roughly 60 items
-across more beats and both styles.
+across more beats and both styles. The repaired sheet is
+[prompt-fidelity-probe-2.md](./prompt-fidelity-probe-2.md): 71 claims
+over seven beats of two runs, one horror-comic and one painterly,
+written from beat text with the images unopened.
 
 - **Recall >= 90% and precision >= 80%** -> build it, including the
   in-run report.
