@@ -517,3 +517,21 @@ The first run with `contact`, `intensity` and the reflection ban in force. Readi
 **And the escalation still under-delivers overall.** "the escalation isn't escalating 'enough' and should be really ramped up more in the later photos, once the actual encounter has happened." `contact` did land, though, and it landed on the beat the owner rated best: "the two characters are actually entwined and seemingly wrestling... this aspect is quite good."
 
 **Unfixable by any rule:** a lanyard worn backwards in beat 1 and legs that do not resolve in beat 4. Worth recording for the owner's reasoning on the first, which generalises: "normally this is a potentially true thing a human can do, but in AI generation it just screams 'mistake'." Plausibility is not the bar — whether it *reads* as an error is.
+
+**2026-09-22** · Real run, hospital sub-basement laundry scene (5 beats, comic style), images generated · *category: detail dropout under budget pressure, and facing rules that the plan stated and the image ignored* · genre: horror, embodied threat
+
+The first run whose plan visibly uses [0075](../decisions/0075-a-perception-moment-is-two-beats.md)'s pair — beat 2 is the look (eyes cut off-frame, threat absent from `staging`), beat 3 the reverse from behind.
+
+**Most of the frame was right.** "mostly good images, body posture is interesting, she's doing exactly as described, room looks detailed and believable." Worth recording as the baseline the rest of this entry sits against.
+
+**Two named details silently dropped, and feedback naming them made it worse.** Beat 1 lost the dark drum window and the trail of wet footprints. "it seems like the image model is struggling with the amount of complexity, retries + feedback about exactly this just seemed to give worse results." The beat was over `_COMPLEXITY_BUDGET_RULE`'s five-thing budget as planned, before any feedback — see [open-tasks 4](./open-tasks.md), which argues the retry loop pushes the wrong direction on a dropout failure because it appends rather than removes.
+
+**Skin colour changed between retry candidates** of the same beat. Identity drift across attempts, not across beats.
+
+**`facing` was written and the image ignored it.** Beat 3 stated the pair's orientation explicitly in the field 0072 added for it — "she is turned three-quarters away from him with her head only part-way over her shoulder, he is squared to her back" — and rendered as "real regression in her ability to look at the enemy and not the camera, same with him." Beat 5's `contact` was equally explicit and came back "awkward", with "random glances, they almost look like they're dancing" across all three candidates. So 0072's fields are being populated correctly by the planner and lost at render time, which is a different failure from the one 0072 diagnosed.
+
+**A character fused with a prop.** Beat 4: "she melded with the cart, scene seems to be confused about what to do with her." New shape — not a pose failure, a body-boundary failure against furniture it was staged to be thrown onto.
+
+**A drawn sound mark fixed an unreadable beat.** Beat 2 did not read as hearing something; feedback asking for a comic-style mark denoting the sound worked. The owner's own caveat is the interesting half — "though maybe only because it's a comic book style" — and whether the move generalises to realistic styles is [open-tasks 6](./open-tasks.md).
+
+**The owner proposed inserts, unprompted, in film terms.** A second tighter image revealing the machine and the footprints, instead of loading them onto the wide shot: "because we can't see 100% of the room anyway, the viewer would likely be more forgiving in terms of 'wait does this room layout even make sense'... i think i'm starting to look at this more as a film maker." Recorded as [open-tasks 5](./open-tasks.md).

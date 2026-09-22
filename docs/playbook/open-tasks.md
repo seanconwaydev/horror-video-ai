@@ -110,3 +110,107 @@ contrast." References have been off by default since
 [0050](../decisions/0050-no-reference-images-by-default.md) -- a default
 run is plain text-to-image and is edited from nothing, so unless the run
 passed `--references` there is no sheet to inherit from.
+
+## 4. Retry feedback that adds detail to an over-budget beat
+
+From the 2026-09-22 laundry run, beat 1. The image dropped two named
+details -- a dark drum window among five tumbling ones, and a trail of wet
+footprints -- while rendering everything else well. The owner retried with
+feedback naming exactly those two omissions, and **the retries came back
+worse, not better**.
+
+That result is the interesting part, and it generalises past this beat.
+When a frame fails by dropout, the cause is that the beat was over the
+complexity ceiling `_COMPLEXITY_BUDGET_RULE` exists to hold it under.
+Feedback that names the missing thing appends another requirement to a
+prompt that already had too many, so the retry is strictly further over
+budget than the attempt that failed. The loop is structurally pushing the
+wrong direction.
+
+Worth noting the beat was over budget as planned, before any feedback: her
+lift, the footprint trail, the one dark drum among five lit ones, a
+straight-down shadow, and a wide/high/from-behind camera is five to six
+things in a rule that permits about five and says to drop the least
+important. So the first question is not "what new rule is missing" but
+**why the planner exceeded a budget it was told**, which is a measurement,
+not an argument.
+
+The candidate fix, if the diagnosis holds: feedback on a dropout failure
+should propose a *removal* or a split, never an addition. Nothing in the
+retry path knows the difference between "you missed something" and "you
+got something wrong", and those want opposite edits.
+
+## 5. Inserts: spend a frame rather than crowd one
+
+The owner's idea from the same run, offered tentatively and recorded here
+rather than implemented. Beat 1's missing machine and footprints could be
+a **second image** -- a tighter shot that shows only those -- instead of
+extra load on the wide shot that failed to hold them.
+
+This is [0075](../decisions/0075-a-perception-moment-is-two-beats.md)
+generalised. That ADR already established the precedent that a moment can
+cost two beats, for the specific case of noticing a threat: the look, then
+the reverse. The proposal extends the same move to any detail the frame
+cannot hold, which in film is an **insert** (or cutaway / detail shot) --
+a close frame on an object, cut in between wider ones.
+
+The owner also noticed the second-order benefit unprompted: because the
+viewer never sees the whole room at once, fragmenting it across frames
+means the room's geometry is never auditable, so an incoherent layout
+stops being a defect the viewer can catch. That is genuinely how shot
+coverage works on a real set, and it is a reason to prefer inserts beyond
+the complexity budget.
+
+The underlying principle is the one worth testing, because it is the most
+generalisable lever this project has found: **the model's ceiling is per
+frame, so buy detail with more frames rather than more text per frame.**
+
+The cost is 0075's cost and the ADR does not hide it: at four or five
+beats a scene, every insert is a story moment not spent. "Not all the
+time" was the owner's own framing. An insert also has no character in it,
+which no rule currently contemplates -- `subject` and the staging schema
+both assume one.
+
+## 6. Non-diegetic marks as a style-level gap-filler
+
+Also from the laundry run, beat 2. The image did not read as "she hears
+something", and the owner's feedback -- add a comic-style mark denoting
+the sound -- worked. Their read, which is the right one: it may have
+worked *because* the style was comic, where drawn sound marks are part of
+the visual vocabulary already.
+
+The open question is whether the same move can be pushed into more
+realistic styles as a deliberate aesthetic choice, on the grounds that it
+covers a real image-model limitation -- a still frame cannot carry sound,
+and the model will not invent a way to show it.
+
+Live-action film solves this differently and that alternative should be
+weighed first: it shows the *cause* in frame (the dryer door swinging on
+its hinge) rather than marking the effect. A painterly style has analogues
+that are not literal marks -- a motion streak, disturbed dust, a swinging
+object caught mid-arc. The risk of a floating mark in a painterly frame is
+that it reads as a rendering artifact rather than as a convention.
+
+## 7. Decide on automated prompt-fidelity checking
+
+Scoped in
+[prompt-fidelity-checking-scope.md](./prompt-fidelity-checking-scope.md),
+with a 26-item probe attached: 92% recall on the owner's own failures,
+61% precision, and all three causes of the false alarms traced to how the
+claims were written rather than to the model.
+
+Not decided. The next step is not code -- it is repairing the claim
+writing (split compounds, delete tolerance adverbs) and re-probing on
+roughly 60 items across more beats and both styles, against the decision
+criteria that doc fixes in advance. Build order is listed there if it
+passes.
+
+Two things from the probe are worth acting on regardless of whether the
+checker is ever built, because both are about how the owner reviews:
+
+- The verdict set is **yes / no / can't tell**, and can't-tell counts as
+  a failure. A frame a viewer cannot read in one glance has failed
+  whatever its ground truth is.
+- Claims about **touching, weight or body boundaries** are owner-only. A
+  vision model scores position and misses contact -- it passed a hand
+  resting in a void as "splayed flat on the door".
