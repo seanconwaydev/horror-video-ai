@@ -10,6 +10,9 @@ per-severity behavior below. Everything else in 0017 (auto-answering
 confirm prompts, the free-text-field and premise-conflict stop behavior)
 is unchanged.
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): there are no fact-check flags for
+--yes to refuse.
 ## Context
 
 A real run under `--yes` hit two fact-check flags on the scene's own

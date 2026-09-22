@@ -4,6 +4,9 @@ Date: 2026-08-26
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md) along with the fact-check stage this
+numbering scheme belonged to.
 ## Context
 
 `fact_check`'s flag-to-claim correlation relied on the model copying a

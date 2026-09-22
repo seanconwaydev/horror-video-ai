@@ -6,38 +6,43 @@
 # Per docs/decisions/0003-model-configuration-via-litellm.md: these are
 # pinned on purpose. Change a model only by editing this file by hand --
 # never automatically, never via a fallback/router.
+#
+# Only stages that have code get a pin (docs/decisions/0063). A stage
+# nobody has written yet gets its pin when its module is written, not
+# before -- an unvalidatable pin goes stale silently, and this project has
+# already had a pinned model retired underneath it (docs/decisions/0018).
 
-# v1 stages (see docs/decisions/0006 and 0007) -- real decisions, not placeholders.
+# Stages with code (docs/decisions/0063). research and fact_check were
+# deleted with their stages by docs/decisions/0069.
 # previz is the exception -- see docs/decisions/0011-previz-image-model-for-
 # video-aspect-ratio-fit.md for why it moved off the original 0007 placeholder.
 
-research:
-  model: "perplexity/sonar-deep-research"
-
-# gemini-2.5-flash was retired by Google (real 404: "no longer available
-# to new users") -- moved to gemini-3.6-flash, Google's own suggested
-# replacement, verified working. See docs/decisions/0018.
-fact_check:
-  model: "gemini/gemini-3.6-flash"
-
-# scene_planning: inserted between fact-check and previz, not yet wired
-# into image generation -- see docs/decisions/0023-scene-planning-stage.md.
-# Turns a verified fact sheet into a full plan (characters, locations,
-# beats) before any image generation happens. DeepSeek picked to unblock
+# scene_planning: the pipeline's first stage now -- see
+# docs/decisions/0023-scene-planning-stage.md. Turns a scene (time, place,
+# description) into a full plan (characters, locations, beats) before any
+# image generation happens. DeepSeek picked to unblock
 # building the stage, not a rigorously compared decision, same status as
 # every other stage's initial model choice in this project.
 
 scene_planning:
   model: "deepseek/deepseek-v4-flash"
 
+# Changing this pin to a different model family or major version triggers
+# a re-verification of every hard ban in the scene-planning prompt before
+# the new pin ships -- `grep -rn "MODEL-BAN(" src/` lists them and says
+# how to re-test each. See docs/decisions/0073. A ban forbids something
+# because THIS model rendered it badly; it does not survive the model on
+# its own merits, and it suppresses the only evidence that would retire it.
+
 previz:
   model: "gemini/gemini-2.5-flash-image"
 
-# previz_review: adversarial check on previz's *output image*, not a
-# pipeline.md-numbered stage of its own -- see docs/decisions/0009-previz-
-# image-review.md. Vision-capable, deliberately a different provider than
-# previz's own OpenAI image model, same "not the same model checking its
-# own work" reasoning as fact_check vs. research (0007). Picked the same
+# previz_review: NOT in the pipeline -- docs/decisions/0055 deleted it
+# after measuring 56% agreement with the owner against 79% for accepting
+# everything. Kept pinned because evals/ still calls it, asking whether
+# any grader beats that bar. Vision-capable, and deliberately a different
+# provider than previz's own image model so it is not a model checking
+# its own work. Picked the same
 # way previz's own model was in 0007 -- to unblock building this, not a
 # rigorously compared decision.
 
@@ -73,20 +78,3 @@ video_generation:
 
 moderation_check:
   model: "openai/omni-moderation-latest"
-
-# Deferred stages (docs/decisions/0006): skipped for v1, not deleted -- these
-# stay as placeholders so the full pipeline vision in docs/pipeline.md still
-# has a config slot waiting for it. Untouched, still "anthropic/claude-sonnet-5"
-# from initial scaffolding -- revisit when these stages are actually built.
-
-narrative:
-  model: "anthropic/claude-sonnet-5"
-
-narrative_review:
-  model: "anthropic/claude-sonnet-5"
-
-shot_list:
-  model: "anthropic/claude-sonnet-5"
-
-video_prompts:
-  model: "anthropic/claude-sonnet-5"

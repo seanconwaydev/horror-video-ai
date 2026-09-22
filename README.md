@@ -1,23 +1,24 @@
-# Historical Video AI
+# Horror Video AI
 
-An AI pipeline for generating AI videos worth watching.
+An AI pipeline for generating short horror videos worth watching.
 
 ## Overview
 
-The goal is videos good enough to draw real viewers — not historical education, and not historical accuracy for its own sake. See [decisions/0031](docs/decisions/0031-goal-is-quality-video-not-historical-accuracy.md) for the full reasoning.
+The goal is videos good enough to draw real viewers — not historical education, and not accuracy for its own sake. See [decisions/0031](docs/decisions/0031-goal-is-quality-video-not-historical-accuracy.md) for the full reasoning.
 
-Historical settings are what the pipeline has been built and tested against so far — research, fact-check, and structured scene planning stay genuinely useful for the parts of a scene meant to be real — but which genres are actually worth specializing in is meant to be discovered empirically across many kinds of scenes, not assumed from this project's name.
+This started as a historical-video pipeline, and grounded every scene in researched, fact-checked real-world claims. [decisions/0069](docs/decisions/0069-delete-historical-grounding.md) deleted all of it — a horror short set in a car park was paying for sourced claims it could not use — and [decisions/0070](docs/decisions/0070-rename-to-horror-video-ai.md) renamed the project to match what it actually makes. Nothing is verified against the real world now, and impossible things are welcome.
+
+Horror is the committed genre ([decisions/0037](docs/decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md)), in a motion-comic style, as vertical Shorts ([decisions/0002](docs/decisions/0002-shorts-first-format.md)).
 
 The pipeline combines:
-- research grounded in real sources, for the parts of a scene meant to be real
-- structured scene planning (characters, locations, beats)
-- automated image/video generation with human review gates before every step that costs real money
+- structured scene planning: a scene becomes characters, locations, and beats
+- automated image/video generation, one image per beat
+- human review gates before every step that costs real money
 
 ## Goals
 
 - Build a maintainable AI media pipeline capable of producing real audience-facing content
 - Stay broadly capable across video genres rather than optimizing early for one
-- Keep the parts of a scene meant to be real genuinely researched and grounded
 
 ## Status
 

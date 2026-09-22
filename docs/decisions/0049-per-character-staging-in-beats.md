@@ -14,6 +14,10 @@ further, on the same one-fact-per-field evidence: `occlusion` moved out of
 [0059](./0059-blocking-and-size-replace-frame-position.md). The rest of
 this decision stands.
 
+Narrowed by [0065](./0065-strict-for-a-model-lenient-for-a-file.md): the
+backward-compatibility fallback this relies on now applies only when reading
+a stored plan, never to a live model response.
+
 ## Context
 
 A four-beat horror run (`--references none`, four candidates per beat)

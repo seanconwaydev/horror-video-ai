@@ -1,10 +1,13 @@
 """Is previz_review a reliable grader at all?
 
-It ranked four arms of the reference-anchor experiment in exact reverse of
-blind human judgment, while holding the full planned beat including the
-camera and lighting text it was scoring against. That rules out an
-incomplete prompt, and leaves three candidate causes: the review prompt's
-framing, the model, or the verdict simply being non-deterministic.
+It ranked four arms of the reference-anchor experiment against blind human
+judgment and disagreed sharply, while holding the full planned beat
+including the camera and lighting text it was scoring against. (The
+stronger "exact reverse" reading this was first written under measured a
+different task -- ranking by quality -- and docs/decisions/0055 retracts
+it.) Disagreement that size still rules out an incomplete prompt, and
+leaves three candidate causes: the review prompt's framing, the model, or
+the verdict simply being non-deterministic.
 
 Non-determinism is the cheapest to rule in or out and the most damaging if
 true, so it is what this measures. The same image and the same beat are
@@ -15,6 +18,12 @@ prompt is written.
 
 Reads the images a previous multi-arm run already produced, so it spends
 nothing on generation.
+
+HISTORICAL. `previz_review` was deleted from the pipeline by docs/decisions/0055
+after measuring 56% agreement with the owner against 79% for accepting
+everything; `run_previz_review_stage` survives only for evals like this
+one. Its fixture, `anchor_scene.json`, is a deliberately frozen pre-0049
+plan (ADR 0064) and does not match today's prompt shape.
 
 Usage:
     uv run python evals/reviewer_reliability.py --dry-run evals/results/anchor-<ts>
@@ -28,11 +37,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.fact_check import FactCheckResult
-from historical_video_ai.stages.previz import run_previz_review_stage
-from historical_video_ai.stages.research import FactSheet
-from historical_video_ai.stages.scene_planning import load_scene_plan
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import run_previz_review_stage
+from horror_video_ai.stages.scene_planning import Scene, load_scene_plan
 
 EVALS_DIR = Path(__file__).parent
 
@@ -58,10 +65,8 @@ def main() -> None:
 
     load_environment()
     review_model = get_stage_model("previz_review")
-    fact_check = FactCheckResult(
-        fact_sheet=FactSheet(
-            time=scene["time"], place=scene["place"], description=scene["description"], claims=[]
-        )
+    scene_input = Scene(
+        time=scene["time"], place=scene["place"], description=scene["description"]
     )
 
     rows = []
@@ -72,10 +77,9 @@ def main() -> None:
         for _ in range(args.repeats):
             review = run_previz_review_stage(
                 image,
-                fact_check,
+                scene_input,
                 characters=[character],
                 beat=beats[index - 1],
-                requires_grounding=False,
                 model=review_model,
             )
             verdicts.append(bool(review.accepted))

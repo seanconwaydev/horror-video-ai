@@ -36,13 +36,12 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
-from historical_video_ai.config import get_stage_model, load_environment
-from historical_video_ai.stages.fact_check import FactCheckResult
-from historical_video_ai.stages.previz import PrevizError, run_previz_review_stage
-from historical_video_ai.stages.research import FactSheet
-from historical_video_ai.stages.scene_planning import (
+from horror_video_ai.config import get_stage_model, load_environment
+from horror_video_ai.stages.previz import PrevizError, run_previz_review_stage
+from horror_video_ai.stages.scene_planning import (
     Beat,
     Character,
+    Scene,
     ScenePlanningError,
     load_scene_plan,
 )
@@ -137,10 +136,9 @@ def main() -> None:
         try:
             review = run_previz_review_stage(
                 Path(case["path"]),
-                FactCheckResult(fact_sheet=FactSheet(**scene, claims=[])),
+                Scene(**scene),
                 characters=case["characters"],
                 beat=case["beat_obj"],
-                requires_grounding=case["requires_grounding"],
                 model=model,
             )
             accepted, concern = review.accepted, review.concern

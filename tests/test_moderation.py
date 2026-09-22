@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.moderation import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.moderation import (
     ModerationError,
     run_moderation_policy_check,
 )

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.video_generation import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.video_generation import (
     MAX_VIDEO_SECONDS,
     MIN_VIDEO_SECONDS,
     VideoGenerationError,

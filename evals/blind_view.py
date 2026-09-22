@@ -5,6 +5,12 @@ run, not per beat. That matters: labels have to stay stable across beats
 so identity consistency -- is this the same person in all three? -- is
 still judgeable, while which arm is which stays hidden.
 
+Reads `anchor_scene.json` for the planned text it shows beside each
+image. That fixture is deliberately frozen at a pre-0049 shape (ADR 0064),
+so a blind view built over a *current* run's results would show it plan
+text that run never used -- point this at the anchor-* results it was
+written for.
+
 Usage:
     uv run python evals/blind_view.py evals/results/anchor-<timestamp>
     uv run python evals/blind_view.py --reveal evals/results/anchor-<timestamp>

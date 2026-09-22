@@ -11,6 +11,9 @@ flagging a premise as historically impossible in the first place, and
 `run_previz_stage`'s own hard-refuse check as the last-resort safety net)
 is unchanged.
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): with no fact-check there is no premise
+conflict to acknowledge, and nothing left that would object to fiction.
 ## Context
 
 The project's actual goal has shifted: historical accuracy is no longer

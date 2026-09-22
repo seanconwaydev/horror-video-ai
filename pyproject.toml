@@ -1,10 +1,10 @@
 [project]
-name = "historical-video-ai"
+name = "horror-video-ai"
 version = "0.1.0"
-description = "AI pipeline for generating historical educational YouTube videos, stage by stage with human review gates."
+description = "AI pipeline for generating short horror videos, stage by stage with human review gates."
 requires-python = ">=3.11"
 dependencies = [
-    "litellm>=1.98.0",
+    "litellm>=1.101.0",
     "pyyaml",
     "python-dotenv",
     "pillow",
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [project.scripts]
-historical-video-ai = "historical_video_ai.cli:main"
+horror-video-ai = "horror_video_ai.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.19,<0.12.0"]
@@ -54,12 +54,12 @@ testpaths = ["tests"]
 #
 # What is left uncovered is almost entirely main(), which CI's smoke job
 # does run end to end -- offline, every push -- but under `uv run
-# historical-video-ai`, not under pytest, so none of it is measured here.
+# horror-video-ai`, not under pytest, so none of it is measured here.
 [tool.coverage.run]
-source = ["src/historical_video_ai"]
+source = ["src/horror_video_ai"]
 
 [tool.coverage.report]
-fail_under = 86
+fail_under = 94
 show_missing = true
 
 # ruff's ANN rules enforce that annotations *exist*; nothing checked they

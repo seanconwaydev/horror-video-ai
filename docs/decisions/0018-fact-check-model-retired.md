@@ -4,6 +4,10 @@ Date: 2026-08-26
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): the fact_check stage and its model pin
+are deleted. The lesson stands and is recorded in 0063 -- a pinned model
+can be retired underneath you.
 ## Context
 
 The first real run of `fact_check` against its actually-pinned model

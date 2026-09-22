@@ -9,8 +9,8 @@ def test_references_default_to_none(monkeypatch):
     in money and in pinned composition -- is no longer the default."""
     import sys
 
-    from historical_video_ai.cli.app import _build_arg_parser
+    from horror_video_ai.cli.app import _build_arg_parser
 
-    monkeypatch.setattr(sys, "argv", ["historical-video-ai"])
+    monkeypatch.setattr(sys, "argv", ["horror-video-ai"])
     args = _build_arg_parser().parse_args([])
     assert args.references == "none"

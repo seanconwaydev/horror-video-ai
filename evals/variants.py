@@ -33,7 +33,7 @@ about commitment regardless of which styles were drawn.
 
 from __future__ import annotations
 
-from historical_video_ai.stages.previz import _STYLE_INSTRUCTIONS
+from horror_video_ai.stages.previz import _STYLE_INSTRUCTIONS
 
 # Representative of what the scene-planning model really emits into a
 # beat's `style` field -- lifted from a real run's stored prompt

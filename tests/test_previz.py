@@ -6,9 +6,8 @@ from types import SimpleNamespace
 import litellm
 import pytest
 
-from historical_video_ai.config import get_stage_model
-from historical_video_ai.stages.fact_check import FactCheckResult
-from historical_video_ai.stages.previz import (
+from horror_video_ai.config import get_stage_model
+from horror_video_ai.stages.previz import (
     _STYLE_INSTRUCTIONS,
     DEFAULT_STYLE,
     STYLE_PRESETS,
@@ -19,8 +18,7 @@ from historical_video_ai.stages.previz import (
     run_previz_review_stage,
     run_reference_image_stage,
 )
-from historical_video_ai.stages.research import Claim, FactSheet
-from historical_video_ai.stages.scene_planning import Beat, Character, Location
+from horror_video_ai.stages.scene_planning import Beat, Character, Location, Scene
 
 # A tiny valid 1x1 PNG, base64-encoded, so tests never touch a real API or
 # write anything that isn't a real (if trivial) image file.
@@ -30,17 +28,12 @@ _TINY_PNG_B64 = (
 )
 
 
-def _fact_check_result(flags=None) -> FactCheckResult:
-    fact_sheet = FactSheet(
-        time="December 1903",
-        place="Kitty Hawk, North Carolina",
-        description="watches a flying machine lift off from the dunes.",
-        claims=[
-            Claim(text="The dunes at Kitty Hawk were largely undeveloped in 1903.", source="NPS"),
-            Claim(text="This claim will be contradicted.", source="somewhere"),
-        ],
+def _scene() -> Scene:
+    return Scene(
+        time="present day",
+        place="an underground car park at night",
+        description="a woman notices someone standing between the pillars.",
     )
-    return FactCheckResult(fact_sheet=fact_sheet, flags=flags or [])
 
 
 def _fake_image_fn(b64_json: str):
@@ -327,8 +320,8 @@ def _beat(**overrides) -> Beat:
 # entire mechanism -- position got one in 0049 and is respected, while
 # hiding written as prose inside blocking lost in 4 of 4 beats.
 def test_beat_prompt_gives_occlusion_its_own_labelled_line():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -350,8 +343,8 @@ def test_beat_prompt_gives_occlusion_its_own_labelled_line():
 
 
 def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -367,8 +360,8 @@ def test_beat_prompt_omits_the_occlusion_line_when_nothing_hides_them():
 # physicality already has its own DOING line since 0049 -- so emitting both
 # described the protagonist twice and everyone else once.
 def test_beat_prompt_does_not_restate_the_focal_character_action():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     character = _character()
     beat = _beat(
@@ -391,7 +384,7 @@ def test_beat_prompt_does_not_restate_the_focal_character_action():
 def test_beat_prompt_keeps_the_action_when_no_character_block_carries_it():
     # A plan captured before 0049, or one whose staging names nobody in
     # `characters`, would otherwise reach the model with no verb at all.
-    from historical_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.previz import _build_beat_prompt
 
     beat = _beat(action="checks her phone", staging=[])
 
@@ -401,8 +394,8 @@ def test_beat_prompt_keeps_the_action_when_no_character_block_carries_it():
 
 
 def test_beat_prompt_carries_human_corrections_last():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(staging=[Staging(character_id="influencer", action="reaches", blocking="l")])
 
@@ -423,8 +416,8 @@ def test_beat_prompt_carries_human_corrections_last():
 # four blind runs, blocking without one never produced the right depth
 # ordering (0/10) and blocking with one never failed (14/14).
 def test_beat_prompt_gives_size_in_frame_its_own_labelled_line():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(
         staging=[
@@ -446,8 +439,8 @@ def test_beat_prompt_gives_size_in_frame_its_own_labelled_line():
 
 
 def test_beat_prompt_omits_the_size_line_when_a_plan_predates_the_field():
-    from historical_video_ai.stages.previz import _build_beat_prompt
-    from historical_video_ai.stages.scene_planning import Staging
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
 
     beat = _beat(
         staging=[Staging(character_id="influencer", action="reaches", blocking="left third")]
@@ -641,7 +634,7 @@ def test_run_previz_review_stage_accepts(tmp_path):
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(json.dumps(payload)),
     )
@@ -654,13 +647,13 @@ def test_run_previz_review_stage_parses_response_wrapped_in_markdown_fence(tmp_p
     # Regression test: this is the exact failure observed for real against
     # a live claude-sonnet-5 call reviewing a real Gemini-generated previz
     # image -- the same prompt returned raw JSON on one call and a
-    # ```json-fenced response on the next. See historical_video_ai.json_utils.
+    # ```json-fenced response on the next. See horror_video_ai.json_utils.
     image_path = _write_tiny_png(tmp_path)
     payload = {"accepted": True, "concern": None}
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(f"```json\n{json.dumps(payload)}\n```"),
     )
@@ -674,7 +667,7 @@ def test_run_previz_review_stage_rejects_with_concern(tmp_path):
 
     review = run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         model="anthropic/claude-sonnet-5",
         completion_fn=_fake_review_completion(json.dumps(payload)),
     )
@@ -690,7 +683,7 @@ def test_run_previz_review_stage_raises_when_rejected_without_concern(tmp_path):
     with pytest.raises(PrevizError, match="missing 'concern'"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion(json.dumps(payload)),
         )
@@ -702,7 +695,7 @@ def test_run_previz_review_stage_raises_for_invalid_json(tmp_path):
     with pytest.raises(PrevizError, match="not valid JSON"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion("not json"),
         )
@@ -715,7 +708,7 @@ def test_run_previz_review_stage_raises_for_non_bool_accepted(tmp_path):
     with pytest.raises(PrevizError, match="must be true or false"):
         run_previz_review_stage(
             image_path,
-            _fact_check_result(),
+            _scene(),
             model="anthropic/claude-sonnet-5",
             completion_fn=_fake_review_completion(json.dumps(payload)),
         )
@@ -736,59 +729,12 @@ def test_run_previz_review_stage_sends_image_as_base64(tmp_path):
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     content = captured["messages"][0]["content"]
     image_part = next(part for part in content if part["type"] == "image_url")
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
-
-
-def test_run_previz_review_stage_includes_acknowledged_fiction_when_set(tmp_path):
-    # docs/decisions/0026: an explicit allowlist for a human-acknowledged
-    # intentional fictional element, so the reviewer doesn't re-flag it.
-    image_path = _write_tiny_png(tmp_path)
-    fact_check_result = dataclasses.replace(
-        _fact_check_result(),
-        acknowledged_fiction="A smartphone with a time-travel app did not exist in 79 AD.",
-    )
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path, fact_check_result, model="anthropic/claude-sonnet-5", completion_fn=_completion
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "already been explicitly acknowledged as" in prompt_text
-    assert "A smartphone with a time-travel app did not exist in 79 AD." in prompt_text
-
-
-def test_run_previz_review_stage_omits_acknowledged_fiction_block_when_not_set(tmp_path):
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "already been explicitly acknowledged as" not in prompt_text
 
 
 def test_run_previz_review_stage_includes_planned_details_when_character_and_beat_given(tmp_path):
@@ -805,7 +751,7 @@ def test_run_previz_review_stage_includes_planned_details_when_character_and_bea
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         characters=[_character()],
         beat=_beat(),
         model="anthropic/claude-sonnet-5",
@@ -836,7 +782,7 @@ def test_run_previz_review_stage_omits_planned_details_block_when_not_given(tmp_
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     prompt_text = next(
@@ -862,7 +808,7 @@ def test_run_previz_review_stage_includes_previous_concerns_when_given(tmp_path)
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
+        _scene(),
         previous_concerns=["Shot lacks the described extreme fisheye-from-below perspective."],
         model="anthropic/claude-sonnet-5",
         completion_fn=_completion,
@@ -886,7 +832,7 @@ def test_run_previz_review_stage_omits_previous_concerns_block_when_not_given(tm
         )
 
     run_previz_review_stage(
-        image_path, _fact_check_result(), model="anthropic/claude-sonnet-5", completion_fn=_completion
+        image_path, _scene(), model="anthropic/claude-sonnet-5", completion_fn=_completion
     )
 
     prompt_text = next(
@@ -909,8 +855,7 @@ def test_run_previz_review_stage_includes_previous_concerns_when_ungrounded(tmp_
 
     run_previz_review_stage(
         image_path,
-        _fact_check_result(),
-        requires_grounding=False,
+        _scene(),
         previous_concerns=["The vinyl record element is missing from the frame."],
         model="anthropic/claude-sonnet-5",
         completion_fn=_completion,
@@ -921,33 +866,6 @@ def test_run_previz_review_stage_includes_previous_concerns_when_ungrounded(tmp_
     )
     assert "This is a retry" in prompt_text
     assert "The vinyl record element is missing from the frame." in prompt_text
-
-
-def test_run_previz_review_stage_drops_anachronism_check_when_ungrounded(tmp_path):
-    # docs/decisions/0034
-    image_path = _write_tiny_png(tmp_path)
-    captured = {}
-
-    def _completion(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"accepted": True})))]
-        )
-
-    run_previz_review_stage(
-        image_path,
-        _fact_check_result(),
-        requires_grounding=False,
-        model="anthropic/claude-sonnet-5",
-        completion_fn=_completion,
-    )
-
-    prompt_text = next(
-        part["text"] for part in captured["messages"][0]["content"] if part["type"] == "text"
-    )
-    assert "not meant to be historically or factually accurate" in prompt_text
-    assert "historically accurate scene description" not in prompt_text
-    assert "Claims the image should be consistent with" not in prompt_text
 
 
 def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_path):
@@ -964,7 +882,7 @@ def test_run_previz_review_stage_resolves_model_from_config_when_not_passed(tmp_
             ]
         )
 
-    run_previz_review_stage(image_path, _fact_check_result(), completion_fn=_completion)
+    run_previz_review_stage(image_path, _scene(), completion_fn=_completion)
 
     assert captured["model"] == get_stage_model("previz_review")
 
@@ -998,7 +916,7 @@ def test_previz_review_is_told_the_beats_lighting_not_just_its_action(tmp_path):
 
     run_previz_review_stage(
         image,
-        _fact_check_result(),
+        _scene(),
         beat=beat,
         completion_fn=_completion,
         model="anthropic/claude-sonnet-5",
@@ -1033,7 +951,7 @@ def test_previz_review_retries_a_transient_error(tmp_path):
 
     review = run_previz_review_stage(
         image,
-        _fact_check_result(),
+        _scene(),
         completion_fn=_flaky_completion,
         model="anthropic/claude-sonnet-5",
         sleep_fn=lambda _s: None,
@@ -1043,3 +961,133 @@ def test_previz_review_retries_a_transient_error(tmp_path):
     assert review.accepted is True
     assert calls["n"] == 2, "the review call should have been retried once"
     assert retries == [1]
+
+
+# --- docs/decisions/0071: contact and intensity lead the prompt ---
+
+
+def test_contact_leads_the_beat_prompt_ahead_of_the_character_blocks():
+    """`staging` describes each character alone, so a grab written only
+    there is two unrelated sentences and renders as two people standing
+    near each other. CONTACT is the one line that states the shape they
+    make together, and it goes first."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        contact="its grey hand closes round her right forearm at frame centre",
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="hauls her arm back toward her sternum",
+                blocking="backed against the railing",
+                size_in_frame="about half the image height",
+            )
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "PHYSICAL CONTACT" in prompt
+    assert "closes round her right forearm" in prompt
+    assert prompt.index("PHYSICAL CONTACT") < prompt.index("CHARACTER")
+
+
+def test_intensity_gets_its_own_line():
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    beat = _beat(intensity="violent -- the slicker flared out mid-lunge")
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+    assert "INTENSITY: violent -- the slicker flared out mid-lunge" in prompt
+
+
+def test_a_beat_without_contact_or_intensity_carries_neither_line():
+    """Archived plans predate both fields and must not gain empty labels."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    prompt = _build_beat_prompt(_beat(), characters=[_character()], location=None)
+    assert "PHYSICAL CONTACT" not in prompt
+    assert "INTENSITY" not in prompt
+
+
+def test_contact_replaces_the_generic_react_to_each_other_line():
+    """The generic line is a weaker restatement of what CONTACT says
+    precisely, and a beat's prompt has a complexity budget
+    (docs/decisions/0071)."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    staging = [
+        Staging(character_id="influencer", action="pulls away", blocking="at the rail"),
+        Staging(character_id="bearer", action="keeps hold of her wrist", blocking="between her and the door"),
+    ]
+    characters = [_character(), dataclasses.replace(_character(), id="bearer")]
+
+    without = _build_beat_prompt(_beat(staging=staging), characters=characters, location=None)
+    with_contact = _build_beat_prompt(
+        _beat(staging=staging, contact="its fist and her forearm meet at frame centre"),
+        characters=characters,
+        location=None,
+    )
+
+    assert "must react to each other" in without
+    assert "must react to each other" not in with_contact
+
+
+# --- docs/decisions/0072: facing leads the prompt for two who do not touch ---
+
+
+def test_facing_leads_the_beat_prompt_ahead_of_the_character_blocks():
+    """The non-touching half of the same problem CONTACT solves: each
+    `staging` entry aims one character on its own, so the pair's axis has
+    to be stated once, for the pair, before the per-character blocks."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    beat = _beat(
+        facing="he is turned three quarters toward her across the open hatch",
+        staging=[
+            Staging(
+                character_id="influencer",
+                action="rocks back onto her heels, eyes down at the hatch",
+                blocking="a pace back from the open hatch",
+                size_in_frame="about half the image height",
+            )
+        ],
+    )
+
+    prompt = _build_beat_prompt(beat, characters=[_character()], location=None)
+
+    assert "AIMED AT EACH OTHER" in prompt
+    assert "three quarters toward her" in prompt
+    assert prompt.index("AIMED AT EACH OTHER") < prompt.index("CHARACTER")
+
+
+def test_facing_replaces_the_generic_react_to_each_other_line():
+    """The generic line was the only thing saying so before this field,
+    and a real beat that relied on it rendered both characters facing the
+    camera instead of each other (docs/decisions/0072)."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+    from horror_video_ai.stages.scene_planning import Staging
+
+    staging = [
+        Staging(character_id="influencer", action="backs into the chart table", blocking="at the window run"),
+        Staging(character_id="bearer", action="rises out of the floor hatch", blocking="at the centre of the room"),
+    ]
+    characters = [_character(), dataclasses.replace(_character(), id="bearer")]
+
+    with_facing = _build_beat_prompt(
+        _beat(staging=staging, facing="the two are square to each other across the hatch"),
+        characters=characters,
+        location=None,
+    )
+
+    assert "must react to each other" not in with_facing
+
+
+def test_a_beat_without_facing_carries_no_facing_line():
+    """Archived plans predate the field and must not gain an empty label."""
+    from horror_video_ai.stages.previz import _build_beat_prompt
+
+    prompt = _build_beat_prompt(_beat(), characters=[_character()], location=None)
+    assert "AIMED AT EACH OTHER" not in prompt

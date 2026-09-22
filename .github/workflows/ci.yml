@@ -47,11 +47,11 @@ jobs:
           enable-cache: true
 
       # --frozen rather than a plain sync: it fails if uv.lock is out of
-      # date with pyproject.toml, which matters here because CLAUDE.md
-      # documents litellm workarounds verified against one specific
-      # version while pyproject declares litellm with no constraint at
-      # all. The lockfile is what actually pins it, so drift between the
-      # two is worth failing on.
+      # date with pyproject.toml, which matters here because CLAUDE.md and
+      # two code comments document litellm workarounds verified against
+      # one specific version. pyproject's floor and the lockfile's pin are
+      # both that version as of ADR 0063's pass, and drift between them is
+      # how the project ended up verifying 1.100.1 while running 1.98.0.
       - name: Install dependencies
         run: uv sync --frozen
 
@@ -102,20 +102,24 @@ jobs:
       # the repo's own fixture with nothing to notice. These dry-runs
       # would have failed the day the field was deleted.
       #
-      # motion_test.py is deliberately absent: it takes a previous run's
-      # images as its input and globs evals/results/, which is gitignored.
-      # It passes locally, where results from earlier runs exist, and fails
-      # in a clean checkout -- which is what happened on this workflow's
-      # first run. It has no smoke coverage as a result; covering it would
-      # mean committing image fixtures.
+      # motion_test.py is run separately below: with no arguments it globs
+      # evals/results/, which is gitignored, so it passed locally and
+      # failed in a clean checkout -- what happened on this workflow's
+      # first run. It now has a committed still to point at.
       - name: Eval scripts still import and parse their fixtures
         run: |
           set -e
           for script in blocking_space camera_obedience conditioning_bakeoff \
-                        reference_anchor run_eval; do
+                        fidelity_probe reference_anchor run_eval; do
             echo "--- $script"
             uv run python "evals/$script.py" --dry-run
           done
+
+      # Given an explicit still, because with no arguments it globs the
+      # gitignored evals/results/. evals/fixtures/still_9x16.png is
+      # committed for exactly this; --dry-run never opens it.
+      - name: Motion test parses its arguments
+        run: uv run python evals/motion_test.py --dry-run evals/fixtures/still_9x16.png
 
       # No --dry-run flag because it never calls a model at all; it reads
       # finished run logs. Exercised here so a change to the run-log shape
@@ -127,7 +131,7 @@ jobs:
       # wiring between stages, which no unit test spans.
       - name: Pipeline runs offline
         run: |
-          uv run historical-video-ai --mock --yes \
+          uv run horror-video-ai --mock --yes \
             --genre horror --tone dread --candidates 2 --max-beats 2 \
             --time "present day" --place "an underground car park at night" \
             --description "a woman notices someone standing between the pillars"
@@ -142,4 +146,4 @@ jobs:
           set -e
           run_dir=$(ls -d outputs/run_* | head -1)
           echo "--- $run_dir"
-          uv run historical-video-ai --mock --yes --video-gen-from "$run_dir"
+          uv run horror-video-ai --mock --yes --video-gen-from "$run_dir"

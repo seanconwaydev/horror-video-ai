@@ -48,9 +48,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import litellm
+from selection import select
 
-from historical_video_ai.config import load_environment
-from historical_video_ai.replicate_client import download_output, file_to_data_uri, run_prediction
+from horror_video_ai.config import load_environment
+from horror_video_ai.replicate_client import download_output, file_to_data_uri, run_prediction
 
 EVALS_DIR = Path(__file__).parent
 _SEED = 20260916  # fixed, so the seed-only condition is actually testing a seed
@@ -148,7 +149,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, help="fix the blind shuffle")
     args = parser.parse_args()
 
-    conditions = {k: CONDITIONS[k] for k in args.conditions.split(",")}
+    conditions = select(parser, CONDITIONS, args.conditions, flag="conditions")
     n_ref = 1 if any(c["use_ref"] for c in conditions.values()) and not args.reference else 0
     total = len(conditions) * len(BEATS) + n_ref
     print(

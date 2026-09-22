@@ -143,9 +143,10 @@ the filenames were corrected and no citation was repointed.
 
 A re-audit run after the `cli.py` split and the 0057-0062 sequence. Seven
 findings; the first is the serious one and is the same failure this
-document was created for.
+document was created for. **All seven are closed as of 2026-09-19** --
+each is marked below with what was done.
 
-### 1. `evals/anchor_scene.json` is five ADRs out of date, and degrades silently
+### 1. `evals/anchor_scene.json` is five ADRs out of date, and degrades silently -- fixed, ADR 0064
 
 The fixture three eval scripts measure against (`reference_anchor.py`,
 `reviewer_reliability.py`, `blind_view.py`) was frozen from
@@ -181,7 +182,7 @@ the affected evals as historical, or to add a second current fixture
 alongside it. A smoke assertion that a fixture's beats carry staging would
 have caught it either way.
 
-### 2. A workaround the documented discovery grep cannot find
+### 2. A workaround the documented discovery grep cannot find -- fixed
 
 `CLAUDE.md` states that every upstream workaround carries a greppable
 `WORKAROUND(<url>):` marker so a later session can list them all with
@@ -192,7 +193,7 @@ so there is no URL to check against either. The workaround itself (reading
 reference images as bytes because litellm's Gemini `image_edit` raises on a
 bare `Path`) is real and still applied.
 
-### 3. litellm is pinned two minor versions behind the one the docs verify against
+### 3. litellm is pinned two minor versions behind the one the docs verify against -- fixed
 
 `uv.lock` pins litellm 1.98.0. `CLAUDE.md` documents the moderation
 workaround as "confirmed still present in litellm 1.100.1 (latest released
@@ -202,7 +203,7 @@ it does not run, and finding 2's `Path` workaround was confirmed against
 released fix before keeping a workaround; that rule has not been applied to
 either of them since the pin.
 
-### 4. `config/models.yaml` pins models for four stages that have no code
+### 4. `config/models.yaml` pins models for four stages that have no code -- fixed, ADR 0063
 
 `narrative`, `narrative_review`, `shot_list` and `video_prompts` are stages
 5-7 and 10-12, which `CLAUDE.md` says are not built. Their pins cannot be
@@ -211,7 +212,7 @@ stages *with* code are present. A pinned model for a stage nobody will
 write for months is a pin that quietly goes stale, or names a model that
 has been retired by the time it matters.
 
-### 5. The `cli` split promoted module-internal helpers to public names
+### 5. The `cli` split promoted module-internal helpers to public names -- fixed
 
 `review_list_with_unique_ids`, `beat_review_context`, `choose_candidate`,
 `resolve_recorded_path` and `record_video_gen_result` lost their leading
@@ -220,7 +221,7 @@ module. The rename was correct for names that cross a module boundary and
 was applied too broadly. Cosmetic, but it overstates each module's surface
 to the next reader.
 
-### 6. `docs/pipeline.md` still describes the deleted previz reviewer
+### 6. `docs/pipeline.md` still describes the deleted previz reviewer -- fixed
 
 Stage 8 reads: "Before you ever see a still, it gets one automated
 adversarial pass: an independent model reviews the *generated image
@@ -230,13 +231,138 @@ paragraph frames the stage's purpose as catching "anachronistic imagery",
 which [0031](../decisions/0031-goal-is-quality-video-not-historical-accuracy.md)
 deprioritised. Flagged in this document's first pass and still open.
 
-### 7. `CLAUDE.md` does not describe the `cli/` package
+### 7. `CLAUDE.md` does not describe the `cli/` package -- fixed
 
 Its Architecture section documents the stage-module layout in detail and
 says nothing about the CLI now being six modules with a deliberate import
 direction (`app` -> `beats`/`research_flow`/`video_gen` -> `review`/`runlog`
 -> `mocks`). A session told to add a CLI feature has no guidance on which
 module it belongs in, which is how a 2,491-line `cli.py` happened once.
+
+## Second pass -- what was done, 2026-09-19
+
+1. **Fixture.** Not re-frozen. `anchor_scene.json` carries
+   `"_historical": true` and a note naming the five ADRs it predates;
+   the three scripts reading it say the same in their module docstrings.
+   [ADR 0064](../decisions/0064-eval-fixtures-are-frozen-evidence.md) sets
+   the rule and `tests/test_eval_fixtures.py` enforces it -- any fixture
+   *not* marked historical must carry beats with `staging`, each entry
+   having `blocking` and `size_in_frame`. The guard was verified by
+   removing the marker and watching it fail, since over one opted-out
+   fixture it would otherwise pass vacuously. Deciding this way rested on
+   a fact the finding did not have: all three scripts answer questions
+   ADRs 0050 and 0055 have since closed, so nothing live was being
+   mismeasured. While there, `reviewer_reliability.py`'s docstring lost
+   the "exact reverse" claim ADR 0055 retracted.
+
+2. **Workaround marker.** `previz.py`'s `TODO(WORKAROUND):` is now
+   `WORKAROUND(unfiled -- ...):` and the documented grep finds both
+   workarounds. No issue was filed: this project does not file bug reports
+   upstream, so `CLAUDE.md`'s convention was amended to make "unfiled" a
+   legitimate, permanent state -- with the requirement that such a marker
+   says how to re-test the bug directly, since there is no URL to watch.
+
+3. **litellm.** Upgraded 1.98.0 -> 1.101.0 (latest stable); the floor in
+   `pyproject.toml` moved with it so a fresh resolve cannot land below the
+   verified version. Both workarounds were re-checked by *calling* the
+   installed package, not by reading source: Gemini `image_edit`'s
+   `_read_all_bytes` still raises on a `Path`, and `litellm.moderation`
+   still passes `model` through unstripped. Both stay. 530 tests pass on
+   the new version. The real lesson is the one written into `CLAUDE.md`:
+   verify against the version you actually run.
+
+4. **Stale pins.** The four deferred blocks are deleted and
+   `test_real_project_config_is_valid` now asserts set equality, so the
+   config cannot drift in either direction. See
+   [ADR 0063](../decisions/0063-pin-only-stages-that-have-code.md).
+
+5. **Helper names.** All five are `_`-prefixed again.
+
+6. **`pipeline.md` stage 8.** The deleted reviewer is described as
+   deleted, with 0055's numbers; the stage's purpose no longer leads with
+   anachronism (ADR 0031).
+
+7. **`CLAUDE.md`.** Gained a "CLI code" block: the seven modules, the
+   one-way import direction, and the underscore convention finding 5 is
+   about.
+
+**What this pass suggests about the next one.** Findings 1 and 3 are the
+same bug in two places -- a thing verified once against a version or a
+schema, then never re-verified as the world moved. Neither was findable by
+grep; both needed a claim read against what it describes. Finding 1 also
+shows the limit of a shape guard: it proves a fixture has `staging`, never
+that it has today's fields. What would actually catch the next one is
+something that builds a prompt from each fixture in CI and diffs its
+section headers against the live builder's, which is a real piece of work
+rather than an assertion.
+
+## Third pass, 2026-09-19 -- reading the code, not the claims
+
+The first two passes read documentation against code. This one read the
+code itself, module by module, starting with what no pass had opened:
+`cli/app.py`'s `main()`, the beat loop, `research_flow.py`, the
+research-side stages, and every eval script. Nine findings, all fixed.
+
+**Four were real defects, not rot.**
+
+1. `write_log` truncated `run_log.json` in place. An interrupt mid-write
+   left invalid JSON and lost the whole run, and [0056](../decisions/0056-persist-work-in-flight.md)
+   had *widened* that window by writing three times per beat attempt to
+   protect against the same class of loss. Now writes a sibling temp file
+   and `os.replace`s it.
+2. `--max-references` deleted characters a beat's `staging` named,
+   antagonist first, returning a plan that failed this repo's own
+   validator. Fixed, then the flag was deleted entirely
+   ([0066](../decisions/0066-delete-max-references.md)) -- its premise
+   died with [0050](../decisions/0050-no-reference-images-by-default.md).
+3. Two fact-check flags on one claim crashed the review with a bare
+   `StopIteration`, mid-session, after the human had answered one prompt.
+   Nothing in the prompt limits a model to one concern per claim.
+   `ClaimFlag` now carries `claim_number` instead of re-deriving it by
+   text.
+4. Stage 9 recorded a clip only after downloading it, and the download
+   had no retry while the polling GET beside it had five. A dropped
+   connection discarded a generated, billed clip leaving nothing that
+   pointed at it ([0068](../decisions/0068-record-the-clip-before-fetching-it.md)).
+   Prediction *creation* was also being retried on ambiguous failures,
+   paying twice ([0067](../decisions/0067-retry-a-post-only-on-a-throttle.md)).
+
+**Three were silent-degradation bugs -- the class this document exists
+for.** The live planner accepted a response with no `staging` by falling
+back to a pre-0049 shim ([0065](../decisions/0065-strict-for-a-model-lenient-for-a-file.md));
+a `--fixture` run recorded `genre: "historical"` regardless of `--genre`,
+mislabelling every judgement row the measurement layer exported from it;
+and a typo in any eval flag either crashed bare or, for `--scenes`,
+silently ran zero scenes while reporting success.
+
+**Two were in the documentation layer the project depends on.**
+`generate_image_with_retries` -- the core generation loop -- had a
+docstring describing an automated reviewer 0055 deleted and claiming
+`generate_fn` receives accumulated rejection reasons, which its own type
+signature (`Callable[[], ...]`) disproves. And three "Addressed" entries
+in `failure-taxonomy.md` were addressed by things since deleted, which
+is worse than an open entry: it tells the next session to look
+elsewhere. Its methodology section proposed building a golden eval set
+scored by `previz_review`, the judge 0055 measured at 56% against 79%
+for accepting everything.
+
+**What made the difference.** `cli/app.py` sat at 22% coverage with
+`main()` never called by the suite, while every other module was above
+94%. Its only automated exercise was the smoke job's single `--mock`
+invocation, through a function that branches three ways before scene
+planning -- which is exactly how the fixture-genre bug survived. Tests
+now run `main()` once per entry shape; app.py is at 81%, the project at
+95%, and the floor moved 86 -> 94.
+
+**The pattern worth carrying forward.** Pass one and two found claims
+that disagreed with code. This pass found code that disagreed with
+itself: a validator that ran and then let the plan change underneath it,
+a retry policy applied uniformly to calls that are not uniformly safe, a
+persistence mechanism that was not atomic, a parser whose lenient branch
+fired where no leniency was wanted. None of these were findable by
+reading documentation, and none were findable by grep. They came from
+reading each function against what its own docstring promised.
+
 
 ## Open — still to do
 

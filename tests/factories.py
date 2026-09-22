@@ -7,7 +7,7 @@ Deliberately boring and fully specified: a test that wants a particular
 field different should say so at the call site.
 """
 
-from historical_video_ai.stages.scene_planning import Beat, Character, Location
+from horror_video_ai.stages.scene_planning import Beat, Character, Location
 
 #: A 1x1 PNG. Anything that only needs *a* real image file on disk uses
 #: this; the mock pipeline's own stand-in is 9:16 and lives in cli/mocks.py.

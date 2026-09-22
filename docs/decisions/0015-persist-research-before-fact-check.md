@@ -4,6 +4,10 @@ Date: 2026-08-26
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): both stages are deleted. The
+principle it established -- persist expensive work the moment it exists --
+outlived it and now governs beat images (0056) and video clips (0068).
 ## Context
 
 While debugging [decisions/0014](./0014-fact-check-claims-by-number.md)'s

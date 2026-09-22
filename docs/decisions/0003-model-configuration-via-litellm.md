@@ -4,6 +4,9 @@ Date: 2026-08-12
 
 Status: Accepted
 
+Narrowed by [0063](./0063-pin-only-stages-that-have-code.md) on which stages get a
+pin: only those with code. The pinning rule itself is unchanged.
+
 ## Context
 
 Each pipeline stage needs an LLM call, and the specific model/provider used at each stage needs to be easy to change — different providers (Claude, DeepSeek, and others) are expected to be tried and compared per stage on quality vs. price, and models update over time.

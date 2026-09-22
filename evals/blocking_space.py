@@ -67,8 +67,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import litellm
+from selection import select
 
-from historical_video_ai.config import load_environment
+from horror_video_ai.config import load_environment
 
 EVALS_DIR = Path(__file__).parent
 
@@ -324,12 +325,11 @@ def main() -> None:
     args = parser.parse_args()
 
     scenarios = (
-        {k: SCENARIOS[k] for k in args.scenarios.split(",")} if args.scenarios else SCENARIOS
+        select(parser, SCENARIOS, args.scenarios, flag="scenarios")
+        if args.scenarios
+        else SCENARIOS
     )
-    arms = tuple(args.arms.split(",")) if args.arms else ARMS
-    for arm in arms:
-        if arm not in ARMS:
-            parser.error(f"unknown arm {arm!r} -- choose from {', '.join(ARMS)}")
+    arms = tuple(select(parser, dict.fromkeys(ARMS), args.arms, flag="arms")) if args.arms else ARMS
 
     total = len(scenarios) * len(arms) * args.candidates
     print(

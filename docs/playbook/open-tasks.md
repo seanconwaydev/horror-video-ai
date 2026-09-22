@@ -17,14 +17,20 @@ broadening the CI trigger to every branch
 (which is why five commits had shipped with no CI at all), and splitting
 the 2,491-line `cli.py` into `cli/` -- six modules, one seam per commit,
 with `app.py` left holding the argument parser and `main()` at 631 lines.
-The coverage floor rose from 84 to 86 along the way.
+The coverage floor rose from 84 to 86 along the way, and to 94 since.
 
-One thing that split surfaced and did not fix: **142 of the repo's 198
-uncovered statements are now `main()`**, and `main()` is not untested --
-CI's smoke job runs it end to end offline every push. It is just not
-*measured*, because coverage only runs under pytest. Running the smoke
-job under `coverage run` and combining the two reports would make the
-real number visible; nobody has decided whether that is worth doing.
+**Done 2026-09-19.** That split had left 142 of the repo's 198 uncovered
+statements in `main()`, measured at 22% while every other module was
+above 94%. Rather than combine coverage reports from the smoke job,
+`tests/test_cli_app_main.py` now calls `main()` under `--mock` once per
+entry shape -- grounded historical, ungrounded genre, fixture replay --
+and asserts what each records. app.py is at 81%, the project at 95%, and
+the floor moved 86 -> 94.
+
+That was not just a number: the single smoke invocation took one path
+through a function that branches three ways before scene planning, which
+is how a `--fixture` run came to record `genre: "historical"` no matter
+what `--genre` said, mislabelling every judgement row exported from it.
 
 Deeper context lives in [repo-audit-brief.md](./repo-audit-brief.md),
 [eval-loop-plan.md](./eval-loop-plan.md) and
@@ -81,7 +87,7 @@ Worth deciding at the same time whether the planning rule should say it
 too, or whether the warning alone is enough -- ADR 0058's lesson is that a
 32nd bullet is not free.
 
-## 2. Why is the mood under-delivered when the prompt asks for it twice?
+## 3. Why is the mood under-delivered when the prompt asks for it twice?
 
 The owner on the 2026-09-18 run: "the shadows and mood should probably be
 better for horror, though i didn't check how much of the prompt specified
@@ -93,8 +99,134 @@ unlit black").
 
 So this is not a missing instruction, and writing a 32nd rule would be
 the exact move ADR 0058 just argued against. Things worth checking before
-anything else: whether the character reference sheet every beat is *edited
-from* is washing out the contrast it inherits, whether `LIGHTING` late in
-the prompt loses to `STYLE` right after it, and whether the model simply
-does not do heavy blacks at this level. The first two are testable with
-the eval harness; the third is not fixable here.
+anything else: whether `LIGHTING` late in the prompt loses to `STYLE`
+right after it, and whether the model simply does not do heavy blacks at
+this level. The first is testable with the eval harness; the second is
+not fixable here.
+
+A third hypothesis was listed here and is already ruled out: "the
+character reference sheet every beat is *edited from* is washing out the
+contrast." References have been off by default since
+[0050](../decisions/0050-no-reference-images-by-default.md) -- a default
+run is plain text-to-image and is edited from nothing, so unless the run
+passed `--references` there is no sheet to inherit from.
+
+## 4. Retry feedback that adds detail to an over-budget beat
+
+From the 2026-09-22 laundry run, beat 1. The image dropped two named
+details -- a dark drum window among five tumbling ones, and a trail of wet
+footprints -- while rendering everything else well. The owner retried with
+feedback naming exactly those two omissions, and **the retries came back
+worse, not better**.
+
+That result is the interesting part, and it generalises past this beat.
+When a frame fails by dropout, the cause is that the beat was over the
+complexity ceiling `_COMPLEXITY_BUDGET_RULE` exists to hold it under.
+Feedback that names the missing thing appends another requirement to a
+prompt that already had too many, so the retry is strictly further over
+budget than the attempt that failed. The loop is structurally pushing the
+wrong direction.
+
+Worth noting the beat was over budget as planned, before any feedback: her
+lift, the footprint trail, the one dark drum among five lit ones, a
+straight-down shadow, and a wide/high/from-behind camera is five to six
+things in a rule that permits about five and says to drop the least
+important. So the first question is not "what new rule is missing" but
+**why the planner exceeded a budget it was told**, which is a measurement,
+not an argument.
+
+The candidate fix, if the diagnosis holds: feedback on a dropout failure
+should propose a *removal* or a split, never an addition. Nothing in the
+retry path knows the difference between "you missed something" and "you
+got something wrong", and those want opposite edits.
+
+## 5. Inserts: spend a frame rather than crowd one
+
+The owner's idea from the same run, offered tentatively and recorded here
+rather than implemented. Beat 1's missing machine and footprints could be
+a **second image** -- a tighter shot that shows only those -- instead of
+extra load on the wide shot that failed to hold them.
+
+This is [0075](../decisions/0075-a-perception-moment-is-two-beats.md)
+generalised. That ADR already established the precedent that a moment can
+cost two beats, for the specific case of noticing a threat: the look, then
+the reverse. The proposal extends the same move to any detail the frame
+cannot hold, which in film is an **insert** (or cutaway / detail shot) --
+a close frame on an object, cut in between wider ones.
+
+The owner also noticed the second-order benefit unprompted: because the
+viewer never sees the whole room at once, fragmenting it across frames
+means the room's geometry is never auditable, so an incoherent layout
+stops being a defect the viewer can catch. That is genuinely how shot
+coverage works on a real set, and it is a reason to prefer inserts beyond
+the complexity budget.
+
+The underlying principle is the one worth testing, because it is the most
+generalisable lever this project has found: **the model's ceiling is per
+frame, so buy detail with more frames rather than more text per frame.**
+
+The cost is 0075's cost and the ADR does not hide it: at four or five
+beats a scene, every insert is a story moment not spent. "Not all the
+time" was the owner's own framing. An insert also has no character in it,
+which no rule currently contemplates -- `subject` and the staging schema
+both assume one.
+
+## 6. Non-diegetic marks as a style-level gap-filler
+
+Also from the laundry run, beat 2. The image did not read as "she hears
+something", and the owner's feedback -- add a comic-style mark denoting
+the sound -- worked. Their read, which is the right one: it may have
+worked *because* the style was comic, where drawn sound marks are part of
+the visual vocabulary already.
+
+The open question is whether the same move can be pushed into more
+realistic styles as a deliberate aesthetic choice, on the grounds that it
+covers a real image-model limitation -- a still frame cannot carry sound,
+and the model will not invent a way to show it.
+
+Live-action film solves this differently and that alternative should be
+weighed first: it shows the *cause* in frame (the dryer door swinging on
+its hinge) rather than marking the effect. A painterly style has analogues
+that are not literal marks -- a motion streak, disturbed dust, a swinging
+object caught mid-arc. The risk of a floating mark in a painterly frame is
+that it reads as a rendering artifact rather than as a convention.
+
+## 7. Automated prompt-fidelity checking -- decided: not built
+
+**Closed 2026-09-22**, as
+[0077](../decisions/0077-no-automated-fidelity-checking.md). Probe 2
+repaired probe 1's claim defects and
+re-ran on 71 claims over seven beats and both styles
+([prompt-fidelity-probe-2.md](./prompt-fidelity-probe-2.md)): recall
+64% against the 80% floor
+[the scope doc](./prompt-fidelity-checking-scope.md) set in advance, so
+its own criteria say stop. Nothing in the build order was started.
+
+The repair worked and did not help. Probe 1's one-way bias
+(owner-yes/model-no) disappeared -- disagreements now run 18 one way and
+9 the other -- while agreement fell from 69% to 62%. What was left
+underneath the badly written claims was disagreement, which a better
+sheet does not fix. A third sheet written until the model agrees is
+eval-overfitting and is explicitly ruled out.
+
+What would reopen it is in that doc's Outcome section; the short version
+is a different vision model rescored against the same sheet, which is
+cheap, or a narrower checker asked only what this one was good at, which
+is a new scope.
+
+Three things from the probes are worth acting on regardless, because
+they are about how the owner reviews rather than about the checker:
+
+- The verdict set is **yes / no / can't tell**, and can't-tell counts as
+  a failure. A frame a viewer cannot read in one glance has failed
+  whatever its ground truth is.
+- Claims about **touching, weight or body boundaries** are owner-only. A
+  vision model scores position and misses contact -- it passed a hand
+  resting in a void as "splayed flat on the door".
+- **Contact failed 4 of 4** in probe 2's images, on top of probe 1's
+  blind spot. Five claims is far too few to conclude from, and it points
+  the same way as
+  [0072](../decisions/0072-facing-and-the-threats-own-face.md): two-body
+  physical facts are both the hardest thing to render and the one thing
+  no automated check can see. Following it up means more images, not
+  more claims per image.

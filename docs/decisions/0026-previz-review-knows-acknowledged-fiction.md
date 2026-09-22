@@ -4,6 +4,9 @@ Date: 2026-09-02
 
 Status: Accepted
 
+
+Voided by [0069](./0069-delete-historical-grounding.md): the allowlist it built told a reviewer
+not to flag acknowledged fiction, and there is no longer either one.
 ## Context
 
 A real run of the Pompeii scene, after 0025 landed, hit a severe, costly

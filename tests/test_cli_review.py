@@ -9,14 +9,14 @@ import dataclasses
 import pytest
 from factories import a_beat, a_character, a_location
 
-from historical_video_ai.cli.review import (
+from horror_video_ai.cli.review import (
     confirm,
     edit_item_fields,
     print_item_fields,
     prompt_if_missing,
     review_scene_plan,
 )
-from historical_video_ai.stages.scene_planning import Beat, Location, ScenePlan, Staging
+from horror_video_ai.stages.scene_planning import Beat, Location, ScenePlan, Staging
 
 
 def test_confirm_auto_yes_returns_true_without_calling_input(monkeypatch):

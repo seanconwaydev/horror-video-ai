@@ -9,6 +9,10 @@ Supersedes the implementation halves of [0012](./0012-video-generation-duration.
 [0022](./0022-video-generation-moderation-preflight.md); voids the stated
 rationale of [0011](./0011-previz-image-model-for-video-aspect-ratio-fit.md).
 
+Narrowed by [0067](./0067-retry-a-post-only-on-a-throttle.md): the Replicate
+client's transport retry no longer applies to prediction creation, which is
+not safe to repeat.
+
 ## Context
 
 [0037](./0037-horror-motion-comic-shorts-wan-via-replicate.md) decided that
