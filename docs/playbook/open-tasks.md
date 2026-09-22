@@ -191,22 +191,29 @@ that are not literal marks -- a motion streak, disturbed dust, a swinging
 object caught mid-arc. The risk of a floating mark in a painterly frame is
 that it reads as a rendering artifact rather than as a convention.
 
-## 7. Decide on automated prompt-fidelity checking
+## 7. Automated prompt-fidelity checking -- decided: not built
 
-Scoped in
-[prompt-fidelity-checking-scope.md](./prompt-fidelity-checking-scope.md),
-with a 26-item probe attached: 92% recall on the owner's own failures,
-61% precision, and all three causes of the false alarms traced to how the
-claims were written rather than to the model.
+**Closed 2026-09-22.** Probe 2 repaired probe 1's claim defects and
+re-ran on 71 claims over seven beats and both styles
+([prompt-fidelity-probe-2.md](./prompt-fidelity-probe-2.md)): recall
+64% against the 80% floor
+[the scope doc](./prompt-fidelity-checking-scope.md) set in advance, so
+its own criteria say stop. Nothing in the build order was started.
 
-Not decided. The next step is not code -- it is repairing the claim
-writing (split compounds, delete tolerance adverbs) and re-probing on
-roughly 60 items across more beats and both styles, against the decision
-criteria that doc fixes in advance. Build order is listed there if it
-passes.
+The repair worked and did not help. Probe 1's one-way bias
+(owner-yes/model-no) disappeared -- disagreements now run 18 one way and
+9 the other -- while agreement fell from 69% to 62%. What was left
+underneath the badly written claims was disagreement, which a better
+sheet does not fix. A third sheet written until the model agrees is
+eval-overfitting and is explicitly ruled out.
 
-Two things from the probe are worth acting on regardless of whether the
-checker is ever built, because both are about how the owner reviews:
+What would reopen it is in that doc's Outcome section; the short version
+is a different vision model rescored against the same sheet, which is
+cheap, or a narrower checker asked only what this one was good at, which
+is a new scope.
+
+Three things from the probes are worth acting on regardless, because
+they are about how the owner reviews rather than about the checker:
 
 - The verdict set is **yes / no / can't tell**, and can't-tell counts as
   a failure. A frame a viewer cannot read in one glance has failed
@@ -214,3 +221,10 @@ checker is ever built, because both are about how the owner reviews:
 - Claims about **touching, weight or body boundaries** are owner-only. A
   vision model scores position and misses contact -- it passed a hand
   resting in a void as "splayed flat on the door".
+- **Contact failed 4 of 4** in probe 2's images, on top of probe 1's
+  blind spot. Five claims is far too few to conclude from, and it points
+  the same way as
+  [0072](../decisions/0072-facing-and-the-threats-own-face.md): two-body
+  physical facts are both the hardest thing to render and the one thing
+  no automated check can see. Following it up means more images, not
+  more claims per image.

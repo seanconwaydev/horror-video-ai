@@ -1,9 +1,15 @@
 # Scope: automated prompt-fidelity checking
 
-Written 2026-09-22, not yet decided. A design to evaluate, not a plan in
-progress. If accepted it becomes an ADR; if rejected, this file records
-why so the idea is not re-proposed from scratch. Same status and purpose
-as [judge-calibration-scope.md](./judge-calibration-scope.md), which it
+Written 2026-09-22. **Not built: the probe it was conditional on came
+back at 64% recall against an 80% floor this file set in advance.** The
+design below is left as written, because the reason it was rejected is a
+measurement and not an argument, and because a different vision model
+would be measured against exactly this text. See
+[prompt-fidelity-probe-2.md](./prompt-fidelity-probe-2.md) for the
+numbers and [Outcome](#outcome) below for what would reopen it.
+
+Same status and purpose as
+[judge-calibration-scope.md](./judge-calibration-scope.md), which it
 partly replaces as the more useful first move.
 
 ## Why this rather than a preference judge
@@ -308,3 +314,39 @@ The headline numbers above use the owner's *considered* answer on B3-9.
 On their first-glance answer, agreement is 17/26 and recall 10/12 -- the
 difference one ambiguous item makes at this sample size, and the reason
 60 items is the floor for the next probe.
+
+## Outcome
+
+**Rejected on measurement, 2026-09-22**, by the third branch of the
+criteria above: recall 64% (69% excluding the contact claims the model
+provably cannot judge), against a floor of 80%. Precision was 55%.
+Repairing probe 1's claim defects removed its one-way bias -- the 27
+disagreements now run 18 one way and 9 the other -- without improving
+agreement, which fell from 69% to 62%. What is left is disagreement
+rather than bad claim-writing, and that is not something a better sheet
+fixes.
+
+Nothing in the build order was started. `evals/fidelity_probe.py` is the
+probe driver and is not `stages/fidelity.py`; no stage, no model pin, no
+jsonl writer and no review-gate report exist.
+
+Three things would reopen this, and writing a third claim sheet is not
+among them -- that is the eval-overfitting this file already forbids:
+
+1. **A different vision model.** The verdict names this model against
+   this material, and the sheet is reusable as-is: point
+   `evals/fidelity_probe.py` at another pin and rescore the same 71
+   claims against the same owner column. That is a cheap experiment, not
+   a rebuild.
+2. **A narrower question.** Per-field numbers were the surprise: every
+   contact claim failed and `staging.action` failed 8 of 24, while the
+   overall number was dragged down by camera and lighting claims. A
+   checker asked only what it is good at might clear the bar the general
+   one missed -- but that is a new scope with its own pre-registered
+   criteria, not a re-run of this one.
+3. **A materially better model generation.** Same test, later.
+
+What the probe leaves behind is worth more than the rejected design:
+71 claims with two independent verdicts each, and the observation that
+two-body physical facts (`contact`) failed 4 of 4 in the images and are
+simultaneously the class an automated checker cannot see.
