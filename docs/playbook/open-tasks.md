@@ -193,7 +193,9 @@ that it reads as a rendering artifact rather than as a convention.
 
 ## 7. Automated prompt-fidelity checking -- decided: not built
 
-**Closed 2026-09-22.** Probe 2 repaired probe 1's claim defects and
+**Closed 2026-09-22**, as
+[0077](../decisions/0077-no-automated-fidelity-checking.md). Probe 2
+repaired probe 1's claim defects and
 re-ran on 71 claims over seven beats and both styles
 ([prompt-fidelity-probe-2.md](./prompt-fidelity-probe-2.md)): recall
 64% against the 80% floor

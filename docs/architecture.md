@@ -31,7 +31,11 @@ Every stage produces a reviewable artifact — a prompt, a document, an image �
 
 Most stages get two passes: a generation pass (one model produces the artifact) and a review pass (a second model critiques it against explicit criteria) before it reaches you. The second model isn't rubber-stamping the first — it should be prompted adversarially, i.e. "find what's wrong with this," not "confirm this is fine."
 
-**Measured, and it failed the one place it was measured.** The adversarial pass over a generated *image* was measured against 78 images the owner had already ruled on: 56% agreement, against 79% for a reviewer that accepts everything, and it rejected 31 of the 62 images that were kept. It was deleted ([decisions/0055](./decisions/0055-delete-the-automated-previz-reviewer.md)), and fact-check — the one adversarial pass that was genuinely catching errors, over *text* rather than images — went with historical grounding in [0069](./decisions/0069-delete-historical-grounding.md). So no stage has a second model reviewing the first today. Before adding one back, note the failure mode: a plan-fidelity question answered as a binary has no notion of severity, so a missing tote bag and an absent antagonist score the same.
+**Measured, and it failed the one place it was measured.** The adversarial pass over a generated *image* was measured against 78 images the owner had already ruled on: 56% agreement, against 79% for a reviewer that accepts everything, and it rejected 31 of the 62 images that were kept. It was deleted ([decisions/0055](./decisions/0055-delete-the-automated-previz-reviewer.md)), and fact-check — the one adversarial pass that was genuinely catching errors, over *text* rather than images — went with historical grounding in [0069](./decisions/0069-delete-historical-grounding.md). So no stage has a second model reviewing the first today, and a second
+attempt at one -- a fidelity checker asking whether the image matches the
+plan rather than whether it is any good -- was measured and declined in
+[decisions/0077](./decisions/0077-no-automated-fidelity-checking.md) at
+64% recall against a floor of 80% fixed before the probe ran. Before adding one back, note the failure mode: a plan-fidelity question answered as a binary has no notion of severity, so a missing tote bag and an absent antagonist score the same.
 
 The system should get better with use. Findings from your own review notes and, later, from actual YouTube performance data should feed back into the prompts and rubrics used at each gate, not just live in your head.
 

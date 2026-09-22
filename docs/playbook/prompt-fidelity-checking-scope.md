@@ -317,6 +317,8 @@ difference one ambiguous item makes at this sample size, and the reason
 
 ## Outcome
 
+Recorded as [0077](../decisions/0077-no-automated-fidelity-checking.md).
+
 **Rejected on measurement, 2026-09-22**, by the third branch of the
 criteria above: recall 64% (69% excluding the contact claims the model
 provably cannot judge), against a floor of 80%. Precision was 55%.
