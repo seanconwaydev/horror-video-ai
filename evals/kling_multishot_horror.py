@@ -66,6 +66,38 @@ MAX_PROMPT_CHARS = 2500
 # 360 x 5s = 30 minutes, which leaves room for a cold start and a queue.
 POLL_ATTEMPTS = 360
 
+# Audited against all eight MODEL-BAN rules in stages/scene_planning.py
+# before this was first run. Those bans were measured on a still-image
+# model and several are actively wrong for video, so the point of the
+# audit is the opposite of compliance -- it is to catch places where the
+# still-image discipline leaked into these prompts by habit. Nothing here
+# imports scene_planning; the risk was always stylistic, not structural.
+#
+# Deliberately violated, and why:
+#   - "a threat is never distant, only occluded" (0060). Shot 1 needs the
+#     figure far away or there is nothing to escalate. Scale is anchored
+#     to architecture ("head almost touching the top of the door frame")
+#     rather than to a distance in metres, which is what 0060 measured
+#     failing.
+#   - "no camera world-position" (0044). A corner-mounted security camera
+#     IS the premise. This is the highest-risk violation of the eight: if
+#     Kling mishandles a stated mount position the way Gemini did, the
+#     whole format collapses. First thing to look at in the output.
+#   - "no process verbs, name the frozen instant". Inverted on purpose --
+#     shots 3 and 4 are built on rotates / rises / tears.
+#
+# Two places the bans HAD leaked in, and were corrected:
+#   - the doorway originally gave onto nothing, because "one beat is one
+#     space" discourages naming what is past a threshold. An unlit hallway
+#     gives the figure somewhere to have come from.
+#   - escalation was originally pure proximity, which is precisely the
+#     failure 0049 measured (one motionless man at four zoom levels). Shot
+#     3 now changes the body -- head over past a natural angle, one arm
+#     too long -- so the threat escalates in more than scale.
+#
+# Not triggered at all: no reflected people, and one dominant light source
+# (a single infrared illuminator) which the format wants anyway.
+
 # Restated verbatim at the head of every shot. Each shot in a multi-shot
 # call is its own prompt, so the look has to be re-established in each one
 # or the cuts drift apart -- the same "reuse the block verbatim" rule
@@ -89,10 +121,10 @@ SHOTS: list[dict[str, Any]] = [
         "duration": 3,
         "prompt": (
             f"{LOOK} A single bed in the middle of the room, duvet thrown violently "
-            "back, sheets twisted, the bed empty. In the open doorway at the far wall "
-            "stands a tall, thin adult figure, head almost touching the top of the "
-            "door frame, absolutely motionless, its face lost to infrared glare. "
-            "Nothing in the room moves at all. "
+            "back, sheets twisted, the bed empty. An open doorway in the far wall gives "
+            "onto an unlit hallway. Standing in that doorway is a tall, thin adult "
+            "figure, head almost touching the top of the door frame, absolutely "
+            "motionless, its face lost to infrared glare. Nothing in the room moves. "
             "Audio: flat electronic hiss, faint room tone, no music."
         ),
     },
@@ -116,8 +148,9 @@ SHOTS: list[dict[str, Any]] = [
             f"{LOOK} The identical framing. The tall thin figure is now standing "
             "directly beside the bed, much closer to the camera, its head turned up "
             "toward the lens. Its eyes catch the infrared light and burn as two flat "
-            "white discs. Its body stays perfectly still; only its head rotates a few "
-            "degrees further toward the camera. "
+            "white discs. Its head is tilted hard over onto one shoulder, further than a "
+            "neck should go, and it rotates a few degrees further toward the camera "
+            "as we watch. One arm hangs too long at its side. "
             "Audio: hiss, one soft mechanical click, a single low sustained sub-bass note."
         ),
     },
