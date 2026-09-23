@@ -70,6 +70,16 @@ previz_review:
 video_generation:
   model: "replicate/wan-video/wan-2.2-i2v-fast"
 
+# shot_writer: turns a ScenePlan into the shot prompts a video model
+# actually wants. Scene planning describes frozen instants, which is right
+# for a still-image model and wrong for video, so this rewrites each beat
+# as something that MOVES while keeping the plan's characters, location
+# and staging intact. A strong model on purpose -- this text is the last
+# thing standing between the plan and a paid generation.
+
+shot_writer:
+  model: "anthropic/claude-sonnet-5"
+
 # moderation_check: a free, advisory pre-flight on every video-generation
 # call -- OpenAI's own omni-moderation-latest endpoint via
 # litellm.moderation(), the only model it supports today.

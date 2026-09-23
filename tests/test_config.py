@@ -82,6 +82,7 @@ def test_real_project_config_is_valid():
         "previz_review",
         "video_generation",
         "moderation_check",
+        "shot_writer",
     }
     assert set(configs.keys()) == expected_stages
     for stage_name, config in configs.items():
