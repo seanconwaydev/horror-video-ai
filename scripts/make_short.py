@@ -1,16 +1,20 @@
 """Make one finished 15-second vertical horror short.
 
-Scene planning writes the characters, the location and the beats. A shot
-writer turns those beats into shot prompts that move. Kling 3.0 renders
-all of them as one continuous video with native audio, in a single call.
+Kling 3.0 renders the four shots in SHOTS as one continuous 15-second
+vertical video with native audio, in a single call.
+
+Those shots came out of this pipeline -- scene planning wrote the
+character, the location and the beats, and the shot writer below turned
+those beats into something that moves -- and were then read and edited by
+hand. --replan rolls a new set the same way.
 
 No previz, no anchor images, no per-beat review loop -- the thing this
 produces is a video, not a set of stills to animate later.
 
 Usage:
-    uv run python scripts/make_short.py --plan-only
     uv run python scripts/make_short.py
-    uv run python scripts/make_short.py --mode standard --yes
+    uv run python scripts/make_short.py --plan-only
+    uv run python scripts/make_short.py --replan --plan-only
 """
 
 from __future__ import annotations
@@ -79,6 +83,76 @@ NEGATIVE_PROMPT = (
     "of field, a child, two figures, duplicate figure, extra limbs, distorted hands, "
     "blur, low quality"
 )
+
+# The shots, as written. These came out of scene planning plus the shot
+# writer below, then were read and edited by hand -- shot 4's audio
+# originally named a hand touching the camera, which a frame full of face
+# has no room for. --replan rolls a new set.
+SHOTS: list[dict[str, Any]] = [
+    {
+        "duration": 4,
+        "prompt": (
+            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
+            "corner of a small bedroom, angled down. Hard monochrome infrared grey-green, heavy "
+            "sensor grain, soft vignette, blown-out highlights, slightly soft focus. The camera "
+            "never moves, never zooms, never pans. Wide shot, high above, facing down the room. "
+            "The bed against the left wall lies empty, duvet thrown back, one pillow already on "
+            "the floor. In the far doorway a very tall, gaunt silhouette stands pressed into a "
+            "hand's-width gap in the door, only a sliver of a long bare shin and one long hand "
+            "flat on the frame catching the infrared light, the rest lost in the black beyond. "
+            "The one thing that changes: the door leaf creeps open another inch under an unseen "
+            "weight, widening the sliver of light and revealing a little more of the pale shin, "
+            "the figure itself not stepping. Audio: low hiss of the camera microphone, a faint "
+            "electrical hum, and a single slow hinge creak."
+        ),
+    },
+    {
+        "duration": 4,
+        "prompt": (
+            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
+            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
+            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
+            "moves, never zooms, never pans. Medium three-quarter angle, high above. The tall, "
+            "gaunt figure is now standing mid-floor, halfway between the bed and the camera "
+            "corner, having crossed without any step being seen; the far doorway behind it hangs "
+            "open on black. It is stooped forward, weight held on the front foot, trailing heel "
+            "lifted, the oversized grey t-shirt hem swinging out behind one thigh. The one thing "
+            "that changes: its bowed head slowly tilts back and its eyes rise up off the floor "
+            "toward the lens, lips just beginning to part off the teeth. Audio: the same low "
+            "hiss, and a single floorboard creak that is not footsteps."
+        ),
+    },
+    {
+        "duration": 4,
+        "prompt": (
+            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
+            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
+            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
+            "moves, never zooms, never pans. Close-up, high above, facing the camera. The "
+            "figure's head and shoulders now fill the frame directly beneath the lens, the "
+            "stripped bed reduced to a blurred pale shape at the bottom edge, the rest of the "
+            "room gone to black. Its face is tipped back and up, eyes stretched wide and locked "
+            "on the glass. The one thing that changes: the jaw slowly drops further open, the "
+            "long throat cording as it widens, teeth catching the infrared flare. Audio: the "
+            "microphone hiss thickens into a slow, wet rasp of breathing close on the lens."
+        ),
+    },
+    {
+        "duration": 3,
+        "prompt": (
+            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
+            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
+            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
+            "moves, never zooms, never pans. Extreme close-up, eye level, facing the camera. The "
+            "face is pressed flat against the lens, one eye filling the centre of the frame, the "
+            "open jaw shoved into the lower half, a shoulder blocking the rest, the far edge of "
+            "the frame solid black. The one thing that changes: the pupil slowly contracts and "
+            "the eye gives one long, deliberate blink, otherwise nothing moves. Audio: hiss gone, "
+            "replaced by a single low sustained tone that cuts abruptly to total silence."
+        ),
+    },
+]
+
 
 SHOT_WRITER_INSTRUCTIONS = """\
 You are writing the shot prompts for a {total}-second vertical horror short.
@@ -243,6 +317,9 @@ def main() -> int:
     )
     parser.add_argument("--yes", action="store_true", help="skip the confirmation before spending")
     parser.add_argument(
+        "--replan", action="store_true", help="write a new set of shots instead of using SHOTS"
+    )
+    parser.add_argument(
         "--mode",
         default="pro",
         choices=("standard", "pro", "4k"),
@@ -252,18 +329,21 @@ def main() -> int:
 
     load_environment()
 
-    print(f"Scene: {SCENE.time} -- {SCENE.place}")
-    print(f"        {SCENE.description}")
-    print("\nPlanning the scene...")
-    plan = run_scene_planning_stage(SCENE, genre="horror", tone="dread", max_beats=4)
-    print(
-        f"  {len(plan.characters)} character(s), {len(plan.locations)} location(s), "
-        f"{len(plan.beats)} beat(s)"
-    )
+    if args.replan:
+        print(f"Scene: {SCENE.time} -- {SCENE.place}")
+        print(f"        {SCENE.description}")
+        print("\nPlanning the scene...")
+        plan = run_scene_planning_stage(SCENE, genre="horror", tone="dread", max_beats=4)
+        print(
+            f"  {len(plan.characters)} character(s), {len(plan.locations)} location(s), "
+            f"{len(plan.beats)} beat(s)"
+        )
+        print("Writing the shots...")
+        shots = write_shots(plan, model=get_stage_model("shot_writer"))
+        fix_durations(shots)
+    else:
+        shots = [dict(shot) for shot in SHOTS]
 
-    print("Writing the shots...")
-    shots = write_shots(plan, model=get_stage_model("shot_writer"))
-    fix_durations(shots)
     problems = validate(shots)
     if problems:
         for problem in problems:
