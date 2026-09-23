@@ -86,6 +86,9 @@ from horror_video_ai.stages.video_generation import (
 # swaps the previz model automatically falls back to "cost unknown" rather
 # than silently reporting a stale price for a different model.
 _KNOWN_IMAGE_MODEL_COSTS_USD = {
+    "gemini/gemini-3.1-flash-lite-image": 0.0336,
+    # Shut down 2026-10-02 (docs/decisions/0079). Kept so replaying an
+    # archived run reports what that run actually cost.
     "gemini/gemini-2.5-flash-image": 0.039,
 }
 

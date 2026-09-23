@@ -28,6 +28,7 @@ from types import SimpleNamespace
 from typing import Any
 
 SHEET = Path("docs/playbook/prompt-fidelity-probe-2.md")
+DRY_RUN_IMAGE = Path("evals/fixtures/still_9x16.png")
 MODEL = "anthropic/claude-sonnet-5"
 
 # From the sheet's image table. Sheet id -> image, relative to outputs/.
@@ -137,11 +138,14 @@ def main() -> int:
 
     answers: dict[str, str] = {}
     for sheet_id, rel in IMAGES.items():
-        image = Path("outputs") / rel
         items = claims[sheet_id]
         if args.dry_run and sheet_id != "B2":
             continue
-        print(f"--- {sheet_id}: {len(items)} claims, {image.name}")
+        # The probe's real images live in gitignored outputs/, so a dry run
+        # encodes a committed fixture instead -- CI runs from a clean
+        # checkout that has no outputs/ at all.
+        image = DRY_RUN_IMAGE if args.dry_run else Path("outputs") / rel
+        print(f"--- {sheet_id}: {len(items)} claims, {Path(rel).name}")
         answers.update(ask(image, items, completion_fn))
 
     if args.dry_run:

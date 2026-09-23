@@ -91,6 +91,86 @@ the previz-image level — requires a new provider (Flux via Replicate, ~$0.03-0
 comparable to current previz cost) — but the video-stage angle looks like the more direct
 fit and adds no new image provider.
 
+**Whether a reference-to-video model should replace the image-then-animate pipeline.**
+Raised 2026-09-22 while the remaining work was scoped as "wire up video generation and
+stop". The pipeline's shape — one previz still per beat, then image-to-video on that still
+— was set when video models could not hold a character's identity across a clip without
+being handed a first frame. The 2026 generation of models has a third mode that did not
+exist then, and it changes what the image stage is *for*.
+
+*How the current best models work.* The leaders are Kling v3, Alibaba's HappyHorse 1.x,
+ByteDance's Seedance 2.x and Google's Veo 3.1. Three capabilities matter here and none of
+them are in Wan 2.2. **Reference-to-video**: Seedance 2.0 accepts up to ~12 reference files
+(images, audio, video) alongside the text prompt, and treats them as consistency
+constraints rather than as a starting frame — the references pin identity, style and
+palette while the model composes its own framing. HappyHorse's reference mode works the
+same way and is reported stronger on stylized material and human motion, Seedance stronger
+on strict character consistency. **Multi-shot in one generation**: Seedance 2.0 produces
+multiple shots with cuts inside a single 15s output, holding identity and lighting across
+the cut — the thing this project currently attempts by generating independent previz images
+per location and hoping they read as coverage (see the Runway note above, which is the same
+problem approached from the camera-control side). **Native audio in the same pass**,
+including lip-sync, on Seedance, HappyHorse and Veo 3.1. `Beat.audio` has been a planned
+field that nothing consumes since scene planning was built
+([0023](./decisions/0023-scene-planning-stage.md)); these models are the first thing in the
+pipeline that could read it.
+
+*How it differs from what exists.* Today identity lives in a still and motion is bolted
+onto it; a beat is frozen to one frame before the video model sees it, and the previz
+review loop is the quality gate. Under reference-to-video, identity lives in a small set of
+character/location reference sheets, motion and shot changes belong to the video model, and
+the per-beat still stops being an artifact at all. That is the appeal and the risk in the
+same sentence: it deletes the only quality gate this project has that demonstrably works.
+[0055](./decisions/0055-delete-the-automated-previz-reviewer.md) found no automated grader beat
+accepting everything, and [0077](./decisions/0077-no-automated-fidelity-checking.md) measured a
+fidelity checker at 64% recall and declined to build it — so the human eye on a still is
+the gate, and judging a 5-15s clip by eye is strictly harder than judging a frame.
+
+*What it would need.* A new provider and credential (fal.ai hosts both HappyHorse and
+Seedance; Veo 3.1 is on the Gemini API) and a direct-REST client module alongside
+`replicate_client.py`, since litellm carries none of these for video — the same deliberate
+bypass [0037](./decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md) already
+took. A `models.yaml` pin, written when the code is ([0063](./decisions/0063-pin-only-stages-that-have-code.md)).
+A reference-sheet artifact (per character and per location) replacing per-beat frames, and
+a grouping step that packs beats into ≤15s shot groups. Explicit 9:16 in the request:
+Wan inherits aspect ratio from its input image, and
+[0038](./decisions/0038-video-generation-on-replicate-and-moderation-rescope.md)'s "no resizing needed"
+stops being free the moment there is no input image. Clip length stops being the 5.06-7.56s
+Wan window and becomes roughly 3-15s, so `Beat.duration_seconds` gains real range for the
+first time. And every `MODEL-BAN(...)` in the prompts was measured against
+`gemini-2.5-flash-image` and must be re-verified before it means anything here
+([0073](./decisions/0073-re-verify-hard-bans-on-a-model-change.md)).
+
+*Cost, for 20-60 finished Shorts.* Taking one Short as ~40s from ~7 beats. The current
+pipeline runs about **$0.80-$1.05 per finished Short** — previz dominates it at $0.47-$0.71
+(14-21 images at $0.0336 on `gemini-3.1-flash-lite-image`, assuming 2-3 attempts per beat),
+video is only $0.35 (7 clips at $0.05 on `wan-2.2-i2v-fast` at 480p), scene planning is under
+a cent. That is **$16-$63 for 20-60 videos**. Reference-to-video inverts the ratio: reference
+sheets cost ~$0.20 once per run and are reused by every shot, while 40s of output at
+per-second video pricing is the whole bill.
+
+| Model (40s Short, one take) | Per second | Per Short | 20 videos | 60 videos |
+| --- | --- | --- | --- | --- |
+| Current: previz + Wan 2.2 i2v fast | n/a (per clip) | ~$1.10 | ~$22 | ~$66 |
+| Seedance 2.0 fast | ~$0.048 | ~$2.10 | ~$42 | ~$125 |
+| HappyHorse 1.1 (720p) | ~$0.099 | ~$4.15 | ~$83 | ~$249 |
+| Seedance 2.0 standard | ~$0.10 | ~$4.20 | ~$84 | ~$252 |
+| Veo 3.1 (Gemini API list) | $0.75 | ~$30 | ~$600 | ~$1,800 |
+
+So the switch is roughly **2-4x the current cost per finished video** — $40-$250 total at
+this volume, which is not the deciding factor — with the exception of Veo 3.1 at list
+price, which is. Retakes are the real multiplier and are worse here than they look: a
+retake today re-rolls one $0.05 clip, while a retake on a 15s multi-shot generation re-rolls
+every shot in the group. Budget two takes per group and double the video line. The honest
+read is that money is not what makes this decision; whether the project can judge a clip
+without the still it was judging before is.
+
+*Not decided.* Nothing here is committed, and this would be a separate path rather than a
+change to the existing one. If it is tried, it should be an A/B on one fixed, frozen scene
+plan — current image-then-animate against reference-to-video — not a fresh run judged on
+its own, since this project has no grader and a side-by-side is the only comparison a human
+can actually make reliably.
+
 **Documentation and instruction rot.** Several decisions have outlived the premise that
 justified them, and the pattern is now frequent enough to be worth a deliberate sweep
 rather than case-by-case discovery: a dead model constant survived a month past
@@ -111,7 +191,7 @@ actively fighting each other: a buried, conditional "make characters react to ea
 clause was losing to a much more concrete instruction to describe the threat as a fraction
 of the frame ([0049](./decisions/0049-per-character-staging-in-beats.md)).
 
-**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gemini/gemini-2.5-flash-image` is the current v1 placeholder ([decisions/0011](./decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md), superseding 0007's original OpenAI placeholder) — picked because its 9:16 output is a close aspect-ratio match to the video-generation stage's required size, not from a rigorous quality comparison; Kling, Runway, and a real quality bake-off against gpt-image-1-mini are all still untried.
+**Image model for previz.** Needs to be cheap and fast since it's the primary quality gate. `gemini/gemini-3.1-flash-lite-image` is the current pin ([decisions/0079](./decisions/0079-previz-moves-to-gemini-3-1-flash-lite-image.md)), which replaced `gemini-2.5-flash-image` ahead of Google shutting that model down on 2026-10-02 — a forced move plus a price preference ($0.0336/image, cheaper than the $0.039 it replaced), not a quality comparison. So this stays open in the same sense it has been since [decisions/0011](./decisions/0011-previz-image-model-for-video-aspect-ratio-fit.md): Kling, Runway, the full `gemini-3.1-flash-image` and a real bake-off against gpt-image-1-mini are all still untried. Two loose ends 0079 names rather than resolves — the eight `MODEL-BAN(...)` rules in `scene_planning.py` are all still labelled with the retired model and unverified against the new one ([0073](./decisions/0073-re-verify-hard-bans-on-a-model-change.md)), and four scripts under `evals/` hardcode the retired model as a comparison key and break on the same date unless updated separately.
 
 **Control flow.** How stages actually get called in sequence and pause for review (a script vs. something more structured) — worth revisiting once stages 2–7 have real code to review. Likely AWS Step Functions, per [decisions/0004](./decisions/0004-aws-incremental-adoption.md), but not yet implemented. Answered for v1's narrowed scope as a plain CLI confirm-loop — see [decisions/0006](./decisions/0006-narrow-v1-scope-single-image.md).
 

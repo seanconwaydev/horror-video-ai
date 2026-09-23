@@ -6,6 +6,8 @@ Status: Accepted
 
 Stated rationale voided by [0038](./0038-video-generation-on-replicate-and-moderation-rescope.md).
 
+Superseded by [0079](./0079-previz-moves-to-gemini-3-1-flash-lite-image.md), which repinned this stage when the model chosen here was shut down.
+
 ## Context
 
 Building stage 9 ([0010](./0010-video-generation-model-and-standalone-stage.md))
