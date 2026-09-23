@@ -3,12 +3,10 @@ verified scene, skipping the script/shot-list/per-scene-prompt stages this
 normally sits downstream of. See docs/pipeline.md ("8. Previz") and
 docs/decisions/0006-narrow-v1-scope-single-image.md.
 
-Model: gemini/gemini-2.5-flash-image (docs/decisions/0011) -- moved off
-the original OpenAI placeholder because its 9:16 output is a ~0.8% match
-to Sora-2's exact required ratio, letting video_generation resize instead
-of crop. Requests a 9:16-ish `size` (Gemini only supports an aspect-ratio
-hint, not an exact pixel size). Confirmed working end to end against a
-real key, not just a call-shape guess.
+Model: gemini/gemini-3.1-flash-lite-image (docs/decisions/0079), which
+replaced gemini-2.5-flash-image ahead of its 2026-10-02 shutdown.
+Requests a 9:16-ish `size` (Gemini only supports an aspect-ratio hint,
+not an exact pixel size).
 """
 
 from __future__ import annotations
@@ -62,7 +60,7 @@ class PrevizError(Exception):
 # docs/decisions/0011's reason for pinning this stage's model no longer
 # holds.
 #
-# gemini-2.5-flash-image only supports requesting an aspect ratio, not an
+# Gemini's image models only support requesting an aspect ratio, not an
 # exact pixel size, so this is a hint litellm maps to Gemini's nearest
 # named ratio ("9:16"), not a literal request for these exact pixels.
 _PREVIZ_SIZE_HINT = "720x1280"

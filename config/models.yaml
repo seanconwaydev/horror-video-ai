@@ -34,8 +34,15 @@ scene_planning:
 # because THIS model rendered it badly; it does not survive the model on
 # its own merits, and it suppresses the only evidence that would retire it.
 
+# previz: moved off gemini-2.5-flash-image ahead of its announced
+# 2026-10-02 shutdown -- docs/decisions/0079. Flash Lite over Flash Image
+# on price ($0.0336 vs $0.067 per 1K image) because this stage is the
+# iteration loop, not the final render. The eight MODEL-BAN(...) rules in
+# scene_planning.py were all measured on 2.5 and are UNVERIFIED against
+# this pin; 0079 records that debt.
+
 previz:
-  model: "gemini/gemini-2.5-flash-image"
+  model: "gemini/gemini-3.1-flash-lite-image"
 
 # previz_review: NOT in the pipeline -- docs/decisions/0055 deleted it
 # after measuring 56% agreement with the owner against 79% for accepting
