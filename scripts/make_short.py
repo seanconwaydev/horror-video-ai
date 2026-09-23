@@ -48,6 +48,15 @@ MAX_SHOTS = 6
 TOTAL_SECONDS = 15
 MAX_PROMPT_CHARS = 2500
 
+# Undocumented, and learned from a rejected prediction: the 2500-character
+# limit the schema advertises applies to the top-level `prompt` only. Each
+# shot inside `multi_prompt` is capped at 512, and going over is not
+# caught until the prediction has already been created --
+#   "Shot prompt exceeds 512 characters at shot index 0. (E006)"
+# Roughly 140 of those 512 go on restating the look, so a shot has about
+# 360 characters of its own to work with.
+MAX_SHOT_PROMPT_CHARS = 512
+
 # A 15s pro clip took 532s on the model's own reference example, and the
 # shared client's default ceiling is 600s. 30 minutes leaves room for a
 # cold start without losing a paid generation to a timeout.
@@ -69,11 +78,11 @@ SCENE = Scene(
 # work here: infrared grain, a fixed mount and a blown-out highlight range
 # are the format's own texture, so the artifacts a video model produces read
 # as camera artifacts instead of mistakes.
+# Kept deliberately terse: it is repeated inside every shot's 512-character
+# budget, so every word here is a word the shot itself does not get.
 LOOK = (
-    "Infrared night-vision security-camera footage. Locked-off camera mounted high "
-    "in the corner of the room, angled down. Hard monochrome infrared grey-green, "
-    "heavy sensor grain, soft vignette, blown-out highlights, slightly soft focus. "
-    "The camera never moves, never zooms, never pans."
+    "IR night-vision security cam, locked off high in a corner, angled down. "
+    "Monochrome grey-green, heavy grain, blown highlights. Camera static."
 )
 
 NEGATIVE_PROMPT = (
@@ -92,63 +101,48 @@ SHOTS: list[dict[str, Any]] = [
     {
         "duration": 4,
         "prompt": (
-            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
-            "corner of a small bedroom, angled down. Hard monochrome infrared grey-green, heavy "
-            "sensor grain, soft vignette, blown-out highlights, slightly soft focus. The camera "
-            "never moves, never zooms, never pans. Wide shot, high above, facing down the room. "
-            "The bed against the left wall lies empty, duvet thrown back, one pillow already on "
-            "the floor. In the far doorway a very tall, gaunt silhouette stands pressed into a "
-            "hand's-width gap in the door, only a sliver of a long bare shin and one long hand "
-            "flat on the frame catching the infrared light, the rest lost in the black beyond. "
-            "The one thing that changes: the door leaf creeps open another inch under an unseen "
-            "weight, widening the sliver of light and revealing a little more of the pale shin, "
-            "the figure itself not stepping. Audio: low hiss of the camera microphone, a faint "
-            "electrical hum, and a single slow hinge creak."
+            "IR night-vision security cam, locked off high in a corner, angled down. Monochrome "
+            "grey-green, heavy grain, blown highlights. Camera static. Wide, down the room. Empty "
+            "bed, duvet thrown back, a pillow on the floor. In the far doorway a very tall gaunt "
+            "silhouette stands in a hand's-width gap: one long bare shin, one hand flat on the "
+            "frame, the rest lost to black. The door leaf creeps open another inch under an "
+            "unseen weight. The figure does not step. Audio: mic hiss, faint hum, one slow hinge "
+            "creak."
         ),
     },
     {
         "duration": 4,
         "prompt": (
-            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
-            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
-            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
-            "moves, never zooms, never pans. Medium three-quarter angle, high above. The tall, "
-            "gaunt figure is now standing mid-floor, halfway between the bed and the camera "
-            "corner, having crossed without any step being seen; the far doorway behind it hangs "
-            "open on black. It is stooped forward, weight held on the front foot, trailing heel "
-            "lifted, the oversized grey t-shirt hem swinging out behind one thigh. The one thing "
-            "that changes: its bowed head slowly tilts back and its eyes rise up off the floor "
-            "toward the lens, lips just beginning to part off the teeth. Audio: the same low "
-            "hiss, and a single floorboard creak that is not footsteps."
+            "IR night-vision security cam, locked off high in a corner, angled down. Monochrome "
+            "grey-green, heavy grain, blown highlights. Camera static. The tall gaunt figure is "
+            "mid-floor now, halfway between bed and camera, having crossed with no step seen; the "
+            "doorway behind it hangs open on black. Stooped forward, weight on the front foot, "
+            "trailing heel lifted. Its bowed head tilts slowly back and its eyes rise to the "
+            "lens, lips parting off the teeth. Audio: hiss, one floorboard creak that is not "
+            "footsteps."
         ),
     },
     {
         "duration": 4,
         "prompt": (
-            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
-            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
-            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
-            "moves, never zooms, never pans. Close-up, high above, facing the camera. The "
-            "figure's head and shoulders now fill the frame directly beneath the lens, the "
-            "stripped bed reduced to a blurred pale shape at the bottom edge, the rest of the "
-            "room gone to black. Its face is tipped back and up, eyes stretched wide and locked "
-            "on the glass. The one thing that changes: the jaw slowly drops further open, the "
-            "long throat cording as it widens, teeth catching the infrared flare. Audio: the "
-            "microphone hiss thickens into a slow, wet rasp of breathing close on the lens."
+            "IR night-vision security cam, locked off high in a corner, angled down. Monochrome "
+            "grey-green, heavy grain, blown highlights. Camera static. Its head and shoulders "
+            "fill the frame directly beneath the lens, the bed a blurred pale shape at the bottom "
+            "edge, the rest gone to black. The face is tipped back and up, eyes wide on the "
+            "glass. The jaw slowly drops further open, the throat cording as it widens, teeth "
+            "catching the infrared flare. Audio: hiss thickening into a slow, wet rasp of "
+            "breathing on the lens."
         ),
     },
     {
         "duration": 3,
         "prompt": (
-            "Infrared night-vision security-camera footage. Locked-off camera mounted high in the "
-            "corner of the room, angled down. Hard monochrome infrared grey-green, heavy sensor "
-            "grain, soft vignette, blown-out highlights, slightly soft focus. The camera never "
-            "moves, never zooms, never pans. Extreme close-up, eye level, facing the camera. The "
-            "face is pressed flat against the lens, one eye filling the centre of the frame, the "
-            "open jaw shoved into the lower half, a shoulder blocking the rest, the far edge of "
-            "the frame solid black. The one thing that changes: the pupil slowly contracts and "
-            "the eye gives one long, deliberate blink, otherwise nothing moves. Audio: hiss gone, "
-            "replaced by a single low sustained tone that cuts abruptly to total silence."
+            "IR night-vision security cam, locked off high in a corner, angled down. Monochrome "
+            "grey-green, heavy grain, blown highlights. Camera static. The face is pressed flat "
+            "against the lens: one eye filling the centre of the frame, the open jaw shoved into "
+            "the lower half, a shoulder blocking the rest, the frame's edge solid black. The "
+            "pupil slowly contracts and the eye gives one long, deliberate blink. Nothing else "
+            "moves. Audio: hiss gone, one low tone cutting abruptly to silence."
         ),
     },
 ]
@@ -196,8 +190,11 @@ Rules that decide whether this is any good:
   "Audio:" and describe it -- room tone, a single specific noise, silence.
   Silence used deliberately is stronger than a sting.
 - NO ON-SCREEN TEXT of any kind. It renders as garbage.
-- Keep each shot's prompt under {max_chars} characters and self-contained: the
-  look, who or what is in frame, the one thing that changes, and the audio.
+- HARD LIMIT: each shot's prompt must be under {max_chars} characters, and the
+  look above eats about 140 of them. That leaves roughly 360 characters for the
+  shot itself, so write tight. This is not advisory -- the model rejects the
+  whole generation over it. Each shot still has to be self-contained: the look,
+  what is in frame, the one thing that changes, and the audio.
 
 Return ONLY a JSON array, no prose and no code fence:
 [{{"prompt": "...", "duration": 4}}, ...]
@@ -255,7 +252,7 @@ def write_shots(plan: ScenePlan, *, model: str) -> list[dict[str, Any]]:
         look=LOOK,
         plan=format_plan(plan),
         max_shots=MAX_SHOTS,
-        max_chars=MAX_PROMPT_CHARS,
+        max_chars=MAX_SHOT_PROMPT_CHARS,
     )
     response = litellm.completion(model=model, messages=[{"role": "user", "content": prompt}])
     text = response.choices[0].message.content.strip()
@@ -296,8 +293,13 @@ def validate(shots: list[dict[str, Any]]) -> list[str]:
     if total != TOTAL_SECONDS:
         problems.append(f"durations total {total}s, must be exactly {TOTAL_SECONDS}s")
     for i, shot in enumerate(shots, start=1):
-        if len(shot.get("prompt", "")) > MAX_PROMPT_CHARS:
-            problems.append(f"shot {i} is over {MAX_PROMPT_CHARS} characters")
+        length = len(shot.get("prompt", ""))
+        if length > MAX_SHOT_PROMPT_CHARS:
+            problems.append(
+                f"shot {i} is {length} characters -- each shot is capped at "
+                f"{MAX_SHOT_PROMPT_CHARS}, and the model only says so after the "
+                "prediction is created"
+            )
         if not shot.get("prompt"):
             problems.append(f"shot {i} has no prompt")
     return problems
