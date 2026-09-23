@@ -78,7 +78,7 @@ _TINY_PNG_B64 = (
     "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
 
-MODEL = "gemini/gemini-2.5-flash-image"
+MODEL = "gemini/gemini-3.1-flash-lite-image"
 
 # Identity only, and identical in every cell. Wardrobe and face are not
 # what is being tested, and a long identity block is one more thing for the

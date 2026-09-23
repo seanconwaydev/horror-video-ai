@@ -93,7 +93,7 @@ BEATS = {
 }
 
 CONDITIONS = {
-    "gemini_ref": {"model": "gemini/gemini-2.5-flash-image", "use_ref": True},
+    "gemini_ref": {"model": "gemini/gemini-3.1-flash-lite-image", "use_ref": True},
     "flux_ref_0.8": {"model": "replicate/black-forest-labs/flux-dev", "use_ref": True, "strength": 0.8},
     "flux_ref_0.9": {"model": "replicate/black-forest-labs/flux-dev", "use_ref": True, "strength": 0.9},
     "flux_seed_only": {"model": "replicate/black-forest-labs/flux-dev", "use_ref": False},

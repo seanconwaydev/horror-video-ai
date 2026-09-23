@@ -142,10 +142,10 @@ first time. And every `MODEL-BAN(...)` in the prompts was measured against
 ([0073](./decisions/0073-re-verify-hard-bans-on-a-model-change.md)).
 
 *Cost, for 20-60 finished Shorts.* Taking one Short as ~40s from ~7 beats. The current
-pipeline runs about **$0.90-$1.20 per finished Short** — previz dominates it at $0.55-$0.82
-(14-21 images at $0.039 on `gemini-2.5-flash-image`, assuming 2-3 attempts per beat), video
-is only $0.35 (7 clips at $0.05 on `wan-2.2-i2v-fast` at 480p), scene planning is under a
-cent. That is **$18-$72 for 20-60 videos**. Reference-to-video inverts the ratio: reference
+pipeline runs about **$0.80-$1.05 per finished Short** — previz dominates it at $0.47-$0.71
+(14-21 images at $0.0336 on `gemini-3.1-flash-lite-image`, assuming 2-3 attempts per beat),
+video is only $0.35 (7 clips at $0.05 on `wan-2.2-i2v-fast` at 480p), scene planning is under
+a cent. That is **$16-$63 for 20-60 videos**. Reference-to-video inverts the ratio: reference
 sheets cost ~$0.20 once per run and are reused by every shot, while 40s of output at
 per-second video pricing is the whole bill.
 

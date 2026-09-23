@@ -120,8 +120,8 @@ def _generate_replicate(model: str, prompt: str, reference: Path | None = None) 
 
 
 MODELS: dict[str, dict[str, Any]] = {
-    "gemini-2.5-flash-image": {
-        "model": "gemini/gemini-2.5-flash-image",
+    "gemini-3.1-flash-lite-image": {
+        "model": "gemini/gemini-3.1-flash-lite-image",
         "generate": _generate_gemini,
     },
     "flux-dev": {"model": "replicate/black-forest-labs/flux-dev", "generate": _generate_replicate},
@@ -142,7 +142,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="print the plan, spend nothing")
     parser.add_argument("--mock", action="store_true", help="run end to end with fake images")
-    parser.add_argument("--models", default="gemini-2.5-flash-image")
+    parser.add_argument("--models", default="gemini-3.1-flash-lite-image")
     parser.add_argument(
         "--reference",
         type=Path,

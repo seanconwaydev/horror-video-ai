@@ -15,7 +15,7 @@ scene and recorded in key.json. Score first, reveal after.
 Usage:
     uv run python evals/run_eval.py --dry-run
     uv run python evals/run_eval.py --variants current,single_source
-    uv run python evals/run_eval.py --models gemini-2.5-flash-image,flux-dev --variants single_source
+    uv run python evals/run_eval.py --models gemini-3.1-flash-lite-image,flux-dev --variants single_source
     uv run python evals/run_eval.py --reveal evals/results/20260915-224500
 """
 
@@ -88,8 +88,8 @@ def _generate_replicate(model: str, prompt: str) -> bytes:
 
 
 MODELS: dict[str, dict[str, Any]] = {
-    "gemini-2.5-flash-image": {
-        "model": "gemini/gemini-2.5-flash-image",
+    "gemini-3.1-flash-lite-image": {
+        "model": "gemini/gemini-3.1-flash-lite-image",
         "generate": _generate_gemini,
     },
     "flux-dev": {"model": "replicate/black-forest-labs/flux-dev", "generate": _generate_replicate},
@@ -143,7 +143,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="print the plan, call nothing, spend nothing")
     parser.add_argument("--scenes", help="comma-separated scene ids (default: all)")
-    parser.add_argument("--models", default="gemini-2.5-flash-image", help="comma-separated model keys")
+    parser.add_argument("--models", default="gemini-3.1-flash-lite-image", help="comma-separated model keys")
     parser.add_argument("--variants", default="current", help="comma-separated variant names")
     parser.add_argument("--reveal", help="print the A/B key for a finished run directory")
     parser.add_argument("--seed", type=int, help="fix the A/B shuffle, for reproducibility")
