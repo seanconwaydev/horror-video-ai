@@ -80,6 +80,33 @@ video_generation:
 shot_writer:
   model: "anthropic/claude-sonnet-5"
 
+# The three direct-to-vendor video backends. All first-party: Replicate
+# marked the identical Kling generation up from ~$2.52 to $5.
+#
+# video_veo is the only one needing no new account -- it runs on
+# GEMINI_API_KEY through litellm's gemini/videos provider. Swap to
+# gemini/veo-3.1-lite-generate-preview ($0.05/s vs $0.10/s) to halve the
+# cost again, or gemini/veo-3.1-generate-preview ($0.40/s) for quality.
+# These three strings are the ones litellm actually prices; a name it does
+# not know reports "cost unknown" rather than a wrong number.
+
+video_veo:
+  model: "gemini/veo-3.1-fast-generate-preview"
+
+# The provider prefix is stripped before the call, the same way
+# video_generation's "replicate/" is (docs/decisions/0003 requires the
+# <provider>/<model> shape; the vendors' own APIs do not use it).
+#
+# UNVERIFIED model strings: neither vendor's API has been called yet, and
+# both are pins rather than constants precisely so a wrong guess is a
+# one-line fix here instead of a code change.
+
+video_kling:
+  model: "kling/kling-v3"
+
+video_wan:
+  model: "dashscope/wan2.7-t2v-plus"
+
 # moderation_check: a free, advisory pre-flight on every video-generation
 # call -- OpenAI's own omni-moderation-latest endpoint via
 # litellm.moderation(), the only model it supports today.

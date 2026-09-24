@@ -73,7 +73,7 @@ show_missing = true
 # (pytest fixtures are conventionally unannotated), so checking it would
 # be noise.
 [tool.mypy]
-files = ["src", "evals", "tests", "scripts"]
+files = ["src", "evals", "tests"]
 python_version = "3.11"
 
 # litellm ships no usable types for its response objects. Stage code

@@ -12,6 +12,8 @@ This was `historical_video_ai` until `docs/decisions/0070` renamed it. **Every A
 
 **Current build is deliberately narrower than that full vision** — see `docs/decisions/0006-narrow-v1-scope-single-image.md` for the original scoping, though not for the current state. Implemented: scene planning (`stages/scene_planning.py`, `docs/decisions/0023`), which takes a `Scene` and breaks it into beats with characters and locations; stage 8 (previz, `stages/previz.py`), which renders one image per beat; and stage 9 (video generation, `stages/video_generation.py`, `docs/decisions/0010`, `0037`). `cli/` wires scene-planning and previz into one interactive run (`uv run horror-video-ai`); video generation is a deliberately separate, standalone invocation (`--video-gen-from`) — see `docs/decisions/0010` (previz is the spend gate; crossing it should be a distinct, deliberate step). Stages 2–3 were built and then deleted (`docs/decisions/0069`); stages 5–7 and 10–12 were never built.
 
+**There is a second, newer path that bypasses previz entirely: the short flow.** `stages/shot_writing.py` turns a `ScenePlan` into shot prompts that *move* — scene planning describes frozen instants, which is right for a still-image model and is exactly what made image-to-video clips come out motionless. `video_backends/` then generates the whole short in one or a few calls, going direct to each vendor (Veo via litellm, Kling and Wan via their own REST APIs) rather than through Replicate, which marked an identical Kling generation up from ~$2.52 to $5. `cli/short.py` wires it as two deliberately separate invocations — `--short` writes a `shots.json` and stops, `--shots <file>` generates from it — because the human editing that file between them is the spend gate and is where the quality actually comes from.
+
 The single-image previz flow that `docs/decisions/0006` originally scoped — one image straight from the scene — was deleted once scene planning made it unreachable (`docs/decisions/0051`). Every image now comes from a beat. Archived runs in that old shape are still *readable* by `--video-gen-from`; only the generation path is gone.
 
 Two docs are worth reading before touching pipeline design: `docs/architecture.md`'s "Design principles" section (cheap-before-expensive stage ordering, every stage produces a reviewable artifact, adversarial review passes, no hardcoded format) and its "Open questions" section (undecided items like the video-gen model — check there before assuming something is settled).
@@ -28,6 +30,9 @@ uv run ruff check .                    # lint
 uv run mypy                            # type check src/, evals/, tests/ -- must be clean
 uv run pytest --cov                    # tests + coverage floor (94%)
 uv run horror-video-ai --mock      # run the pipeline with no API keys / no network calls
+uv run horror-video-ai --short --mock --yes --time t --place p --description d  # plan a short, offline
+uv run horror-video-ai --shots outputs/<run>/shots.json --backend veo           # generate from reviewed shots
+uv run horror-video-ai --shots outputs/<run>/shots.json --bakeoff               # same shots on every backend, blind
 uv run horror-video-ai --time "present day" --place "an underground car park at night" \
     --description "a woman notices someone standing between the pillars."
 ```
@@ -77,11 +82,11 @@ If the real tool genuinely can't be run in the current environment, say so plain
 
 **Per-stage model configuration (`config/models.yaml` + `src/horror_video_ai/config.py`)**: every pipeline stage's LLM choice is a pinned `<provider>/<model-name>` string (LiteLLM format) in `config/models.yaml`, never hardcoded in stage code and never auto-substituted or routed on failure — see `docs/decisions/0003-model-configuration-via-litellm.md`. Model choices for research/fact-check/previz specifically are explained in `docs/decisions/0007-research-fact-check-previz-models.md`. `load_stage_configs()` fails loud (`ConfigError`) on a missing file, empty file, or a stage missing its `model` key, rather than falling back silently. When adding a new stage's code, add its corresponding block to `config/models.yaml` first — `tests/test_config.py::test_real_project_config_is_valid` asserts the real committed config still defines every stage that has code depending on it, so that test's `expected_stages` set needs updating too.
 
-**LLM calls go through LiteLLM**, not provider SDKs directly — one `completion(model=..., messages=[...])` call works uniformly across providers so stage code doesn't need provider-specific branches (`docs/decisions/0003`). Image generation uses `litellm.image_generation()`/`image_edit()` the same way (`stages/previz.py`). Video generation is the one deliberate exception: it calls Replicate's REST API directly via `replicate_client.py`, because litellm has no video support for Wan (`docs/decisions/0037`). Both paths are confirmed working end to end against real keys, including a full paid video generation run.
+**LLM calls go through LiteLLM**, not provider SDKs directly — one `completion(model=..., messages=[...])` call works uniformly across providers so stage code doesn't need provider-specific branches (`docs/decisions/0003`). Image generation uses `litellm.image_generation()`/`image_edit()` the same way (`stages/previz.py`). Video generation is where the exceptions live. The original stage 9 calls Replicate's REST API directly via `replicate_client.py`, because litellm has no video support for Wan (`docs/decisions/0037`). The newer `video_backends/` follows the same split for the same reason: Veo goes through `litellm.video_generation()` (litellm 1.101.0 ships a `gemini/videos` provider, so it needs no client of its own), while Kling and Wan use direct REST in `video_backends/kling.py` and `wan.py`, sharing one retry policy in `video_backends/_http.py`. **Both of those wire formats are unverified against a live account** — say so rather than assuming they work. Both paths are confirmed working end to end against real keys, including a full paid video generation run.
 
 **Secrets** load via `config.load_environment()` (wraps `python-dotenv`), called explicitly at a run's entry point — importing `config.py` has no side effects on the environment.
 
-**Stage code**: one module per pipeline stage under `src/horror_video_ai/stages/`, added incrementally as each stage in `docs/pipeline.md` gets implemented (currently: `scene_planning.py`, `previz.py`, `moderation.py`, `video_generation.py`). Established pattern: a frozen-dataclass artifact type for the stage's reviewable output, a stage-specific `<Stage>Error` exception that fails loud on malformed model output (matching `ConfigError`'s convention in `config.py`), and a `run_<stage>_stage(...)` function taking an injectable `completion_fn`/`image_fn`/`video_fn` (default `litellm.completion`/`litellm.image_generation`/`litellm.video_generation`) so tests never need a live API call.
+**Stage code**: one module per pipeline stage under `src/horror_video_ai/stages/`, added incrementally as each stage in `docs/pipeline.md` gets implemented (currently: `scene_planning.py`, `shot_writing.py`, `previz.py`, `moderation.py`, `video_generation.py`). Established pattern: a frozen-dataclass artifact type for the stage's reviewable output, a stage-specific `<Stage>Error` exception that fails loud on malformed model output (matching `ConfigError`'s convention in `config.py`), and a `run_<stage>_stage(...)` function taking an injectable `completion_fn`/`image_fn`/`video_fn` (default `litellm.completion`/`litellm.image_generation`/`litellm.video_generation`) so tests never need a live API call.
 
 **CLI code** (`src/horror_video_ai/cli/`): six modules, not one file — a 2,491-line `cli.py` is what this replaced. Which module a new CLI feature belongs in follows from a deliberate one-way import direction, and adding an import that points back up it is how the single file grows again:
 
@@ -126,6 +131,23 @@ shipping the pin** -- by generating the forbidden thing against the new
 model and looking at it, never by reasoning from the model's docs -- and
 update each surviving ban's marker to the model it was just checked on.
 See `docs/decisions/0073`.
+
+## Platform-safety rules do not expire
+
+`grep -rn "PLATFORM-SAFETY(" src/` lists rules that exist because a
+generation produced something **unpublishable** rather than merely ugly.
+The first one is in `stages/shot_writing.py`: a real 15-second clip put
+what read as a phallic form between a figure's legs -- bare shins under a
+loose hem, in infrared blowout, is geometry that goes ambiguous. A video
+with that in it is worth nothing, so it is prevented at prompt time by
+three layers (a wardrobe rule, a composition rule, and a blocking regex
+check before any paid call) rather than caught afterwards.
+
+These look like `MODEL-BAN(...)` markers and are **not** the same thing.
+A model ban is provisional -- it was measured on one model and expires
+when that pin moves. A platform-safety rule does not: every generator has
+this failure mode and every platform acts on it. Do not retire one
+because the model changed.
 
 ## Project conventions
 
