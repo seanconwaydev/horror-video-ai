@@ -26,6 +26,7 @@ paying for four clips is exactly the failure that check exists to avoid.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -51,6 +52,23 @@ _POLL_INTERVAL_SECONDS = 10.0
 _MAX_POLL_ATTEMPTS = 120
 _TERMINAL_OK = {"completed", "succeeded"}
 _TERMINAL_BAD = {"failed", "cancelled", "canceled"}
+
+
+_MISSING_CREDENTIALS = (
+    "GEMINI_API_KEY is not set -- add it to .env (see .env.example). It is the "
+    "same key the rest of the pipeline already uses."
+)
+
+
+def credentials_problem() -> str | None:
+    """Why this backend cannot be called, or None when it can.
+
+    litellm reads `GEMINI_API_KEY` from the environment itself, so nothing
+    here passes the value anywhere; this exists so that a missing key is
+    reported by `validate()`, before the spend prompt, instead of failing
+    the first generation call.
+    """
+    return None if os.environ.get("GEMINI_API_KEY") else _MISSING_CREDENTIALS
 
 
 def snap_seconds(seconds: int) -> int:
@@ -89,6 +107,9 @@ class VeoBackend:
 
     def validate(self, shot_list: ShotList) -> list[str]:
         problems = []
+        missing = credentials_problem()
+        if missing is not None:
+            problems.append(missing)
         if shutil.which("ffmpeg") is None:
             problems.append(
                 "ffmpeg is not installed, and Veo needs it to join its 8-second "

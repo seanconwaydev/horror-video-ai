@@ -20,6 +20,17 @@ from horror_video_ai.video_backends.wan import WanBackend
 
 LOOK = "IR night-vision security cam, locked off high in a corner. Camera static."
 
+_KEYS = ("GEMINI_API_KEY", "KLING_ACCESS_KEY", "KLING_SECRET_KEY", "DASHSCOPE_API_KEY")
+
+
+@pytest.fixture(autouse=True)
+def _credentials(monkeypatch):
+    """Every backend's validate() now reports a missing key, so the limit
+    tests below would otherwise be asserting on the developer's own .env.
+    The credential checks themselves clear these explicitly."""
+    for key in _KEYS:
+        monkeypatch.setenv(key, "test-value")
+
 
 def _shots(count=4, seconds=4, prompt="A door creeps open. Audio: hiss."):
     return ShotList(
@@ -379,3 +390,38 @@ def test_joining_without_ffmpeg_fails_loud(monkeypatch):
     with pytest.raises(VideoBackendError, match="ffmpeg"):
         veo_module._concatenate([b"a", b"b"])
     assert any("ffmpeg" in p for p in VeoBackend("gemini/veo-3.1-fast-generate-preview").validate(_shots()))
+
+
+# --- Credentials, checked before the spend prompt --------------------------
+
+
+@pytest.mark.parametrize(
+    ("build", "unset", "expected"),
+    [
+        (lambda: VeoBackend("gemini/veo-3.1-fast-generate-preview"), ["GEMINI_API_KEY"], "GEMINI_API_KEY"),
+        (lambda: KlingBackend("kling/kling-v3"), ["KLING_ACCESS_KEY"], "KLING_ACCESS_KEY"),
+        (lambda: KlingBackend("kling/kling-v3"), ["KLING_SECRET_KEY"], "KLING_SECRET_KEY"),
+        (lambda: WanBackend("dashscope/wan2.7-t2v-plus"), ["DASHSCOPE_API_KEY"], "DASHSCOPE_API_KEY"),
+    ],
+)
+def test_a_missing_key_is_a_fatal_validation_problem(monkeypatch, build, unset, expected):
+    """A bake-off confirms one total and then generates in order, so a
+    missing key found at generate() time means the backends ahead of it
+    have already been paid for. validate() has to catch it instead, and
+    the problem must be fatal -- run_bakeoff only skips problems that do
+    not start with "note:"."""
+    for key in unset:
+        monkeypatch.delenv(key, raising=False)
+    problems = build().validate(_shots(count=1, seconds=4))
+    matching = [p for p in problems if expected in p]
+    assert matching, problems
+    assert not matching[0].startswith("note:")
+
+
+def test_credentials_present_means_no_credential_problem():
+    for backend in (
+        VeoBackend("gemini/veo-3.1-fast-generate-preview"),
+        KlingBackend("kling/kling-v3"),
+        WanBackend("dashscope/wan2.7-t2v-plus"),
+    ):
+        assert not [p for p in backend.validate(_shots(count=1, seconds=4)) if "_KEY" in p]

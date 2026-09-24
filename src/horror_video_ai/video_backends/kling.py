@@ -76,6 +76,26 @@ def _sign_jwt(access_key: str, secret_key: str, *, now: int | None = None) -> st
     return (signing_input + b"." + base64.urlsafe_b64encode(signature).rstrip(b"=")).decode()
 
 
+_MISSING_CREDENTIALS = (
+    "KLING_ACCESS_KEY and KLING_SECRET_KEY are not both set -- add them to "
+    ".env (see .env.example). Kling's developer API is prepaid and separate "
+    "from any consumer subscription."
+)
+
+
+def credentials_problem() -> str | None:
+    """Why this backend cannot be called, or None when it can.
+
+    Read by `validate()` so a missing key takes the backend out of a
+    bake-off before the spend prompt. Without it the run confirms a total
+    that includes this backend, pays the ones ahead of it in the order,
+    and only then raises.
+    """
+    if os.environ.get("KLING_ACCESS_KEY") and os.environ.get("KLING_SECRET_KEY"):
+        return None
+    return _MISSING_CREDENTIALS
+
+
 def resolve_credentials(
     access_key: str | None = None, secret_key: str | None = None
 ) -> tuple[str, str]:
@@ -85,11 +105,7 @@ def resolve_credentials(
     access = access_key or os.environ.get("KLING_ACCESS_KEY")
     secret = secret_key or os.environ.get("KLING_SECRET_KEY")
     if not access or not secret:
-        raise VideoBackendError(
-            "KLING_ACCESS_KEY and KLING_SECRET_KEY are not both set -- add them to "
-            ".env (see .env.example). Kling's developer API is prepaid and separate "
-            "from any consumer subscription."
-        )
+        raise VideoBackendError(_MISSING_CREDENTIALS)
     return access, secret
 
 
@@ -120,6 +136,9 @@ class KlingBackend:
 
     def validate(self, shot_list: ShotList) -> list[str]:
         problems = []
+        missing = credentials_problem()
+        if missing is not None:
+            problems.append(missing)
         if len(shot_list.shots) > MAX_SHOTS:
             problems.append(f"{len(shot_list.shots)} shots -- Kling accepts at most {MAX_SHOTS}")
         if shot_list.total_seconds > MAX_TOTAL_SECONDS:

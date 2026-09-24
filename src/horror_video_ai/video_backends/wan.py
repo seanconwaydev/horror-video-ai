@@ -43,13 +43,23 @@ _LIST_PRICE_PER_SECOND_USD = 0.0708
 _SIZE_FOR_RESOLUTION = {"720p": "720*1280", "1080p": "1080*1920"}
 
 
+_MISSING_CREDENTIALS = (
+    "DASHSCOPE_API_KEY is not set -- add it to .env (see .env.example). "
+    "This is Alibaba Model Studio's key, not a Replicate token."
+)
+
+
+def credentials_problem() -> str | None:
+    """Why this backend cannot be called, or None when it can. Read by
+    `validate()` so a missing key skips this backend before the spend
+    prompt rather than raising after other backends have been paid for."""
+    return None if os.environ.get("DASHSCOPE_API_KEY") else _MISSING_CREDENTIALS
+
+
 def resolve_api_key(api_key: str | None = None) -> str:
     key = api_key or os.environ.get("DASHSCOPE_API_KEY")
     if not key:
-        raise VideoBackendError(
-            "DASHSCOPE_API_KEY is not set -- add it to .env (see .env.example). "
-            "This is Alibaba Model Studio's key, not a Replicate token."
-        )
+        raise VideoBackendError(_MISSING_CREDENTIALS)
     return key
 
 
@@ -82,6 +92,9 @@ class WanBackend:
 
     def validate(self, shot_list: ShotList) -> list[str]:
         problems = []
+        missing = credentials_problem()
+        if missing is not None:
+            problems.append(missing)
         if shot_list.total_seconds > MAX_SECONDS:
             problems.append(
                 f"{shot_list.total_seconds}s requested -- Wan's ceiling is {MAX_SECONDS}s, "

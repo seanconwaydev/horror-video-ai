@@ -228,8 +228,9 @@ def run_short_generation(
     print(f"Checking {backend.name}'s limits...")
     if not _report_validation(backend, shot_list):
         raise VideoBackendError(
-            f"{backend.name} cannot generate this shot list as written -- edit "
-            f"{shots_path} and try again. Nothing was spent."
+            f"{backend.name} cannot generate this shot list -- fix the problems "
+            f"above, editing {shots_path} for the ones about the shots themselves. "
+            "Nothing was spent."
         )
 
     cost = _describe_cost(backend, shot_list.total_seconds)
