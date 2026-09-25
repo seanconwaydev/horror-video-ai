@@ -131,10 +131,20 @@ _CRAFT_RULES = """\
   monster; a figure that simply IS closer is frightening.
 - THE FIRST SHOT OPENS ON THE WRONG THING. No establishing, no build. Whatever
   is frightening is already in frame at the first frame.
+- EVERYONE IS IN THE FIRST SHOT. The camera never moves, so the room is a
+  fixed stage: a person who was not there a moment ago reads as a mistake,
+  not a scare. The threat may be somewhere new at each cut; the people it is
+  happening to may not appear, leave and come back. If a character is in the
+  short at all, they are in frame at the first frame.
 - HOLD THE FACE BACK. Do not spend the face, the mouth or the eyes early.
   Distance, posture and silhouette carry the opening.
 - ESCALATE IN THE BODY, NOT JUST IN SIZE. A threat that only grows larger reads
   as one figure at four zoom levels. Change its posture, its angle, its head.
+- THE LAST SHOT TURNS. End on a change that completes on screen, not on a held
+  pose: an expression arriving, a movement finishing, a sound cutting out. A
+  face that is merely present is where the clip stopped, not an ending. The
+  strongest close is a small human gesture on an inhuman face -- a smile lands
+  harder than a scream.
 - WRITE THE SOUND. The model generates audio. End every shot with "Audio:" and
   describe it -- room tone, one specific noise, silence. Deliberate silence is
   stronger than a sting.

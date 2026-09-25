@@ -7,6 +7,8 @@ import pytest
 
 from horror_video_ai.stages.scene_planning import Beat, Character, Location, ScenePlan
 from horror_video_ai.stages.shot_writing import (
+    _CRAFT_RULES,
+    _SAFETY_RULES,
     Shot,
     ShotList,
     ShotWritingError,
@@ -53,8 +55,13 @@ def _plan():
     )
 
 
-def _completion(shots):
+def _completion(shots, sent=None):
+    """`sent` collects the assembled prompt, so a test can assert on what
+    the model was actually given rather than only on what it returned."""
+
     def fake(**kwargs):
+        if sent is not None:
+            sent.append(kwargs["messages"][0]["content"])
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(shots)))]
         )
@@ -187,3 +194,23 @@ def test_format_plan_includes_every_layer_the_writer_needs():
     assert "LOCATION bedroom" in text
     assert "BEAT 1" in text
     assert "a long grey coat" in text
+
+
+def test_the_rules_reach_the_model():
+    """The rules are the whole value of this stage and nothing else asserts
+    they are sent. Pinned as whole constants rather than sentence by
+    sentence: ADR 0058 retires rules by judgement, and a test naming each
+    one would have to be edited every time that happens."""
+    sent = []
+    run_shot_writing_stage(
+        _plan(),
+        look=LOOK,
+        model="test/model",
+        completion_fn=_completion(
+            [{"prompt": "A door creeps open. Audio: hiss.", "duration_seconds": 15}],
+            sent,
+        ),
+    )
+    assert len(sent) == 1
+    assert _SAFETY_RULES in sent[0]
+    assert _CRAFT_RULES in sent[0]
