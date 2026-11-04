@@ -40,7 +40,7 @@ A second model critiques the script specifically for watchability — where it d
 
 The approved script is broken into discrete visual beats — video generation models work in short clips (typically 5–10 seconds each), not continuous narratives, so the script needs to be decomposed into a sequence of scenes before it can be turned into generation prompts.
 
-**Review gate:** you check the shot list against the script — does the visual plan actually serve the story, or is it defaulting to generic "historical imagery"?
+**Review gate:** you check the shot list against the script — does the visual plan actually serve the story, or is it defaulting to generic stock imagery?
 
 ### 7. Per-scene video prompts
 
