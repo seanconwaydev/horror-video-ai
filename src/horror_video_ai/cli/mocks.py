@@ -115,3 +115,62 @@ def mock_moderation_policy_check(**kwargs: object) -> SimpleNamespace:
     """Always clean, so --mock exercises the moderation pre-flight's
     mechanics (docs/decisions/0038) without a call."""
     return SimpleNamespace(results=[SimpleNamespace(flagged=False, categories={})])
+
+
+def mock_shot_writer_completion(**kwargs: object) -> SimpleNamespace:
+    """A canned four-shot list in the shape run_shot_writing_stage parses.
+
+    Deliberately written to pass the platform-safety check -- the figure
+    is in a full-length coat -- so a --mock run exercises the happy path.
+    A test that wants the check to fire supplies its own text.
+    """
+    shots = [
+        {
+            "prompt": (
+                "Wide, down the room. The bed is empty, the duvet thrown back. In the "
+                "far doorway a tall figure in a long grey coat stands still. The door "
+                "creeps open another inch. Audio: mic hiss, one hinge creak."
+            ),
+            "duration_seconds": 4,
+        },
+        {
+            "prompt": (
+                "The same frame. The figure is mid-floor now, having crossed with no "
+                "step seen. Its bowed head tilts slowly back toward the lens. "
+                "Audio: hiss, one floorboard creak that is not footsteps."
+            ),
+            "duration_seconds": 4,
+        },
+        {
+            "prompt": (
+                "Its head and shoulders fill the frame beneath the lens, the room gone "
+                "to black behind. The jaw slowly drops further open. "
+                "Audio: hiss thickening into a slow wet rasp."
+            ),
+            "duration_seconds": 4,
+        },
+        {
+            "prompt": (
+                "The face is pressed flat to the lens, one eye filling the centre. The "
+                "pupil contracts and the eye gives one long, deliberate blink. "
+                "Audio: hiss gone, one low tone cutting to silence."
+            ),
+            "duration_seconds": 3,
+        },
+    ]
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(shots)))]
+    )
+
+
+# A tiny but structurally real MP4 (ftyp + empty moov), so a --mock run
+# writes a file that a player at least recognises as a container rather
+# than an arbitrary blob.
+MOCK_MP4 = bytes.fromhex(
+    "0000001c667479706d703432000000016d70343269736f6d"
+    "0000000866726565000000086d6f6f76"
+)
+
+
+def mock_video_bytes(**kwargs: object) -> bytes:
+    return MOCK_MP4

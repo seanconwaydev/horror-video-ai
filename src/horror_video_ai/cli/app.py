@@ -63,6 +63,12 @@ from horror_video_ai.cli.runlog import (
     slugify,
     write_log,
 )
+from horror_video_ai.cli.short import (
+    DEFAULT_LOOK,
+    run_bakeoff,
+    run_short_generation,
+    run_short_planning,
+)
 from horror_video_ai.cli.video_gen import (
     run_video_generation_only,
 )
@@ -76,10 +82,12 @@ from horror_video_ai.stages.scene_planning import (
     Scene,
     run_scene_planning_stage,
 )
+from horror_video_ai.stages.shot_writing import DEFAULT_TOTAL_SECONDS
 from horror_video_ai.stages.video_generation import (
     MAX_VIDEO_SECONDS,
     MIN_VIDEO_SECONDS,
 )
+from horror_video_ai.video_backends import BACKEND_NAMES
 
 # Real, checked per-image costs (docs/decisions/0024) -- never a guessed
 # number. Keyed by the exact pinned model string, so a config change that
@@ -141,6 +149,59 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Combine with --mock to exercise the polling loop "
             "without a real API call."
         ),
+    )
+    parser.add_argument(
+        "--short",
+        action="store_true",
+        help=(
+            "Plan a short: scene planning then shot writing, ending with a "
+            "shots.json to read and edit. Generates nothing and spends nothing "
+            "beyond the two text calls. Generate from the result with --shots."
+        ),
+    )
+    parser.add_argument(
+        "--shots",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "Generate video from an already-written (and ideally hand-edited) "
+            "shots.json. This is the spend gate: nothing is generated from shots "
+            "a human has not read."
+        ),
+    )
+    parser.add_argument(
+        "--backend",
+        choices=BACKEND_NAMES,
+        default="veo",
+        help=(
+            "Which vendor to generate on, reached directly rather than through "
+            "an aggregator. Defaults to veo, the only one needing no new account."
+        ),
+    )
+    parser.add_argument(
+        "--bakeoff",
+        action="store_true",
+        help=(
+            "With --shots, generate the same shots on every backend and write "
+            "them under blind A/B/C labels with the mapping in key.json."
+        ),
+    )
+    parser.add_argument(
+        "--resolution",
+        choices=("720p", "1080p"),
+        default="720p",
+        help="Output resolution for --shots. 720p is the cheaper default.",
+    )
+    parser.add_argument(
+        "--total-seconds",
+        type=int,
+        default=DEFAULT_TOTAL_SECONDS,
+        help=f"Target runtime for --short (default {DEFAULT_TOTAL_SECONDS}).",
+    )
+    parser.add_argument(
+        "--look",
+        default=DEFAULT_LOOK,
+        help="The visual style restated at the head of every shot, for --short.",
     )
     parser.add_argument(
         "--video-seconds",
@@ -251,6 +312,42 @@ def main() -> None:
 
     if not args.mock:
         load_environment()
+
+    if args.shots:
+        if args.bakeoff:
+            run_bakeoff(
+                args.shots,
+                resolution=args.resolution,
+                auto_yes=args.yes,
+                mock=args.mock,
+            )
+        else:
+            run_short_generation(
+                args.shots,
+                backend_name=args.backend,
+                resolution=args.resolution,
+                auto_yes=args.yes,
+                mock=args.mock,
+            )
+        return
+
+    if args.short:
+        run_short_planning(
+            Scene(
+                time=prompt_if_missing(args.time, "Time", auto_yes=args.yes),
+                place=prompt_if_missing(args.place, "Place", auto_yes=args.yes),
+                description=prompt_if_missing(
+                    args.description, "What the main character does", auto_yes=args.yes
+                ),
+            ),
+            genre=args.genre,
+            tone=args.tone,
+            look=args.look,
+            total_seconds=args.total_seconds,
+            max_beats=args.max_beats,
+            mock=args.mock,
+        )
+        return
 
     if args.video_gen_from:
         run_video_generation_only(

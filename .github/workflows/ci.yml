@@ -136,6 +136,23 @@ jobs:
             --time "present day" --place "an underground car park at night" \
             --description "a woman notices someone standing between the pillars"
 
+      # The short flow is two invocations by design: plan, a human edits,
+      # then generate. Both halves run here because the split is the whole
+      # spend gate -- if --short silently started generating, or --shots
+      # accepted a file it could not parse, nothing else would catch it.
+      - name: Short flow runs offline, both halves
+        run: |
+          set -e
+          uv run horror-video-ai --short --mock --yes \
+            --genre horror --tone dread \
+            --time "the middle of the night" \
+            --place "a bedroom watched by a corner-mounted infrared camera" \
+            --description "the bed is empty and someone very tall is in the doorway"
+          SHOTS=$(ls -td outputs/run_*the-bed-is-empty* | head -1)/shots.json
+          test -s "$SHOTS"
+          uv run horror-video-ai --shots "$SHOTS" --backend veo --mock --yes
+          uv run horror-video-ai --shots "$SHOTS" --bakeoff --mock --yes
+
       # Stage 9 is a separate invocation by design (docs/decisions/0010),
       # so the run above never reaches it. It reads a finished run
       # directory back off disk, which is exactly what the previous step

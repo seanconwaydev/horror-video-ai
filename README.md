@@ -4,11 +4,11 @@ A Python pipeline that turns a one-line scene idea into a short vertical horror 
 
 You give it three strings: a time, a place and what happens ("present day", "an underground car park at night", "a woman notices someone standing between the pillars"). It plans the scene, renders a storyboard, and generates video only after you approve what it is about to pay for.
 
-> **Status:** personal project, in active development since August 2026. What runs today is scene planning → previz → video generation. Audio, assembly and upload are designed but not built.
+> **Status:** personal project, in active development since August 2026. What runs on `main` today is scene planning → previz → video generation. Audio, assembly and upload are designed but not built.
 
 ## Demo
 
-Shorts made with the pipeline (Kling v3), posted by hand:
+Two shorts made with an experimental Kling v3 short-generation flow that is not merged into `main` yet, then posted by hand:
 
 - [Short 1 on TikTok](https://www.tiktok.com/@whowhereamai/video/7689589918753951006)
 - [Short 2 on TikTok](https://www.tiktok.com/@whowhereamai/video/7689594934193573150)
@@ -22,9 +22,7 @@ Shorts made with the pipeline (Kling v3), posted by hand:
 | Video generation | One image-to-video clip per approved still | Wan 2.2 (fast) on Replicate | A separate command, so crossing the spend gate is always deliberate |
 | Moderation check | Advisory YouTube-policy signal on every video prompt | OpenAI omni-moderation | Reports, never blocks |
 
-A second path, the **short flow**, skips per-beat stills: Claude Sonnet 5 rewrites the plan as shots that move, writes them to `shots.json` and stops. You edit that file, then a second command generates the whole short. Direct-to-vendor backends for Veo 3.1, Kling v3 and Wan 2.7 are written behind one interface but have not yet been run against the live APIs.
-
-Models are reached through [LiteLLM](https://github.com/BerriAI/litellm) where it supports them and through small REST clients where it does not (Replicate, Kling). Every stage's model is pinned by hand: no fallbacks and no routers, so a run is reproducible and a model change is a reviewed diff.
+Models are reached through [LiteLLM](https://github.com/BerriAI/litellm) where it supports them and through a small REST client where it does not (Replicate). Every stage's model is pinned by hand: no fallbacks and no routers, so a run is reproducible and a model change is a reviewed diff.
 
 ## Evaluation
 
@@ -39,13 +37,11 @@ The same approach removed a component. An automated vision reviewer sat in front
 
 ## Design decisions
 
-Every significant choice is an Architecture Decision Record in [`docs/decisions/`](docs/decisions/) (79 so far). Good starting points:
+Decisions are recorded as Architecture Decision Records in [`docs/decisions/`](docs/decisions/). Besides the two above, the ones that shaped the project most:
 
-- [0003](docs/decisions/0003-model-configuration-via-litellm.md): per-stage model pins through LiteLLM
-- [0010](docs/decisions/0010-video-generation-model-and-standalone-stage.md): previz is the spend gate, and video generation is its own command
+- [0010](docs/decisions/0010-video-generation-model-and-standalone-stage.md): previz is the spend gate, so video generation is its own command
 - [0037](docs/decisions/0037-horror-motion-comic-shorts-wan-via-replicate.md): moving video generation off Sora to Wan 2.2, after Sora's moderation proved a structural misfit for horror
-- [0053](docs/decisions/0053-human-judgements-are-recorded-as-data.md): every human keep/reject is recorded as data
-- [0069](docs/decisions/0069-delete-historical-grounding.md) and [0070](docs/decisions/0070-rename-to-horror-video-ai.md): why this started as a historical-video pipeline and stopped being one
+- [0069](docs/decisions/0069-delete-historical-grounding.md): deleting the research and fact-check stages, which is why a project that started as a historical-video pipeline no longer is one
 
 [`docs/architecture.md`](docs/architecture.md) has the full design, including the stages not built yet and a per-model cost comparison.
 
@@ -67,10 +63,6 @@ uv run horror-video-ai --time "present day" --place "an underground car park at 
 
 # Generate video from an approved run (the spend gate)
 uv run horror-video-ai --video-gen-from outputs/<run>
-
-# Short flow: write shots, edit them, then generate
-uv run horror-video-ai --short --time "..." --place "..." --description "..."
-uv run horror-video-ai --shots outputs/<run>/shots.json --backend veo
 ```
 
 ## Development
@@ -82,6 +74,10 @@ uv run mypy              # types: src/, evals/ and tests/ must be clean
 uv run pytest --cov      # coverage, with a 94% floor
 ```
 
-CI runs all four, plus an offline smoke job that drives the pipeline and the short flow end to end in mock mode and checks the eval scripts still parse their fixtures.
+CI runs all four, plus an offline smoke job that drives the pipeline and video generation end to end in mock mode and checks the eval scripts still parse their fixtures.
 
-Built with [Claude Code](https://claude.com/claude-code) as a pair programmer. `CLAUDE.md` holds the project instructions it works from, and the ADRs are where its proposals were accepted, changed or rejected.
+## How this was built
+
+This project is a deliberate experiment in agent-driven development. [Claude Code](https://claude.com/claude-code) wrote most of the code and proposed most of the design, with no upfront plan or imposed structure, to see how far that approach goes and where it breaks. `CLAUDE.md` holds the instructions it works from, and `docs/decisions/` records decisions as they were made, including the many that reversed earlier, hastier ones.
+
+What stayed human: every keep-or-reject judgement on generated output, the blind evaluations above, and the final call on each decision.
