@@ -228,3 +228,4 @@ _to_delete_stale_venv/
 
 # Eval run outputs -- generated images, not source
 evals/results/
+.claude/settings.local.json
